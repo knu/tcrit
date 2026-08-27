@@ -4,6 +4,8 @@
 
 # crit
 
+> This is **tcrit**, a fork of [kevindutra/crit](https://github.com/kevindutra/crit).  It installs the command as `tcrit` and includes fixes and improvements not yet merged upstream.
+
 TUI for reviewing AI-generated code and plans — built for human-in-the-loop agentic coding workflows.
 
 Read a plan or review code changes across multiple files, leave inline comments, and let Claude Code address your feedback automatically.
@@ -28,9 +30,7 @@ Then use `/tcrit:review` in Claude Code. It will ask whether you want to review 
 ### From source
 
 ```bash
-git clone https://github.com/knu/tcrit
-cd tcrit
-go install ./cmd/tcrit
+go install github.com/knu/tcrit/cmd/tcrit@latest
 ```
 
 Make sure `$GOPATH/bin` (defaults to `~/go/bin`) is in your `PATH`:

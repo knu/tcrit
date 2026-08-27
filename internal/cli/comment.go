@@ -7,8 +7,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
-	"github.com/kevindutra/crit/internal/document"
-	"github.com/kevindutra/crit/internal/review"
+	"github.com/knu/tcrit/internal/document"
+	"github.com/knu/tcrit/internal/review"
 )
 
 var commentLine int

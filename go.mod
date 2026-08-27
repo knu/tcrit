@@ -1,4 +1,4 @@
-module github.com/kevindutra/crit
+module github.com/knu/tcrit
 
 go 1.24.2
 

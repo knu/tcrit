@@ -14,9 +14,7 @@ Review the document at `$ARGUMENTS` using TCrit's interactive TUI.
 The `tcrit` binary must be installed and on PATH. If not installed:
 
 ```bash
-git clone https://github.com/knu/tcrit
-cd tcrit
-go install ./cmd/tcrit
+go install github.com/knu/tcrit/cmd/tcrit@latest
 ```
 
 ## Step 1: Launch the TUI
