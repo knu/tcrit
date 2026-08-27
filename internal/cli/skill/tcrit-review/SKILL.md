@@ -1,5 +1,5 @@
 ---
-name: tcrit:review
+name: tcrit-review
 description: Open TCrit for review. Routes to code review (multi-file TUI for code changes) or plan/document review (single-file TUI).
 ---
 
@@ -12,6 +12,6 @@ Ask the user what they want to review:
 > 1. **Code changes** — Review changed files in a tabbed TUI with syntax highlighting and diff markers
 > 2. **A document or plan** — Review a specific file in the interactive TUI
 
-If the user chooses **code review**, invoke the `tcrit:code-review` skill.
+If the user chooses **code review**, invoke the `/tcrit-code-review` skill.
 
-If the user chooses **document/plan review**, ask for the file path and invoke the `tcrit:plan-review` skill with that path.
+If the user chooses **document/plan review**, ask for the file path and invoke the `/tcrit-plan-review` skill with that path.

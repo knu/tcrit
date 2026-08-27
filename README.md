@@ -16,14 +16,14 @@ Built for the human-in-the-loop workflow: Your agent the writes code or a plan, 
 
 ### Claude Code Plugin Marketplace (recommended)
 
-crit is available as a Claude Code plugin. Add the marketplace and install:
+tcrit is available as a Claude Code plugin. Add the marketplace and install:
 
 ```
-/plugin marketplace add kevindutra/crit
-/plugin install crit
+/plugin marketplace add knu/tcrit
+/plugin install tcrit
 ```
 
-Then use `/crit:review` in Claude Code. It will ask whether you want to review code changes or a document, open the TUI, and after you close it, Claude reads your comments and makes changes.
+Then use `/tcrit:review` in Claude Code. It will ask whether you want to review code changes or a document, open the TUI, and after you close it, Claude reads your comments and makes changes.
 
 ### From source
 
@@ -50,7 +50,7 @@ tcrit setup-claude           # Install globally (~/.claude/skills/)
 tcrit setup-claude --project # Install for current project only
 ```
 
-Then use `/crit-review <path>` in Claude Code for document reviews, or `/crit-code-review` for multi-file code reviews.
+Then use `/tcrit-review <path>` in Claude Code for document reviews, or `/tcrit-code-review` for multi-file code reviews.
 
 #### Gemini CLI
 
@@ -59,7 +59,7 @@ tcrit setup-gemini           # Install globally (~/.gemini/)
 tcrit setup-gemini --project # Install for current project only
 ```
 
-Then use `@crit` to start a review in Gemini CLI.
+Then use `@tcrit` to start a review in Gemini CLI.
 
 ## Requirements
 
@@ -76,7 +76,7 @@ tmux new -s work
 claude
 ```
 
-If you forget, crit will tell you — but the split-pane review won't work outside of tmux.
+If you forget, tcrit will tell you — but the split-pane review won't work outside of tmux.
 
 ## Code Review (multi-file)
 
@@ -97,10 +97,10 @@ tcrit status --code
 
 ### How code review works
 
-1. Run `crit review --code` — crit detects changed files and opens the tabbed TUI
+1. Run `tcrit review --code` — tcrit detects changed files and opens the tabbed TUI
 2. Navigate between files and leave inline comments on the changes
 3. Quit the TUI — comments are saved to `.crit/`
-4. `crit status --code` outputs all comments across files as JSON
+4. `tcrit status --code` outputs all comments across files as JSON
 5. Claude (or any tool) reads the comments and edits the files
 
 ## Document Review (single file)
@@ -123,14 +123,14 @@ tcrit review docs/plan.md --detach
 tcrit review docs/plan.md --detach --wait
 ```
 
-This is how the Claude Code skill invokes crit — `--detach --wait` is a single blocking call that opens the TUI next to Claude Code and waits for you to finish reviewing.
+This is how the Claude Code skill invokes tcrit — `--detach --wait` is a single blocking call that opens the TUI next to Claude Code and waits for you to finish reviewing.
 
 ### How document review works
 
 1. Claude writes a plan (or you open any markdown file)
-2. `crit review <path>` opens the TUI — read through and leave inline comments
+2. `tcrit review <path>` opens the TUI — read through and leave inline comments
 3. Comments are stored as JSON in a local `.crit/` directory (gitignored by default)
-4. `crit status <path>` outputs comments as JSON for Claude (or any tool) to consume
+4. `tcrit status <path>` outputs comments as JSON for Claude (or any tool) to consume
 5. Claude reads the comments, edits the document, and you can re-review
 
 ## Keybindings

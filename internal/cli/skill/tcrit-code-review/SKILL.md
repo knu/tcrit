@@ -1,36 +1,48 @@
 ---
-name: crit:code-review
-description: Review code changes in crit's multi-file TUI. Opens a tabbed interface showing all changed files with syntax highlighting and diff markers. After the review, address any comments.
-allowed-tools: Bash(crit *), Read, Edit, Grep, MultiEdit
+name: tcrit-code-review
+description: Review code changes in TCrit's multi-file TUI with syntax highlighting and diff markers. After the review, address any comments.
+allowed-tools: Bash(tcrit *), Read, Edit, Grep, MultiEdit
 ---
 
 # Code Review
 
-Review code changes using crit's multi-file code review TUI.
+Review code changes using TCrit's multi-file code review TUI.
 
 ## Prerequisites
 
-The `crit` binary must be installed and on PATH. If not installed:
+The `tcrit` binary must be installed and on PATH. If not installed:
 
 ```bash
-go install github.com/kevindutra/crit/cmd/crit@latest
+git clone https://github.com/knu/tcrit
+cd tcrit
+go install ./cmd/tcrit
 ```
 
 ## Step 1: Launch the TUI
+
+When starting a new review task, reset state left over from an earlier task once, from the project root.  This removes saved review comments and the code review session while preserving `.crit/.gitignore`:
+
+```bash
+tcrit clear --all
+```
+
+Do not run it again when reopening the review after addressing comments.  Keep the existing review state throughout that review-fix-re-review cycle.
 
 Check if `$TMUX` is set:
 
 If in tmux, run this command with a **timeout of 600000** (10 minutes) since it blocks until the user finishes reviewing:
 ```bash
-crit review --code --detach --wait
+tcrit review --code --detach --wait
 ```
+If the command runner yields an execution session ID, the command is still running even if its initial output says that the review opened.  Keep polling that execution session until the process exits.  A quick exit is a valid completed review; do not impose a minimum wait.  Continue to Step 2 only after the process exits, and never use a fixed sleep in place of session polling.
+
 
 If not in tmux (command fails with "requires a tmux session"), ask the user to run the TUI manually:
 
 > Please run this in your terminal, review the changes, and let me know when you're done:
 >
 > ```
-> crit review --code
+> tcrit review --code
 > ```
 
 Wait for the user to confirm before proceeding.
@@ -40,19 +52,10 @@ Wait for the user to confirm before proceeding.
 After the user confirms the review is complete, read the aggregate review comments:
 
 ```bash
-crit status --code
+tcrit status --code
 ```
 
-This outputs JSON with all files and their comments:
-```json
-{
-  "files": [
-    {"file": "path/to/file.go", "comments": [...]},
-    {"file": "path/to/other.rb", "comments": [...]}
-  ],
-  "total_comments": 5
-}
-```
+This outputs JSON with all files and their comments.
 
 ## Step 3: Address comments
 
@@ -71,7 +74,7 @@ After addressing all comments and summarizing the changes, use the `AskUserQuest
 - **Question:** "I've addressed all your comments. What would you like to do next?"
 - **Header:** "Next action"
 - **Options:**
-  - **Re-review** — Open crit again to review the changes
+  - **Re-review** — Open TCrit again to review the changes
   - **Continue** — Done, move on
 
 If the user provides free-form input (via the "Other" option), respond accordingly, then ask again with `AskUserQuestion` until they pick Re-review or Continue.
@@ -86,7 +89,7 @@ If the user chooses **Re-review**, use `AskUserQuestion` again to ask:
 
 If clear, run:
 ```bash
-crit clear --code
+tcrit clear --code
 ```
 Then go back to Step 1. If keep, go back to Step 1 directly.
 
@@ -96,5 +99,3 @@ If the user chooses **Continue**, done.
 
 - Do NOT modify files while the TUI is open — only edit after it exits
 - The `content_snippet` field shows the line content when the comment was created — use it to find the right location even if line numbers have shifted
-- The TUI shows changed lines with green background and + gutter markers
-- Use `n`/`N` in the TUI to jump between changes, `H`/`L` to switch tabs

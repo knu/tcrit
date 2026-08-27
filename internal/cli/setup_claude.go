@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-//go:embed skill/crit-review/SKILL.md skill/crit-plan-review/SKILL.md skill/crit-code-review/SKILL.md
+//go:embed skill/tcrit-review/SKILL.md skill/tcrit-plan-review/SKILL.md skill/tcrit-code-review/SKILL.md
 var skillContent embed.FS
 
 var setupProject bool
@@ -20,15 +20,15 @@ var skillsToInstall = []struct {
 	dir  string
 	name string
 }{
-	{"crit-review", "crit-review"},
-	{"crit-plan-review", "crit-plan-review"},
-	{"crit-code-review", "crit-code-review"},
+	{"tcrit-review", "tcrit-review"},
+	{"tcrit-plan-review", "tcrit-plan-review"},
+	{"tcrit-code-review", "tcrit-code-review"},
 }
 
 var setupClaudeCmd = &cobra.Command{
 	Use:   "setup-claude",
-	Short: "Install Claude Code skills for crit review workflow",
-	Long:  "Installs /crit-review, /crit-plan-review, and /crit-code-review skills to ~/.claude/skills/ (or .claude/skills/ with --project). Alternative to installing the crit plugin via /plugin install.",
+	Short: "Install Claude Code skills for TCrit review workflow",
+	Long:  "Installs /tcrit-review, /tcrit-plan-review, and /tcrit-code-review skills to ~/.claude/skills/ (or .claude/skills/ with --project). Alternative to installing the tcrit plugin via /plugin install.",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var baseDir string
@@ -76,9 +76,9 @@ var setupClaudeCmd = &cobra.Command{
 		}
 
 		fmt.Println("\nAvailable skills:")
-		fmt.Println("  /crit-review         — Routes to code or plan review")
-		fmt.Println("  /crit-code-review    — Multi-file code review")
-		fmt.Println("  /crit-plan-review    — Single-file document review")
+		fmt.Println("  /tcrit-review        — Routes to code or plan review")
+		fmt.Println("  /tcrit-code-review   — Multi-file code review")
+		fmt.Println("  /tcrit-plan-review   — Single-file document review")
 		return nil
 	},
 }

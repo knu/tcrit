@@ -1,12 +1,12 @@
 {
-  "name": "crit-marketplace",
+  "name": "tcrit-marketplace",
   "owner": {
-    "name": "Kevin Dutra"
+    "name": "Akinori Musha"
   },
   "plugins": [
     {
-      "name": "crit",
-      "source": "./plugin/crit",
+      "name": "tcrit",
+      "source": "./plugin/tcrit",
       "description": "Review markdown documents with an interactive TUI and let Claude address feedback automatically."
     }
   ]

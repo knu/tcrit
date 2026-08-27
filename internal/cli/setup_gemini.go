@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-//go:embed agent/gemini/crit.md
+//go:embed agent/gemini/tcrit.md
 var geminiAgentContent embed.FS
 
 var setupGeminiProject bool
@@ -17,8 +17,8 @@ var setupGeminiForce bool
 
 var setupGeminiCmd = &cobra.Command{
 	Use:   "setup-gemini",
-	Short: "Install Gemini CLI agents for crit review workflow",
-	Long:  "Installs the crit agent to ~/.gemini/agents/crit.md (or .gemini/ in current directory with --project).",
+	Short: "Install Gemini CLI agents for TCrit review workflow",
+	Long:  "Installs the tcrit agent to ~/.gemini/agents/tcrit.md (or .gemini/ in current directory with --project).",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var baseDir string
@@ -40,14 +40,14 @@ var setupGeminiCmd = &cobra.Command{
 
 		// 1. Install the Agent
 		agentTargetDir := filepath.Join(baseDir, "agents")
-		agentTargetPath := filepath.Join(agentTargetDir, "crit.md")
+		agentTargetPath := filepath.Join(agentTargetDir, "tcrit.md")
 
-		if err := installFile(agentTargetDir, agentTargetPath, "agent/gemini/crit.md", "crit agent", scope, setupGeminiForce); err != nil {
+		if err := installFile(agentTargetDir, agentTargetPath, "agent/gemini/tcrit.md", "tcrit agent", scope, setupGeminiForce); err != nil {
 			return err
 		}
 
-		fmt.Println("\nSuccess! You can now use crit with Gemini CLI:")
-		fmt.Println("  - Use @crit to start a review")
+		fmt.Println("\nSuccess! You can now use TCrit with Gemini CLI:")
+		fmt.Println("  - Use @tcrit to start a review")
 		return nil
 	},
 }

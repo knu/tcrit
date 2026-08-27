@@ -1,36 +1,49 @@
 ---
-name: crit:plan-review
-description: Open a document or plan in crit's interactive TUI for review. After the review, address any comments by editing the document.
+name: tcrit-plan-review
+description: Open a document or plan in TCrit's interactive TUI for review. After the review, address any comments by editing the document. Use when a plan or document needs human review, when the user asks to review a document, or after generating/updating a plan.
+allowed-tools: Bash(tcrit *), Read, Edit, Grep
 argument-hint: <file-path>
 ---
 
 # Review Document
 
-Review the document at `$ARGUMENTS` using crit's interactive TUI.
+Review the document at `$ARGUMENTS` using TCrit's interactive TUI.
 
 ## Prerequisites
 
-The `crit` binary must be installed and on PATH. If not installed:
+The `tcrit` binary must be installed and on PATH. If not installed:
 
 ```bash
-go install github.com/kevindutra/crit/cmd/crit@latest
+git clone https://github.com/knu/tcrit
+cd tcrit
+go install ./cmd/tcrit
 ```
 
 ## Step 1: Launch the TUI
+
+When starting a new review task, reset state left over from an earlier task once, from the project root.  This removes saved review comments and the code review session while preserving `.crit/.gitignore`:
+
+```bash
+tcrit clear --all
+```
+
+Do not run it again when reopening the review after addressing comments.  Keep the existing review state throughout that review-fix-re-review cycle.
 
 Check if `$TMUX` is set:
 
 If in tmux, run this command with a **timeout of 600000** (10 minutes) since it blocks until the user finishes reviewing:
 ```bash
-crit review $ARGUMENTS --detach --wait
+tcrit review $ARGUMENTS --detach --wait
 ```
+If the command runner yields an execution session ID, the command is still running even if its initial output says that the review opened.  Keep polling that execution session until the process exits.  A quick exit is a valid completed review; do not impose a minimum wait.  Continue to Step 2 only after the process exits, and never use a fixed sleep in place of session polling.
+
 
 If not in tmux (command fails with "requires a tmux session"), ask the user to run the TUI manually:
 
 > Please run this in your terminal, review the document, and let me know when you're done:
 >
 > ```
-> crit review $ARGUMENTS
+> tcrit review $ARGUMENTS
 > ```
 
 Wait for the user to confirm before proceeding.
@@ -40,7 +53,7 @@ Wait for the user to confirm before proceeding.
 After the user confirms the review is complete, read the review comments:
 
 ```bash
-crit status $ARGUMENTS
+tcrit status $ARGUMENTS
 ```
 
 This outputs JSON with the file path and comments array.
@@ -62,7 +75,7 @@ After addressing all comments and summarizing the changes, use the `AskUserQuest
 - **Question:** "I've addressed all your comments. What would you like to do next?"
 - **Header:** "Next action"
 - **Options:**
-  - **Re-review** — Open crit again to review the document
+  - **Re-review** — Open TCrit again to review the document
   - **Continue** — Done, move on
 
 If the user provides free-form input (via the "Other" option), respond accordingly, then ask again with `AskUserQuestion` until they pick Re-review or Continue.
@@ -77,7 +90,7 @@ If the user chooses **Re-review**, use `AskUserQuestion` again to ask:
 
 If clear, run:
 ```bash
-crit clear $ARGUMENTS
+tcrit clear $ARGUMENTS
 ```
 Then go back to Step 1. If keep, go back to Step 1 directly.
 
