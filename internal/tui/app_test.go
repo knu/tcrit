@@ -9,8 +9,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/kevindutra/crit/internal/document"
-	"github.com/kevindutra/crit/internal/review"
+	"github.com/knu/tcrit/internal/document"
+	"github.com/knu/tcrit/internal/review"
 )
 
 func setupAppWithDoc(t *testing.T, content string) AppModel {

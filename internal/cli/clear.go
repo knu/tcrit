@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/kevindutra/crit/internal/review"
+	"github.com/knu/tcrit/internal/review"
 )
 
 var clearCode bool

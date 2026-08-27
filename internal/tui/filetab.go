@@ -4,10 +4,10 @@ import (
 	"sort"
 	"strings"
 
-	gitpkg "github.com/kevindutra/crit/internal/git"
+	gitpkg "github.com/knu/tcrit/internal/git"
 
-	"github.com/kevindutra/crit/internal/document"
-	"github.com/kevindutra/crit/internal/review"
+	"github.com/knu/tcrit/internal/document"
+	"github.com/knu/tcrit/internal/review"
 )
 
 // FileTab holds per-file state for a single tab in the code review TUI.

@@ -11,9 +11,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
-	"github.com/kevindutra/crit/internal/git"
-	"github.com/kevindutra/crit/internal/review"
-	"github.com/kevindutra/crit/internal/tui"
+	"github.com/knu/tcrit/internal/git"
+	"github.com/knu/tcrit/internal/review"
+	"github.com/knu/tcrit/internal/tui"
 )
 
 var reviewDetach bool

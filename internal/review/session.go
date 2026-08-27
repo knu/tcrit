@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/kevindutra/crit/internal/document"
+	"github.com/knu/tcrit/internal/document"
 	"gopkg.in/yaml.v3"
 )
 
