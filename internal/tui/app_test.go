@@ -5,13 +5,23 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/knu/tcrit/internal/document"
 	"github.com/knu/tcrit/internal/review"
 )
+
+// setupSession points XDG state at a temp dir and opens a doc session there.
+func setupSession(t *testing.T, docPath string) *review.Session {
+	t.Helper()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	sess, err := review.OpenDocSession("", docPath)
+	if err != nil {
+		t.Fatalf("opening session: %v", err)
+	}
+	return sess
+}
 
 func setupAppWithDoc(t *testing.T, content string) AppModel {
 	t.Helper()
@@ -20,7 +30,7 @@ func setupAppWithDoc(t *testing.T, content string) AppModel {
 	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
 		t.Fatalf("failed to write test file: %v", err)
 	}
-	app := NewApp(testFile)
+	app := NewApp(testFile, setupSession(t, testFile), "Tester")
 	app.tabs = []FileTab{{path: testFile}}
 	app.activeTab = 0
 	updated, _ := app.Update(docRenderedMsg{})
@@ -105,7 +115,7 @@ func TestNavigationPgDownClampsAtBottom(t *testing.T) {
 }
 
 func TestNewApp(t *testing.T) {
-	app := NewApp("test.md")
+	app := NewApp("test.md", nil, "")
 	if app.filePath != "test.md" {
 		t.Errorf("expected filePath 'test.md', got %s", app.filePath)
 	}
@@ -119,24 +129,23 @@ func TestDocRenderedMsg_LoadsExistingComments(t *testing.T) {
 		t.Fatalf("failed to write test file: %v", err)
 	}
 
-	// Save a review state with comments for that file
+	// Save review comments for that file in the session
+	sess := setupSession(t, testFile)
 	comment := review.Comment{
-		ID:             "test-comment-1",
-		Line:           1,
-		ContentSnippet: "package main",
-		Body:           "This is a test comment",
-		CreatedAt:      time.Now(),
+		ID:        "test-comment-1",
+		StartLine: 1,
+		EndLine:   1,
+		Anchor:    "package main",
+		Body:      "This is a test comment",
+		CreatedAt: review.Now(),
 	}
-	state := &review.ReviewState{
-		File:     testFile,
-		Comments: []review.Comment{comment},
-	}
-	if err := review.Save(state); err != nil {
+	sess.SetFileComments(testFile, "", []review.Comment{comment})
+	if err := sess.Save(); err != nil {
 		t.Fatalf("failed to save review state: %v", err)
 	}
 
 	// Create an AppModel with a tab for the test file
-	app := NewApp(testFile)
+	app := NewApp(testFile, sess, "Tester")
 	app.tabs = []FileTab{
 		{path: testFile},
 	}
@@ -163,7 +172,7 @@ func TestDocRenderedMsg_LoadsExistingComments(t *testing.T) {
 }
 
 func newScrollTestApp(path string, lines []string, isMarkdown bool, width, height int) AppModel {
-	app := NewApp(path)
+	app := NewApp(path, nil, "")
 	app.tabs[0].doc = &document.Document{
 		Path:    path,
 		Content: strings.Join(lines, "\n"),
@@ -226,8 +235,8 @@ func TestScrollToChunk_SourceWithLongLines(t *testing.T) {
 func newApproveTestApp(t *testing.T, comments []review.Comment) AppModel {
 	t.Helper()
 	t.Chdir(t.TempDir())
-	app := NewApp("test.go")
-	app.tabs[0].state = &review.ReviewState{File: "test.go", Comments: comments}
+	app := NewApp("test.go", setupSession(t, "test.go"), "Tester")
+	app.tabs[0].state = &fileReview{Comments: comments}
 	return app
 }
 
@@ -251,7 +260,7 @@ func isQuit(cmd tea.Cmd) bool {
 }
 
 func testComment() review.Comment {
-	return review.Comment{ID: "c1", Line: 1, Body: "please fix", CreatedAt: time.Now()}
+	return review.Comment{ID: "c_test01", StartLine: 1, EndLine: 1, Body: "please fix", CreatedAt: review.Now()}
 }
 
 func TestQuitWithRemainingComments_PromptsApproval(t *testing.T) {
@@ -279,12 +288,12 @@ func TestApproveModal_ApproveClearsComments(t *testing.T) {
 	if len(app.tabs[0].state.Comments) != 0 {
 		t.Errorf("expected comments cleared, got %d", len(app.tabs[0].state.Comments))
 	}
-	state, err := review.Load("test.go")
+	sess, err := review.OpenDocSession("", "test.go")
 	if err != nil {
 		t.Fatalf("loading saved state: %v", err)
 	}
-	if len(state.Comments) != 0 {
-		t.Errorf("expected persisted comments cleared, got %d", len(state.Comments))
+	if got := len(sess.FileComments("test.go")); got != 0 {
+		t.Errorf("expected persisted comments cleared, got %d", got)
 	}
 }
 

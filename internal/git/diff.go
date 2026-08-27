@@ -20,6 +20,24 @@ const (
 	StatusBinary
 )
 
+// String returns the review.json status string for a change status.
+func (s ChangeStatus) String() string {
+	switch s {
+	case StatusAdded:
+		return "added"
+	case StatusDeleted:
+		return "deleted"
+	case StatusRenamed:
+		return "renamed"
+	case StatusUntracked:
+		return "untracked"
+	case StatusBinary:
+		return "binary"
+	default:
+		return "modified"
+	}
+}
+
 // FileChange describes a single changed file.
 type FileChange struct {
 	Path    string
@@ -251,4 +269,13 @@ func gitCommand(args ...string) (string, error) {
 func IsGitRepo() bool {
 	_, err := gitCommand("rev-parse", "--is-inside-work-tree")
 	return err == nil
+}
+
+// CurrentBranch returns the current branch name, or "HEAD" when detached.
+func CurrentBranch() (string, error) {
+	out, err := gitCommand("rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
 }

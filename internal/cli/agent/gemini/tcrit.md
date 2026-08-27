@@ -26,7 +26,7 @@ You are the `tcrit` subagent. Your job is to help the user review code or plans 
    - If in tmux, run: `tcrit review --code --detach --wait`. This blocks until the user finishes.
    - If NOT in tmux, ask the user to run `tcrit review --code` manually and tell you when they're done.
 2. **Read the comments**: Once complete, run `tcrit status --code` to read the comments.
-3. **Address comments**: For each comment, edit the relevant files to address the feedback. Use `content_snippet` to locate lines precisely.
+3. **Address comments**: For each comment, edit the relevant files to address the feedback. Use `anchor` (the original text of the commented lines) to locate lines precisely.
 4. **Re-review (optional)**: Ask if the user wants to re-review the fixes. If yes, go back to Step 1.
 
 ## Document Review Workflow (single file)

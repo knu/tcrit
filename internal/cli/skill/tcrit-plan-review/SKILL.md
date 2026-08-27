@@ -60,7 +60,7 @@ This outputs JSON with the file path and comments array.
 
 For each comment in the `comments` array:
 
-1. Read the `line` number and `content_snippet` to locate where in the document the comment applies
+1. Read the `start_line`/`end_line` numbers and `anchor` to locate where in the document the comment applies
 2. Read the `body` for what the reviewer wants changed
 3. Edit the document at `$ARGUMENTS` to address the comment
 
@@ -97,4 +97,4 @@ If the user chooses **Continue**, done.
 ## Important notes
 
 - Do NOT modify the document while the TUI is open — only edit after it exits
-- The `content_snippet` field shows the line content when the comment was created — use it to find the right location even if line numbers have shifted
+- The `anchor` field holds the full text of the commented lines when the comment was created — use it to find the right location even if line numbers have shifted

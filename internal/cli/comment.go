@@ -2,11 +2,11 @@ package cli
 
 import (
 	"fmt"
-	"time"
+	"strings"
 
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
+	"github.com/knu/tcrit/internal/config"
 	"github.com/knu/tcrit/internal/document"
 	"github.com/knu/tcrit/internal/review"
 )
@@ -35,11 +35,6 @@ var commentCmd = &cobra.Command{
 			return fmt.Errorf("--body is required")
 		}
 
-		state, err := review.Load(filePath)
-		if err != nil {
-			return fmt.Errorf("loading review state: %w", err)
-		}
-
 		endLine := commentEndLine
 		if endLine > 0 && endLine < commentLine {
 			return fmt.Errorf("--end-line (%d) must be >= --line (%d)", endLine, commentLine)
@@ -47,29 +42,58 @@ var commentCmd = &cobra.Command{
 		if endLine > doc.LineCount() {
 			return fmt.Errorf("end-line %d is out of range (document has %d lines)", endLine, doc.LineCount())
 		}
-
-		comment := review.Comment{
-			ID:             uuid.NewString()[:8],
-			Line:           commentLine,
-			EndLine:        endLine,
-			ContentSnippet: doc.LineAt(commentLine),
-			Body:           commentBody,
-			CreatedAt:      time.Now(),
+		if endLine == 0 {
+			endLine = commentLine
 		}
 
-		state.AddComment(comment)
+		cfg, err := config.LoadCurrent()
+		if err != nil {
+			return err
+		}
 
-		if err := review.Save(state); err != nil {
+		sess, err := review.OpenDocSession(cfg.Output, filePath)
+		if err != nil {
+			return fmt.Errorf("loading review state: %w", err)
+		}
+
+		now := review.Now()
+		comment := review.Comment{
+			ID:          review.RandomCommentID(),
+			StartLine:   commentLine,
+			EndLine:     endLine,
+			Anchor:      anchorText(doc, commentLine, endLine),
+			Body:        commentBody,
+			Author:      cfg.Author,
+			Scope:       "line",
+			CreatedAt:   now,
+			UpdatedAt:   now,
+			ReviewRound: sess.CJ.ReviewRound,
+		}
+
+		comments := append(sess.FileComments(filePath), comment)
+		sess.SetFileComments(filePath, "", comments)
+
+		if err := sess.Save(); err != nil {
 			return fmt.Errorf("saving review: %w", err)
 		}
 
-		if endLine > 0 {
+		if endLine > commentLine {
 			fmt.Printf("Comment added at lines %d-%d\n", commentLine, endLine)
 		} else {
 			fmt.Printf("Comment added at line %d\n", commentLine)
 		}
 		return nil
 	},
+}
+
+// anchorText returns the full text of lines start..end, the drift-correction
+// anchor stamped on every line comment.
+func anchorText(doc *document.Document, start, end int) string {
+	lines := make([]string, 0, end-start+1)
+	for l := start; l <= end; l++ {
+		lines = append(lines, doc.LineAt(l))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func init() {

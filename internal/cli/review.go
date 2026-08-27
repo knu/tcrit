@@ -6,11 +6,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
+	"github.com/knu/tcrit/internal/config"
 	"github.com/knu/tcrit/internal/git"
 	"github.com/knu/tcrit/internal/review"
 	"github.com/knu/tcrit/internal/tui"
@@ -62,7 +62,18 @@ var reviewCmd = &cobra.Command{
 			return runDetachedReview(filePath)
 		}
 
-		model := tui.NewApp(filePath)
+		review.WarnLegacyState()
+
+		cfg, err := config.LoadCurrent()
+		if err != nil {
+			return err
+		}
+		sess, err := review.OpenDocSession(cfg.Output, filePath)
+		if err != nil {
+			return fmt.Errorf("loading review state: %w", err)
+		}
+
+		model := tui.NewApp(filePath, sess, cfg.Author)
 		p := tea.NewProgram(model)
 		if _, err := p.Run(); err != nil {
 			return fmt.Errorf("TUI error: %w", err)
@@ -124,21 +135,25 @@ func runCodeReview() error {
 		}
 	}
 
-	// Save session manifest
-	var paths []string
+	review.WarnLegacyState()
+
+	cfg, err := config.LoadCurrent()
+	if err != nil {
+		return err
+	}
+	sess, err := review.OpenCodeSession(cfg.Output)
+	if err != nil {
+		return fmt.Errorf("loading review state: %w", err)
+	}
+	sess.CJ.BaseRef = ref
 	for _, f := range files {
-		paths = append(paths, f.Path)
+		sess.SetFileComments(f.Path, f.Status.String(), sess.FileComments(f.Path))
 	}
-	session := &review.CodeReviewSession{
-		Files:     paths,
-		DiffBase:  ref,
-		CreatedAt: time.Now(),
-	}
-	if err := review.SaveSession(session); err != nil {
+	if err := sess.Save(); err != nil {
 		fmt.Fprintf(os.Stderr, "tcrit: warning: could not save session: %v\n", err)
 	}
 
-	model := tui.NewCodeReviewApp(files, ref)
+	model := tui.NewCodeReviewApp(files, ref, sess, cfg.Author)
 	p := tea.NewProgram(model)
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("TUI error: %w", err)
@@ -259,11 +274,15 @@ func runDetachedReview(filePath string) error {
 			return fmt.Errorf("review pane terminated abnormally")
 		}
 
-		state, err := review.Load(absPath)
+		cfg, err := config.LoadCurrent()
+		if err != nil {
+			return err
+		}
+		sess, err := review.OpenDocSession(cfg.Output, absPath)
 		if err != nil {
 			return fmt.Errorf("reading review state: %w", err)
 		}
-		fmt.Fprintf(os.Stdout, "Review complete. %d comments.\n", len(state.Comments))
+		fmt.Fprintf(os.Stdout, "Review complete. %d comments.\n", len(sess.FileComments(absPath)))
 	}
 
 	return nil

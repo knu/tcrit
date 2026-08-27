@@ -10,55 +10,95 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
-	"github.com/knu/tcrit/internal/document"
-	"gopkg.in/yaml.v3"
 )
 
-func Load(docPath string) (*ReviewState, error) {
-	reviewPath := document.ReviewPath(docPath) // .yaml
-	data, err := os.ReadFile(reviewPath)
-	if err != nil && os.IsNotExist(err) {
-		// Try legacy JSON path
-		jsonPath := strings.TrimSuffix(reviewPath, ".yaml") + ".json"
-		jsonData, jsonErr := os.ReadFile(jsonPath)
-		if jsonErr != nil {
-			if os.IsNotExist(jsonErr) {
-				return &ReviewState{
-					File:     docPath,
-					Comments: []Comment{},
-				}, nil
-			}
-			return nil, fmt.Errorf("reading review: %w", jsonErr)
-		}
-		// Migrate: parse JSON, save as YAML, remove JSON
-		var state ReviewState
-		if err := json.Unmarshal(jsonData, &state); err != nil {
-			return nil, fmt.Errorf("parsing legacy JSON review: %w", err)
-		}
-		if saveErr := Save(&state); saveErr == nil {
-			os.Remove(jsonPath)
-		}
-		return &state, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("reading review: %w", err)
-	}
-
-	var state ReviewState
-	if err := yaml.Unmarshal(data, &state); err != nil {
-		return nil, fmt.Errorf("parsing review YAML: %w", err)
-	}
-	return &state, nil
+// Session binds a review folder on disk to its loaded CritJSON document.
+type Session struct {
+	Key  string
+	Dir  string
+	CJ   CritJSON
+	Meta SessionEntry
 }
 
-func Save(state *ReviewState) error {
-	if err := document.EnsureDirs(); err != nil {
-		return err
+// NormalizePath cleans a user-supplied file path into the forward-slash
+// form used both in session-key derivation and as Files map keys.  Paths
+// under the current working directory normalize to the same relative form
+// whether given as absolute or relative, so all commands agree on keys.
+func NormalizePath(p string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return filepath.ToSlash(filepath.Clean(p))
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		if rel, err := filepath.Rel(cwd, abs); err == nil && rel != ".." && !strings.HasPrefix(rel, "../") {
+			return filepath.ToSlash(rel)
+		}
+	}
+	return filepath.ToSlash(abs)
+}
+
+// OpenSession loads the review folder for key, creating an empty round-1
+// document when none exists yet.
+func OpenSession(dataRoot, key string) (*Session, error) {
+	dir := Dir(dataRoot, key)
+	s := &Session{Key: key, Dir: dir}
+
+	data, err := os.ReadFile(JSONPath(dir))
+	if err != nil {
+		if os.IsNotExist(err) {
+			s.CJ = NewCritJSON()
+			return s, nil
+		}
+		return nil, fmt.Errorf("reading review: %w", err)
+	}
+	if err := json.Unmarshal(data, &s.CJ); err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", JSONPath(dir), err)
+	}
+	if s.CJ.Files == nil {
+		s.CJ.Files = map[string]CritJSONFile{}
+	}
+	if s.CJ.ReviewRound == 0 {
+		s.CJ.ReviewRound = 1
+	}
+	return s, nil
+}
+
+// Path returns the session's review.json path.
+func (s *Session) Path() string {
+	return JSONPath(s.Dir)
+}
+
+// FileComments returns the comments recorded for a (normalized) file path.
+func (s *Session) FileComments(path string) []Comment {
+	return s.CJ.Files[NormalizePath(path)].Comments
+}
+
+// SetFileComments replaces the comments for a file, creating its entry when
+// missing.  An empty status leaves the recorded status untouched.
+func (s *Session) SetFileComments(path, status string, comments []Comment) {
+	key := NormalizePath(path)
+	f := s.CJ.Files[key]
+	if status != "" {
+		f.Status = status
+	}
+	if f.Status == "" {
+		f.Status = "modified"
+	}
+	if comments == nil {
+		comments = []Comment{}
+	}
+	f.Comments = comments
+	s.CJ.Files[key] = f
+}
+
+// Save writes review.json atomically under an advisory file lock.
+func (s *Session) Save() error {
+	if err := os.MkdirAll(s.Dir, 0o755); err != nil {
+		return fmt.Errorf("creating review dir: %w", err)
 	}
 
-	reviewPath := document.ReviewPath(state.File)
+	reviewPath := s.Path()
 	lockPath := reviewPath + ".lock"
-
 	fileLock := flock.New(lockPath)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -69,38 +109,44 @@ func Save(state *ReviewState) error {
 	if !locked {
 		return fmt.Errorf("could not acquire lock on %s — another process may be writing. Try again", lockPath)
 	}
-	defer fileLock.Unlock()
+	defer func() {
+		_ = fileLock.Unlock()
+		_ = os.Remove(lockPath)
+	}()
 
-	data, err := yaml.Marshal(state)
+	s.CJ.Touch()
+	data, err := json.MarshalIndent(&s.CJ, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshaling review: %w", err)
 	}
+	data = append(data, '\n')
 
 	tmpPath := reviewPath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
 		return fmt.Errorf("writing temp file: %w", err)
 	}
-
 	if err := os.Rename(tmpPath, reviewPath); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("renaming temp file: %w", err)
 	}
 
-	_ = filepath.Dir(lockPath)
-	_ = os.Remove(lockPath)
-
+	if s.Meta.Key != "" {
+		if s.Meta.StartedAt == "" {
+			s.Meta.StartedAt = Now()
+		}
+		s.Meta.ReviewPath = reviewPath
+		if err := writeSessionEntry(s.Meta); err != nil {
+			return fmt.Errorf("recording session: %w", err)
+		}
+	}
 	return nil
 }
 
-func (s *ReviewState) AddComment(c Comment) {
-	s.Comments = append(s.Comments, c)
-}
-
-func (s *ReviewState) DeleteComment(id string) {
-	for i, c := range s.Comments {
-		if c.ID == id {
-			s.Comments = append(s.Comments[:i], s.Comments[i+1:]...)
-			return
-		}
+// Clear removes the whole review folder and its registry entry.  Missing
+// folders are not an error.
+func (s *Session) Clear() error {
+	if err := os.RemoveAll(s.Dir); err != nil {
+		return fmt.Errorf("removing review dir: %w", err)
 	}
+	return RemoveSessionEntry(s.Key)
 }

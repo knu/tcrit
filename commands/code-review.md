@@ -68,7 +68,7 @@ This outputs JSON with all files and their comments:
 
 For each file in the `files` array, for each comment:
 
-1. Read the `line` number and `content_snippet` to locate where the comment applies
+1. Read the `start_line`/`end_line` numbers and `anchor` to locate where the comment applies
 2. Read the `body` for what the reviewer wants changed
 3. Edit the file to address the comment
 
@@ -105,6 +105,6 @@ If the user chooses **Continue**, done.
 ## Important notes
 
 - Do NOT modify files while the TUI is open — only edit after it exits
-- The `content_snippet` field shows the line content when the comment was created — use it to find the right location even if line numbers have shifted
+- The `anchor` field holds the full text of the commented lines when the comment was created — use it to find the right location even if line numbers have shifted
 - The TUI shows changed lines with green background and + gutter markers
 - Use `n`/`N` in the TUI to jump between changes, `H`/`L` to switch tabs

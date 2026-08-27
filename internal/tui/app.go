@@ -7,14 +7,12 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/google/uuid"
 
 	"github.com/knu/tcrit/internal/document"
 	gitpkg "github.com/knu/tcrit/internal/git"
@@ -56,6 +54,10 @@ type AppModel struct {
 	// Single-file mode (legacy)
 	filePath string
 
+	// Review session backing all tabs, and the author stamped on new comments.
+	session *review.Session
+	author  string
+
 	detached bool
 
 	contentViewport viewport.Model
@@ -78,7 +80,7 @@ func (m *AppModel) tab() *FileTab {
 	return &m.tabs[m.activeTab]
 }
 
-func NewApp(filePath string) AppModel {
+func NewApp(filePath string, sess *review.Session, author string) AppModel {
 	ta := textarea.New()
 	ta.Placeholder = "Type your comment..."
 	ta.ShowLineNumbers = false
@@ -93,6 +95,8 @@ func NewApp(filePath string) AppModel {
 		filePath:        filePath,
 		tabs:            []FileTab{tab},
 		activeTab:       0,
+		session:         sess,
+		author:          author,
 		detached:        os.Getenv("CRIT_DETACHED") == "1",
 		contentViewport: viewport.New(),
 		commentViewport: viewport.New(),
@@ -101,7 +105,7 @@ func NewApp(filePath string) AppModel {
 }
 
 // NewCodeReviewApp creates a multi-file code review TUI.
-func NewCodeReviewApp(files []gitpkg.FileChange, ref string) AppModel {
+func NewCodeReviewApp(files []gitpkg.FileChange, ref string, sess *review.Session, author string) AppModel {
 	ta := textarea.New()
 	ta.Placeholder = "Type your comment..."
 	ta.ShowLineNumbers = false
@@ -134,6 +138,8 @@ func NewCodeReviewApp(files []gitpkg.FileChange, ref string) AppModel {
 		tabs:            tabs,
 		activeTab:       0,
 		multiFile:       true,
+		session:         sess,
+		author:          author,
 		detached:        os.Getenv("CRIT_DETACHED") == "1",
 		contentViewport: viewport.New(),
 		commentViewport: viewport.New(),
@@ -192,27 +198,15 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case docRenderedMsg:
-		// Load documents and existing review state for each tab
+		// Load documents and existing review comments for each tab
 		for i := range m.tabs {
 			t := &m.tabs[i]
+			t.state = &fileReview{Comments: m.sessionComments(t.path)}
 			if t.isBinary || t.isDeleted {
-				t.state = &review.ReviewState{
-					File:     t.path,
-					Comments: []review.Comment{},
-				}
 				continue
 			}
 			doc, _ := document.Load(t.path)
 			t.doc = doc
-			// Load existing review state (returns empty state if none exists)
-			state, err := review.Load(t.path)
-			if err != nil {
-				state = &review.ReviewState{
-					File:     t.path,
-					Comments: []review.Comment{},
-				}
-			}
-			t.state = state
 			t.ensureHighlightCache()
 		}
 
@@ -262,11 +256,7 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Quit):
 		// Auto-save all tabs on quit
-		for i := range m.tabs {
-			if m.tabs[i].state != nil {
-				review.Save(m.tabs[i].state)
-			}
-		}
+		m.persist()
 		// Quitting without new feedback while older comments remain is
 		// ambiguous: offer to approve by clearing them.
 		if !m.newFeedback && m.totalComments() > 0 {
@@ -429,10 +419,7 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				}
 				var best *target
 				for _, c := range t.state.Comments {
-					endAt := c.Line
-					if c.EndLine > 0 {
-						endAt = c.EndLine
-					}
+					endAt := c.EndAt()
 					if endAt > t.cursorLine || (endAt == t.cursorLine && !t.cursorOnAnnotation) {
 						if best == nil || endAt < best.endLine {
 							best = &target{endLine: endAt, idx: 0}
@@ -441,10 +428,7 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				}
 				if best == nil {
 					for _, c := range t.state.Comments {
-						endAt := c.Line
-						if c.EndLine > 0 {
-							endAt = c.EndLine
-						}
+						endAt := c.EndAt()
 						if best == nil || endAt < best.endLine {
 							best = &target{endLine: endAt, idx: 0}
 						}
@@ -465,10 +449,7 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				}
 				var best *target
 				for _, c := range t.state.Comments {
-					endAt := c.Line
-					if c.EndLine > 0 {
-						endAt = c.EndLine
-					}
+					endAt := c.EndAt()
 					if endAt < t.cursorLine || (endAt == t.cursorLine && !t.cursorOnAnnotation) {
 						if best == nil || endAt > best.endLine {
 							best = &target{endLine: endAt, idx: 0}
@@ -477,10 +458,7 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				}
 				if best == nil {
 					for _, c := range t.state.Comments {
-						endAt := c.Line
-						if c.EndLine > 0 {
-							endAt = c.EndLine
-						}
+						endAt := c.EndAt()
 						if best == nil || endAt > best.endLine {
 							best = &target{endLine: endAt, idx: 0}
 						}
@@ -622,32 +600,33 @@ func (m *AppModel) modalSubmit() {
 		for i := range t.state.Comments {
 			if t.state.Comments[i].ID == m.editingID {
 				t.state.Comments[i].Body = body
+				t.state.Comments[i].UpdatedAt = review.Now()
 				break
 			}
 		}
 		m.editingID = ""
 	} else {
 		startLine, endLine := m.selectionRange()
-		snippet := ""
-		if t.doc != nil {
-			snippet = strings.TrimSpace(t.doc.LineAt(startLine))
-		}
-
+		now := review.Now()
 		c := review.Comment{
-			ID:             uuid.NewString()[:8],
-			Line:           startLine,
-			ContentSnippet: snippet,
-			Body:           body,
-			CreatedAt:      time.Now(),
+			ID:        review.RandomCommentID(),
+			StartLine: startLine,
+			EndLine:   endLine,
+			Anchor:    m.anchorText(t, startLine, endLine),
+			Body:      body,
+			Author:    m.author,
+			Scope:     "line",
+			CreatedAt: now,
+			UpdatedAt: now,
 		}
-		if startLine != endLine {
-			c.EndLine = endLine
+		if m.session != nil {
+			c.ReviewRound = m.session.CJ.ReviewRound
 		}
-		t.state.AddComment(c)
+		t.state.Comments = append(t.state.Comments, c)
 	}
 	m.newFeedback = true
 
-	review.Save(t.state)
+	m.persist()
 	m.modal = noModal
 	m.modalTextarea.Blur()
 	t.selecting = false
@@ -660,9 +639,14 @@ func (m *AppModel) modalDelete() {
 	if t.state == nil || m.editingID == "" {
 		return
 	}
-	t.state.DeleteComment(m.editingID)
+	for i, c := range t.state.Comments {
+		if c.ID == m.editingID {
+			t.state.Comments = append(t.state.Comments[:i], t.state.Comments[i+1:]...)
+			break
+		}
+	}
 	m.editingID = ""
-	review.Save(t.state)
+	m.persist()
 	m.modal = noModal
 	m.modalTextarea.Blur()
 	t.cursorOnAnnotation = false
@@ -688,8 +672,49 @@ func (m *AppModel) approveAndClear() {
 	for i := range m.tabs {
 		if m.tabs[i].state != nil {
 			m.tabs[i].state.Comments = nil
-			review.Save(m.tabs[i].state)
 		}
+	}
+	m.persist()
+}
+
+// sessionComments returns the session's stored comments for a file path.
+func (m *AppModel) sessionComments(path string) []review.Comment {
+	if m.session == nil {
+		return []review.Comment{}
+	}
+	comments := m.session.FileComments(path)
+	if comments == nil {
+		comments = []review.Comment{}
+	}
+	return comments
+}
+
+// anchorText joins the full text of lines start..end as the comment's
+// drift-correction anchor.
+func (m *AppModel) anchorText(t *FileTab, start, end int) string {
+	if t.doc == nil {
+		return ""
+	}
+	lines := make([]string, 0, end-start+1)
+	for l := start; l <= end && l <= t.doc.LineCount(); l++ {
+		lines = append(lines, t.doc.LineAt(l))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// persist writes every tab's comments back into the session and saves it.
+func (m *AppModel) persist() {
+	if m.session == nil {
+		return
+	}
+	for i := range m.tabs {
+		if m.tabs[i].state == nil {
+			continue
+		}
+		m.session.SetFileComments(m.tabs[i].path, "", m.tabs[i].state.Comments)
+	}
+	if err := m.session.Save(); err != nil {
+		m.err = err
 	}
 }
 
@@ -874,15 +899,8 @@ func (m *AppModel) annotationsAfterLine(lineNum int) []annotation {
 	}
 	var anns []annotation
 	for _, c := range t.state.Comments {
-		endAt := c.Line
-		if c.EndLine > 0 {
-			endAt = c.EndLine
-		}
-		if endAt == lineNum {
-			anns = append(anns, annotation{
-				id: c.ID, body: c.Body,
-				line: c.Line, endLine: c.EndLine,
-			})
+		if c.EndAt() == lineNum {
+			anns = append(anns, newAnnotation(c))
 		}
 	}
 	return anns
@@ -890,18 +908,32 @@ func (m *AppModel) annotationsAfterLine(lineNum int) []annotation {
 
 // sidebarItem represents a comment in the sidebar list.
 type sidebarItem struct {
-	id      string
-	line    int
-	endLine int
-	body    string
+	id       string
+	line     int
+	endLine  int
+	body     string
+	author   string
+	resolved bool
+	replies  []review.Reply
 }
 
 // annotation represents an inline comment to render.
 type annotation struct {
-	id      string
-	body    string
-	line    int
-	endLine int
+	id       string
+	body     string
+	line     int
+	endLine  int
+	author   string
+	resolved bool
+	replies  []review.Reply
+}
+
+func newAnnotation(c review.Comment) annotation {
+	return annotation{
+		id: c.ID, body: c.Body,
+		line: c.StartLine, endLine: c.EndLine,
+		author: c.Author, resolved: c.Resolved, replies: c.Replies,
+	}
 }
 
 // rebuildContent renders the document line-by-line with cursor, selection,
@@ -927,14 +959,8 @@ func (m *AppModel) rebuildContent() {
 	annosByEndLine := make(map[int][]annotation)
 	if t.state != nil {
 		for _, c := range t.state.Comments {
-			endAt := c.Line
-			if c.EndLine > 0 {
-				endAt = c.EndLine
-			}
-			annosByEndLine[endAt] = append(annosByEndLine[endAt], annotation{
-				id: c.ID, body: c.Body,
-				line: c.Line, endLine: c.EndLine,
-			})
+			endAt := c.EndAt()
+			annosByEndLine[endAt] = append(annosByEndLine[endAt], newAnnotation(c))
 		}
 	}
 
@@ -942,11 +968,7 @@ func (m *AppModel) rebuildContent() {
 	annotatedLines := make(map[int]int)
 	if t.state != nil {
 		for _, c := range t.state.Comments {
-			end := c.Line
-			if c.EndLine > 0 {
-				end = c.EndLine
-			}
-			for l := c.Line; l <= end; l++ {
+			for l := c.StartLine; l <= c.EndAt(); l++ {
 				annotatedLines[l]++
 			}
 		}
@@ -1142,10 +1164,17 @@ func (m *AppModel) rebuildContent() {
 	m.contentViewport.SetContent(b.String())
 }
 
+// annotationExtraLines counts the lines an annotation box renders beyond the
+// classic "body + label + borders" baseline, keeping scroll math in sync with
+// renderAnnotationBox.
+func annotationExtraLines(ann annotation) int {
+	return len(ann.replies)
+}
+
 // renderAnnotationBox renders a bordered annotation box indented under the gutter.
 func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused bool) string {
 	var lineLabel string
-	if ann.endLine > 0 {
+	if ann.endLine > ann.line {
 		lineLabel = fmt.Sprintf("L%d-%d", ann.line, ann.endLine)
 	} else {
 		lineLabel = fmt.Sprintf("L%d", ann.line)
@@ -1154,8 +1183,26 @@ func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused boo
 	var boxContent strings.Builder
 	label := inlineLabelComment.Render("comment")
 	lineRef := commentLineStyle.Render(lineLabel)
-	boxContent.WriteString(fmt.Sprintf("%s %s\n", label, lineRef))
+	header := fmt.Sprintf("%s %s", label, lineRef)
+	if ann.author != "" {
+		header += " " + commentLineStyle.Render("— "+ann.author)
+	}
+	if ann.resolved {
+		header += " " + resolvedBadge.Render("✓ resolved")
+	}
+	boxContent.WriteString(header + "\n")
 	boxContent.WriteString(clampLines(ann.body, 3))
+	for _, r := range ann.replies {
+		reply := r.Body
+		if i := strings.IndexByte(reply, '\n'); i >= 0 {
+			reply = reply[:i] + "…"
+		}
+		who := r.Author
+		if who == "" {
+			who = "reply"
+		}
+		boxContent.WriteString("\n" + replyStyle.Render(fmt.Sprintf("↳ %s: %s", who, reply)))
+	}
 	boxStyle := inlineCommentBox
 
 	if focused {
@@ -1528,12 +1575,8 @@ func (m *AppModel) extraLinesPerDocLine() map[int]int {
 
 	if t.state != nil {
 		for _, c := range t.state.Comments {
-			endAt := c.Line
-			if c.EndLine > 0 {
-				endAt = c.EndLine
-			}
 			bodyLines := strings.Count(c.Body, "\n") + 1
-			counts[endAt] += bodyLines + 3
+			counts[c.EndAt()] += bodyLines + 3 + annotationExtraLines(newAnnotation(c))
 		}
 	}
 
@@ -1560,8 +1603,9 @@ func (m *AppModel) updateCommentSidebar() {
 	t.sidebarItems = nil
 	for _, c := range t.state.Comments {
 		t.sidebarItems = append(t.sidebarItems, sidebarItem{
-			id: c.ID, line: c.Line, endLine: c.EndLine,
-			body: c.Body,
+			id: c.ID, line: c.StartLine, endLine: c.EndLine,
+			body: c.Body, author: c.Author, resolved: c.Resolved,
+			replies: c.Replies,
 		})
 	}
 	sort.Slice(t.sidebarItems, func(i, j int) bool { return t.sidebarItems[i].line < t.sidebarItems[j].line })
@@ -1585,12 +1629,18 @@ func (m *AppModel) updateCommentSidebar() {
 		isSelected := m.focused == commentPane && idx == t.sidebarCursor
 
 		var lineInfo string
-		if it.endLine > 0 {
+		if it.endLine > it.line {
 			lineInfo = fmt.Sprintf("L%d-%d", it.line, it.endLine)
 		} else {
 			lineInfo = fmt.Sprintf("L%d", it.line)
 		}
 		lineInfo = commentLineStyle.Render(lineInfo)
+		if it.author != "" {
+			lineInfo += " " + commentLineStyle.Render(it.author)
+		}
+		if it.resolved {
+			lineInfo += " " + resolvedBadge.Render("✓")
+		}
 
 		cursorCol := lipgloss.NewStyle().Width(2)
 		prefix := cursorCol.Render("")
@@ -1613,6 +1663,17 @@ func (m *AppModel) updateCommentSidebar() {
 			if i < len(bodyLines)-1 {
 				b.WriteString("\n")
 			}
+		}
+		for _, r := range it.replies {
+			reply := r.Body
+			if i := strings.IndexByte(reply, '\n'); i >= 0 {
+				reply = reply[:i] + "…"
+			}
+			who := r.Author
+			if who == "" {
+				who = "reply"
+			}
+			b.WriteString("\n " + replyStyle.Render(fmt.Sprintf("↳ %s: %s", who, reply)))
 		}
 		b.WriteString("\n\n")
 	}
@@ -2012,11 +2073,8 @@ func (m AppModel) renderWithModal(background string) string {
 		var contextSection string
 		for _, c := range m.tabs[m.activeTab].state.Comments {
 			if c.ID == m.editingID {
-				start := c.Line
-				end := c.EndLine
-				if end == 0 {
-					end = start
-				}
+				start := c.StartLine
+				end := c.EndAt()
 				contextSection = contextBoxStyle.
 					Width(innerWidth - 2).
 					Render(m.renderContextPreview(start, end, innerWidth-4))
