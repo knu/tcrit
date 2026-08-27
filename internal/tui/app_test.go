@@ -399,6 +399,10 @@ func TestRoundStart_ReloadsCommentsAndAdvancesRound(t *testing.T) {
 		t.Fatal(err)
 	}
 	app.persist()
+	// Load the document so the next round has previous content to carry
+	// comments forward from; docRenderedMsg reloads state from the session.
+	updated0, _ := app.Update(docRenderedMsg{})
+	app = updated0.(AppModel)
 	app.waiting = true
 
 	// Simulate the agent replying via the CLI while the TUI waits.
@@ -428,5 +432,8 @@ func TestRoundStart_ReloadsCommentsAndAdvancesRound(t *testing.T) {
 	}
 	if !comments[0].Resolved {
 		t.Error("expected reloaded comment to be resolved")
+	}
+	if !comments[0].CarriedForward || comments[0].ID == "c_test01" {
+		t.Errorf("expected a re-minted carried-forward comment, got %+v", comments[0])
 	}
 }

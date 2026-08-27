@@ -38,8 +38,11 @@ type Comment struct {
 	// used to re-locate the comment when line numbers drift across rounds.
 	Anchor  string `json:"anchor,omitempty"`
 	Drifted bool   `json:"drifted,omitempty"`
-	Author  string `json:"author,omitempty"`
-	UserID  string `json:"user_id,omitempty"`
+	// DriftedOnRound is the round that newly classified this comment as
+	// drifted; preserved for crit compatibility.
+	DriftedOnRound int    `json:"drifted_on_round,omitempty"`
+	Author         string `json:"author,omitempty"`
+	UserID         string `json:"user_id,omitempty"`
 	// Scope is "line", "file", or "review".  Empty means "line".
 	Scope     string `json:"scope,omitempty"`
 	CreatedAt string `json:"created_at"`

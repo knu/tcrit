@@ -859,27 +859,40 @@ func (m *AppModel) doFinish() (tea.Model, tea.Cmd) {
 }
 
 // startNextRound reloads the session from disk (picking up agent replies),
+// carries comments forward onto the agent's edits with drift correction,
 // advances the round counter, and refreshes documents and diffs.
 func (m *AppModel) startNextRound() {
+	// Capture the content the current comments were authored against
+	// before reloading, then reload the session so agent-side replies and
+	// resolutions written to review.json are picked up.
+	prevContents := make(map[string]string, len(m.tabs))
+	for i := range m.tabs {
+		if m.tabs[i].doc != nil {
+			prevContents[m.tabs[i].path] = m.tabs[i].doc.Content
+		}
+	}
 	if m.session != nil {
 		if fresh, err := review.OpenSessionAt(m.session.Key, m.session.Dir); err == nil {
 			m.session.CJ = fresh.CJ
 		}
-		m.session.CJ.ReviewRound++
-		if err := m.session.Save(); err != nil {
-			m.err = err
-		}
 	}
+
+	now := review.Now()
 	for i := range m.tabs {
 		t := &m.tabs[i]
-		t.state = &fileReview{Comments: m.sessionComments(t.path)}
+		comments := m.sessionComments(t.path)
 		if t.isBinary || t.isDeleted {
+			t.state = &fileReview{Comments: comments}
 			continue
 		}
 		doc, _ := document.Load(t.path)
 		t.doc = doc
 		t.chromaLines = nil
 		t.deletedLineCache = nil
+		if prev, ok := prevContents[t.path]; ok && t.doc != nil {
+			comments = review.CarryForwardFile(comments, prev, t.doc.Content, now)
+		}
+		t.state = &fileReview{Comments: comments}
 		if m.multiFile && m.baseRef != "" {
 			if diff, err := gitpkg.DiffFile(t.path, m.baseRef); err == nil && diff != nil {
 				t.changedLines = diff.ChangedLines
@@ -889,6 +902,13 @@ func (m *AppModel) startNextRound() {
 		}
 		t.ensureHighlightCache()
 	}
+
+	// Advance the round only after carry-forward, mirroring crit's ordering.
+	if m.session != nil {
+		m.session.CJ.ReviewRound++
+	}
+	m.persist()
+
 	m.waiting = false
 	m.rebuildContent()
 	m.updateCommentSidebar()
