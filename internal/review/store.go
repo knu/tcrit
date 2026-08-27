@@ -40,27 +40,7 @@ func NormalizePath(p string) string {
 // OpenSession loads the review folder for key, creating an empty round-1
 // document when none exists yet.
 func OpenSession(dataRoot, key string) (*Session, error) {
-	dir := Dir(dataRoot, key)
-	s := &Session{Key: key, Dir: dir}
-
-	data, err := os.ReadFile(JSONPath(dir))
-	if err != nil {
-		if os.IsNotExist(err) {
-			s.CJ = NewCritJSON()
-			return s, nil
-		}
-		return nil, fmt.Errorf("reading review: %w", err)
-	}
-	if err := json.Unmarshal(data, &s.CJ); err != nil {
-		return nil, fmt.Errorf("parsing %s: %w", JSONPath(dir), err)
-	}
-	if s.CJ.Files == nil {
-		s.CJ.Files = map[string]CritJSONFile{}
-	}
-	if s.CJ.ReviewRound == 0 {
-		s.CJ.ReviewRound = 1
-	}
-	return s, nil
+	return openSessionAt(key, Dir(dataRoot, key))
 }
 
 // Path returns the session's review.json path.

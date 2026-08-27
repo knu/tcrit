@@ -62,6 +62,11 @@ For each file in the `files` array, for each comment:
 1. Read the `start_line`/`end_line` numbers and `anchor` to locate where the comment applies
 2. Read the `body` for what the reviewer wants changed
 3. Edit the file to address the comment
+4. Reply to the comment recording what you did (do NOT pass --resolve — resolving is the reviewer's call):
+
+```bash
+tcrit comment --reply-to <comment-id> --author 'Claude Code' "<what you did>"
+```
 
 After addressing ALL comments across ALL files, summarize what you changed.
 

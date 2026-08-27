@@ -62,6 +62,11 @@ For each comment in the `comments` array:
 1. Read the `start_line`/`end_line` numbers and `anchor` to locate where in the document the comment applies
 2. Read the `body` for what the reviewer wants changed
 3. Edit the document at `$ARGUMENTS` to address the comment
+4. Reply to the comment recording what you did (do NOT pass --resolve — resolving is the reviewer's call):
+
+```bash
+tcrit comment --reply-to <comment-id> --author 'Claude Code' "<what you did>"
+```
 
 After addressing ALL comments, summarize what you changed.
 

@@ -156,12 +156,28 @@ This is how the Claude Code skill invokes tcrit — `--detach --wait` is a singl
 
 ## Scriptable CLI
 
-```bash
-# Add a comment programmatically
-tcrit comment docs/plan.md --line 15 --body "This needs more detail"
+The comment CLI follows [crit](https://github.com/tomasz-tomczyk/crit)'s
+syntax, so agent tooling written for crit works against TCrit reviews:
 
-# Multi-line comment
-tcrit comment docs/plan.md --line 10 --end-line 20 --body "Rethink this section"
+```bash
+# Review-level, file-level, and line-level comments
+tcrit comment "Overall this looks good"
+tcrit comment docs/plan.md "Needs a rewrite"
+tcrit comment docs/plan.md:15 "This needs more detail"
+tcrit comment docs/plan.md:10-20 "Rethink this section"
+
+# Reply to a comment (e.g. an AI explaining how it addressed feedback)
+tcrit comment --reply-to c_a3f8b2 --author 'Claude Code' "Split into two functions"
+
+# Bulk import comments and replies from JSON
+tcrit comment --json --file comments.json
+
+# List unresolved comments (add --all for resolved ones, --json for JSON)
+tcrit comments
+tcrit comments --json
+
+# Remove the review
+tcrit comment --clear
 
 # Get review comments as JSON (single file)
 tcrit status docs/plan.md
