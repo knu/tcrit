@@ -16,6 +16,7 @@ import (
 
 var (
 	commentSession string
+	commentPlan    string
 	commentOutput  string
 	commentAuthor  string
 	commentReplyTo string
@@ -83,6 +84,12 @@ Usage forms:
 }
 
 func resolveCommentTarget(output string) (*review.Session, error) {
+	if commentPlan != "" {
+		if commentSession != "" {
+			return nil, fmt.Errorf("--plan cannot be combined with --session")
+		}
+		return review.OpenPlanSession(review.Slugify(commentPlan))
+	}
 	return review.ResolveTarget(output, commentSession)
 }
 
@@ -169,7 +176,7 @@ func runCommentReply(output, author, replyTo, body string) error {
 	}
 	err = sess.AppendReply(replyTo, body, author, "", commentResolve, commentPath)
 	var notFound *review.CommentNotFoundError
-	if errors.As(err, &notFound) && commentSession == "" {
+	if errors.As(err, &notFound) && commentSession == "" && commentPlan == "" {
 		// The target may live in another registered review; redirect there.
 		found, findErr := review.FindSessionsByCommentID(replyTo, sess.Key)
 		if findErr != nil || len(found) == 0 {
@@ -256,7 +263,7 @@ func redirectBulkTarget(primary *review.Session, entries []review.BulkCommentEnt
 			"bulk targets multiple review files: %v exist in session %s, but %v do not — split into per-file bulks",
 			inPrimary, primary.Key, missing)
 	}
-	if commentSession != "" {
+	if commentSession != "" || commentPlan != "" {
 		return nil, false, fmt.Errorf("reply targets %v not found in selected review session", missing)
 	}
 
@@ -347,6 +354,7 @@ func runCommentClear(output string) error {
 func init() {
 	rootCmd.AddCommand(commentCmd)
 	commentCmd.Flags().StringVar(&commentSession, "session", "", "target a review session by ID")
+	commentCmd.Flags().StringVar(&commentPlan, "plan", "", "target a plan review by slug")
 	commentCmd.Flags().StringVarP(&commentOutput, "output", "o", "", "review data root")
 	commentCmd.Flags().StringVar(&commentAuthor, "author", "", "comment author (defaults to config author)")
 	commentCmd.Flags().StringVar(&commentReplyTo, "reply-to", "", "reply to an existing comment")

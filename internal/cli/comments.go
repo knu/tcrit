@@ -14,6 +14,7 @@ import (
 
 var (
 	commentsSession string
+	commentsPlan    string
 	commentsOutput  string
 	commentsJSON    bool
 	commentsAll     bool
@@ -37,12 +38,18 @@ unresolved comments are shown unless --all is given.`,
 		}
 
 		var sess *review.Session
-		if len(args) == 1 {
-			if commentsSession != "" {
-				return fmt.Errorf("--session cannot be combined with an explicit review path")
+		switch {
+		case len(args) == 1:
+			if commentsSession != "" || commentsPlan != "" {
+				return fmt.Errorf("--session/--plan cannot be combined with an explicit review path")
 			}
 			sess, err = openSessionAtPathArg(args[0])
-		} else {
+		case commentsPlan != "":
+			if commentsSession != "" {
+				return fmt.Errorf("--plan cannot be combined with --session")
+			}
+			sess, err = review.OpenPlanSession(review.Slugify(commentsPlan))
+		default:
 			sess, err = review.ResolveTarget(output, commentsSession)
 		}
 		if err != nil {
@@ -83,6 +90,7 @@ func openSessionAtPathArg(arg string) (*review.Session, error) {
 func init() {
 	rootCmd.AddCommand(commentsCmd)
 	commentsCmd.Flags().StringVar(&commentsSession, "session", "", "target a review session by ID")
+	commentsCmd.Flags().StringVar(&commentsPlan, "plan", "", "target a plan review by slug")
 	commentsCmd.Flags().StringVarP(&commentsOutput, "output", "o", "", "review data root")
 	commentsCmd.Flags().BoolVar(&commentsJSON, "json", false, "output as JSON")
 	commentsCmd.Flags().BoolVar(&commentsAll, "all", false, "include resolved comments")

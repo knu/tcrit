@@ -52,18 +52,33 @@ tmux the TUI runs in the current terminal.`,
 
 // reviewMode describes what is being reviewed.
 type reviewMode struct {
-	docPath string // non-empty for single-document mode
-	ref     string // diff base for code mode
-	files   []git.FileChange
+	docPath  string // non-empty for single-document and plan modes
+	ref      string // diff base for code mode
+	files    []git.FileChange
+	planSlug string // non-empty for plan mode
+	planFile string // original plan path ("" when read from stdin)
 }
 
 func (m *reviewMode) code() bool { return m.docPath == "" }
+
+func (m *reviewMode) plan() bool { return m.planSlug != "" }
 
 func (m *reviewMode) promptMode() string {
 	if m.code() {
 		return "diff"
 	}
 	return "files"
+}
+
+func (m *reviewMode) internalMode() string {
+	switch {
+	case m.plan():
+		return "plan"
+	case m.code():
+		return "git"
+	default:
+		return "files"
+	}
 }
 
 func runReview(args []string) error {
@@ -84,6 +99,12 @@ func runReview(args []string) error {
 		return err
 	}
 
+	return runReviewFlow(cfg, sess, mode)
+}
+
+// runReviewFlow connects to a live session, spawns the TUI in a tmux split,
+// or runs the TUI inline, then handles the finish result.
+func runReviewFlow(cfg *config.Config, sess *review.Session, mode *reviewMode) error {
 	sock := review.SocketPathFor(sess.Key)
 	if ipc.Alive(sock) {
 		return runReviewCycle(cfg, sess, sock)
@@ -254,10 +275,14 @@ func spawnTUIPane(mode *reviewMode) error {
 	}
 
 	var tuiCmd string
-	if mode.code() {
+	switch {
+	case mode.plan():
+		tuiCmd = fmt.Sprintf("%s %s _tui --plan %s",
+			envPrefix, shellEscape(tcritBin), shellEscape(mode.planSlug))
+	case mode.code():
 		tuiCmd = fmt.Sprintf("%s %s _tui --base %s",
 			envPrefix, shellEscape(tcritBin), shellEscape(mode.ref))
-	} else {
+	default:
 		absPath, err := filepath.Abs(mode.docPath)
 		if err != nil {
 			return fmt.Errorf("resolving absolute path: %w", err)

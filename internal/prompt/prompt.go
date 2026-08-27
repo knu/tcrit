@@ -25,6 +25,8 @@ type Context struct {
 	ReviewPath        string
 	SessionKey        string
 	Mode              string // "diff" (git) or "files"
+	InternalMode      string // "git", "files", or "plan"
+	PlanSlug          string
 	UnresolvedCount   int
 	TotalCount        int
 	FilesWithComments []string
@@ -36,11 +38,20 @@ type Context struct {
 
 // TemplateData returns the snake_case variable map, matching crit's names.
 func (c Context) TemplateData() map[string]any {
+	internalMode := c.InternalMode
+	if internalMode == "" {
+		if c.Mode == "diff" {
+			internalMode = "git"
+		} else {
+			internalMode = "files"
+		}
+	}
 	return map[string]any{
 		"review_path":              c.ReviewPath,
 		"session_key":              c.SessionKey,
 		"mode":                     c.Mode,
-		"internal_session_mode":    c.internalMode(),
+		"internal_session_mode":    internalMode,
+		"plan_slug":                c.PlanSlug,
 		"unresolved_count":         c.UnresolvedCount,
 		"total_count":              c.TotalCount,
 		"files_with_comments":      c.FilesWithComments,
@@ -51,13 +62,6 @@ func (c Context) TemplateData() map[string]any {
 		"comments_cmd":             fmt.Sprintf("tcrit comments --json --session %s", c.SessionKey),
 		"comments_all_cmd":         fmt.Sprintf("tcrit comments --json --all --session %s", c.SessionKey),
 	}
-}
-
-func (c Context) internalMode() string {
-	if c.Mode == "diff" {
-		return "git"
-	}
-	return "files"
 }
 
 // HookForFinish names the hook that fires for a finish result.

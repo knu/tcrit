@@ -38,7 +38,7 @@ func runTUISession(cfg *config.Config, sess *review.Session, mode *reviewMode, s
 	}
 	p := tea.NewProgram(model)
 
-	srv := &tuiServer{cfg: cfg, sess: sess, mode: mode.promptMode(), program: p}
+	srv := &tuiServer{cfg: cfg, sess: sess, mode: mode, program: p}
 
 	if serving {
 		sock := review.SocketPathFor(sess.Key)
@@ -85,7 +85,7 @@ func runTUISession(cfg *config.Config, sess *review.Session, mode *reviewMode, s
 type tuiServer struct {
 	cfg     *config.Config
 	sess    *review.Session
-	mode    string
+	mode    *reviewMode
 	program *tea.Program
 
 	mu          sync.Mutex
@@ -151,7 +151,7 @@ func (s *tuiServer) closeWaiters() {
 
 // buildFinishPayload assembles the agent-facing finish result, rendering
 // the prompt through the template chain.
-func buildFinishPayload(cfg *config.Config, sess *review.Session, mode string, approved bool) ipc.FinishPayload {
+func buildFinishPayload(cfg *config.Config, sess *review.Session, mode *reviewMode, approved bool) ipc.FinishPayload {
 	unresolved := sess.CJ.ListComments(true)
 	all := sess.CJ.ListComments(false)
 
@@ -177,13 +177,15 @@ func buildFinishPayload(cfg *config.Config, sess *review.Session, mode string, a
 
 	nextCmd := ""
 	if !approved {
-		nextCmd = "tcrit --session " + sess.Key
+		nextCmd = nextRoundCommand(sess, mode)
 	}
 
 	ctx := prompt.Context{
 		ReviewPath:        sess.Path(),
 		SessionKey:        sess.Key,
-		Mode:              mode,
+		Mode:              mode.promptMode(),
+		InternalMode:      mode.internalMode(),
+		PlanSlug:          mode.planSlug,
 		UnresolvedCount:   len(unresolved),
 		TotalCount:        len(all),
 		FilesWithComments: filesWithComments,
@@ -204,4 +206,23 @@ func buildFinishPayload(cfg *config.Config, sess *review.Session, mode string, a
 		Comments:    comments,
 		NextCommand: nextCmd,
 	}
+}
+
+// nextRoundCommand builds the command the agent runs to start the next
+// round.  Plan sessions reconnect through `tcrit plan` so the revised plan
+// content is versioned; the original file path is recovered from the
+// session's recorded cli_args when this process was spawned without it.
+func nextRoundCommand(sess *review.Session, mode *reviewMode) string {
+	if !mode.plan() {
+		return "tcrit --session " + sess.Key
+	}
+	planFile := mode.planFile
+	if planFile == "" && len(sess.CJ.CliArgs) >= 4 && sess.CJ.CliArgs[0] == "plan" {
+		planFile = sess.CJ.CliArgs[3]
+	}
+	cmd := "tcrit plan --name " + mode.planSlug
+	if planFile != "" {
+		cmd += " " + planFile
+	}
+	return cmd
 }

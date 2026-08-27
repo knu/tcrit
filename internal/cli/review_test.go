@@ -159,7 +159,7 @@ func TestBuildFinishPayloadUnresolved(t *testing.T) {
 	})
 	cfg := &config.Config{}
 
-	payload := buildFinishPayload(cfg, sess, "diff", false)
+	payload := buildFinishPayload(cfg, sess, &reviewMode{ref: "HEAD"}, false)
 
 	if payload.Approved {
 		t.Error("expected unapproved payload")
@@ -186,7 +186,7 @@ func TestBuildFinishPayloadApproved(t *testing.T) {
 	sess := newPayloadSession(t)
 	cfg := &config.Config{}
 
-	payload := buildFinishPayload(cfg, sess, "files", true)
+	payload := buildFinishPayload(cfg, sess, &reviewMode{docPath: "doc.md"}, true)
 
 	if !payload.Approved || len(payload.Comments) != 0 || payload.NextCommand != "" {
 		t.Errorf("unexpected payload: %+v", payload)
@@ -198,7 +198,7 @@ func TestBuildFinishPayloadApproved(t *testing.T) {
 	sess.SetFileComments("a.go", "", []review.Comment{
 		{ID: "c_1", StartLine: 1, EndLine: 1, Body: "x", Resolved: true},
 	})
-	payload = buildFinishPayload(cfg, sess, "files", true)
+	payload = buildFinishPayload(cfg, sess, &reviewMode{docPath: "doc.md"}, true)
 	if payload.Prompt != "Review approved. All comments are resolved — proceed with implementation." {
 		t.Errorf("prompt = %q", payload.Prompt)
 	}
@@ -210,8 +210,33 @@ func TestBuildFinishPayloadUsesConfigPromptOverride(t *testing.T) {
 		"on_finish_approved": "inline:Custom approved for {{.session_key}}",
 	}}
 
-	payload := buildFinishPayload(cfg, sess, "files", true)
+	payload := buildFinishPayload(cfg, sess, &reviewMode{docPath: "doc.md"}, true)
 	if want := "Custom approved for " + sess.Key; payload.Prompt != want {
 		t.Errorf("prompt = %q, want %q", payload.Prompt, want)
+	}
+}
+
+func TestBuildFinishPayloadPlanMode(t *testing.T) {
+	sess := newPayloadSession(t)
+	sess.CJ.CliArgs = []string{"plan", "--name", "my-plan", "docs/plan.md"}
+	sess.SetFileComments("current.md", "", []review.Comment{
+		{ID: "c_1", StartLine: 1, EndLine: 1, Body: "clarify"},
+	})
+	cfg := &config.Config{}
+	mode := &reviewMode{docPath: "current.md", planSlug: "my-plan"}
+
+	payload := buildFinishPayload(cfg, sess, mode, false)
+
+	if want := "tcrit plan --name my-plan docs/plan.md"; payload.NextCommand != want {
+		t.Errorf("NextCommand = %q, want %q", payload.NextCommand, want)
+	}
+	for _, want := range []string{
+		"Revise the plan to address each comment.",
+		"tcrit comment --plan my-plan --reply-to <id>",
+		payload.NextCommand,
+	} {
+		if !strings.Contains(payload.Prompt, want) {
+			t.Errorf("prompt missing %q:\n%s", want, payload.Prompt)
+		}
 	}
 }

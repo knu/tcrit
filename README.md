@@ -104,6 +104,18 @@ tcrit status --code
 5. The agent edits the files, replies with `tcrit comment --reply-to`, and runs the printed `tcrit --session <id>` to start the next round; the waiting TUI reloads with the fixes and replies
 6. Resolve comments with `r` and approve to end the loop
 
+## Plan Review (versioned)
+
+```bash
+tcrit plan docs/plans/my-plan.md            # slug derived from the first heading
+tcrit plan --name auth docs/plans/plan.md   # pinned slug
+```
+
+Saves the document as an immutable numbered version under
+`$XDG_STATE_HOME/tcrit/plans/<slug>/` and opens a review of the latest
+version. Re-running with the same slug saves the next version and starts
+the next review round; comments carry forward onto the revised text.
+
 ## Document Review (single file)
 
 ```bash
