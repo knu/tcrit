@@ -32,8 +32,30 @@ const (
 	noModal modalType = iota
 	commentModal
 	editModal
-	approveModal
+	finishModal
 )
+
+// FinishEvent is emitted on the finish channel when the reviewer finishes a
+// round.  The runner turns it into a payload for blocked agent clients.
+type FinishEvent struct {
+	Approved bool
+}
+
+// RoundStartMsg tells the TUI an agent requested the next review round:
+// reload comments (including agent replies) and file contents, and advance
+// the round counter.
+type RoundStartMsg struct{}
+
+// AppConfig carries the cross-cutting dependencies of the TUI.
+type AppConfig struct {
+	Session *review.Session
+	Author  string
+	// Serving is true when an agent client may be blocked on this review;
+	// an unresolved finish then parks the TUI in a waiting state instead
+	// of quitting.
+	Serving  bool
+	FinishCh chan<- FinishEvent
+}
 
 // gutterWidth is the total width of the left gutter: line number (5) + marker (1) + space (1).
 const gutterWidth = 7
@@ -58,6 +80,12 @@ type AppModel struct {
 	session *review.Session
 	author  string
 
+	// Finish-flow state (see AppConfig).
+	serving  bool
+	finishCh chan<- FinishEvent
+	waiting  bool
+	baseRef  string
+
 	detached bool
 
 	contentViewport viewport.Model
@@ -68,10 +96,6 @@ type AppModel struct {
 	editingID  string // ID of the comment being edited
 	modalFocus int    // 0=textarea, 1=save button, 2=cancel button, 3=delete button (edit modal only)
 
-	// True once the reviewer adds or edits a comment in this session;
-	// quitting without new feedback offers to approve and clear comments.
-	newFeedback bool
-
 	err error
 }
 
@@ -80,7 +104,7 @@ func (m *AppModel) tab() *FileTab {
 	return &m.tabs[m.activeTab]
 }
 
-func NewApp(filePath string, sess *review.Session, author string) AppModel {
+func NewApp(filePath string, cfg AppConfig) AppModel {
 	ta := textarea.New()
 	ta.Placeholder = "Type your comment..."
 	ta.ShowLineNumbers = false
@@ -95,9 +119,11 @@ func NewApp(filePath string, sess *review.Session, author string) AppModel {
 		filePath:        filePath,
 		tabs:            []FileTab{tab},
 		activeTab:       0,
-		session:         sess,
-		author:          author,
-		detached:        os.Getenv("CRIT_DETACHED") == "1",
+		session:         cfg.Session,
+		author:          cfg.Author,
+		serving:         cfg.Serving,
+		finishCh:        cfg.FinishCh,
+		detached:        os.Getenv("TCRIT_DETACHED") == "1",
 		contentViewport: viewport.New(),
 		commentViewport: viewport.New(),
 		modalTextarea:   ta,
@@ -105,7 +131,7 @@ func NewApp(filePath string, sess *review.Session, author string) AppModel {
 }
 
 // NewCodeReviewApp creates a multi-file code review TUI.
-func NewCodeReviewApp(files []gitpkg.FileChange, ref string, sess *review.Session, author string) AppModel {
+func NewCodeReviewApp(files []gitpkg.FileChange, ref string, cfg AppConfig) AppModel {
 	ta := textarea.New()
 	ta.Placeholder = "Type your comment..."
 	ta.ShowLineNumbers = false
@@ -138,9 +164,12 @@ func NewCodeReviewApp(files []gitpkg.FileChange, ref string, sess *review.Sessio
 		tabs:            tabs,
 		activeTab:       0,
 		multiFile:       true,
-		session:         sess,
-		author:          author,
-		detached:        os.Getenv("CRIT_DETACHED") == "1",
+		session:         cfg.Session,
+		author:          cfg.Author,
+		serving:         cfg.Serving,
+		finishCh:        cfg.FinishCh,
+		baseRef:         ref,
+		detached:        os.Getenv("TCRIT_DETACHED") == "1",
 		contentViewport: viewport.New(),
 		commentViewport: viewport.New(),
 		modalTextarea:   ta,
@@ -218,6 +247,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		return m, nil
 
+	case RoundStartMsg:
+		m.startNextRound()
+		return m, nil
+
 	case tea.KeyPressMsg:
 		return m.handleKeyPress(msg)
 	}
@@ -242,8 +275,16 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.modal == commentModal || m.modal == editModal {
 		return m.handleTextModal(msg)
 	}
-	if m.modal == approveModal {
-		return m.handleApproveModal(msg)
+	if m.modal == finishModal {
+		return m.handleFinishModal(msg)
+	}
+
+	// While waiting for the agent's next round, only quitting is possible.
+	if m.waiting {
+		if key.Matches(msg, keys.Quit) {
+			return m, tea.Quit
+		}
+		return m, nil
 	}
 
 	// Tab search input mode
@@ -255,16 +296,11 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	switch {
 	case key.Matches(msg, keys.Quit):
-		// Auto-save all tabs on quit
+		// Finishing is an explicit act: q opens the Approve/Finish modal.
 		m.persist()
-		// Quitting without new feedback while older comments remain is
-		// ambiguous: offer to approve by clearing them.
-		if !m.newFeedback && m.totalComments() > 0 {
-			m.modal = approveModal
-			m.modalFocus = 0
-			return m, nil
-		}
-		return m, tea.Quit
+		m.modal = finishModal
+		m.modalFocus = 0
+		return m, nil
 
 	case key.Matches(msg, keys.Cancel):
 		// Esc cancels selection
@@ -511,6 +547,14 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.scrollToChunk(chunk)
 				return m, nil
 			}
+		case key.Matches(msg, keys.Resolve):
+			if t.cursorOnAnnotation {
+				anns := m.annotationsAfterLine(t.cursorLine)
+				if t.cursorAnnoIdx < len(anns) {
+					m.toggleResolve(anns[t.cursorAnnoIdx].id)
+				}
+				return m, nil
+			}
 		case key.Matches(msg, keys.Confirm):
 			if t.cursorOnAnnotation {
 				anns := m.annotationsAfterLine(t.cursorLine)
@@ -572,6 +616,12 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Toggle resolution on the selected annotation
+		if key.Matches(msg, keys.Resolve) {
+			m.toggleResolve(t.sidebarItems[t.sidebarCursor].id)
+			return m, nil
+		}
+
 		// Enter to edit selected annotation
 		if key.Matches(msg, keys.Confirm) {
 			sel := t.sidebarItems[t.sidebarCursor]
@@ -624,7 +674,6 @@ func (m *AppModel) modalSubmit() {
 		}
 		t.state.Comments = append(t.state.Comments, c)
 	}
-	m.newFeedback = true
 
 	m.persist()
 	m.modal = noModal
@@ -666,15 +715,35 @@ func (m *AppModel) totalComments() int {
 	return n
 }
 
-// approveAndClear removes all comments from every tab, marking the review
-// as approved for consumers that treat zero comments as approval.
-func (m *AppModel) approveAndClear() {
-	for i := range m.tabs {
-		if m.tabs[i].state != nil {
-			m.tabs[i].state.Comments = nil
+// toggleResolve flips a comment's resolution state, stamping ResolvedRound
+// with the current round on resolve (mirroring crit's reply semantics).
+func (m *AppModel) toggleResolve(id string) {
+	t := m.tab()
+	if t.state == nil {
+		return
+	}
+	round := 0
+	if m.session != nil {
+		round = m.session.CJ.ReviewRound
+	}
+	for i := range t.state.Comments {
+		if t.state.Comments[i].ID != id {
+			continue
 		}
+		c := &t.state.Comments[i]
+		if c.Resolved {
+			c.Resolved = false
+			c.ResolvedRound = 0
+		} else {
+			c.Resolved = true
+			c.ResolvedRound = round
+		}
+		c.UpdatedAt = review.Now()
+		break
 	}
 	m.persist()
+	m.rebuildContent()
+	m.updateCommentSidebar()
 }
 
 // sessionComments returns the session's stored comments for a file path.
@@ -718,8 +787,10 @@ func (m *AppModel) persist() {
 	}
 }
 
-// handleApproveModal processes keys for the approve-on-quit confirmation.
-func (m *AppModel) handleApproveModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+// handleFinishModal processes keys for the finish-review confirmation.
+// Confirming emits the finish event; q abandons the session without
+// finishing (blocked clients see the connection close).
+func (m *AppModel) handleFinishModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if key.Matches(msg, keys.Cancel) {
 		m.modal = noModal
 		return m, nil
@@ -727,21 +798,100 @@ func (m *AppModel) handleApproveModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 
 	switch msg.String() {
 	case "y", "Y":
-		m.approveAndClear()
-		return m, tea.Quit
-	case "n", "N", "q", "ctrl+c":
+		return m.doFinish()
+	case "n", "N":
 		m.modal = noModal
+		return m, nil
+	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "left", "right", "h", "l", "tab", "shift+tab":
 		m.modalFocus = 1 - m.modalFocus
 		return m, nil
 	case "enter":
 		if m.modalFocus == 0 {
-			m.approveAndClear()
+			return m.doFinish()
 		}
-		return m, tea.Quit
+		m.modal = noModal
+		return m, nil
 	}
 	return m, nil
+}
+
+// unresolvedTotal counts unresolved comments across tabs and the session's
+// review-level comments.
+func (m *AppModel) unresolvedTotal() int {
+	n := 0
+	for i := range m.tabs {
+		if m.tabs[i].state == nil {
+			continue
+		}
+		for _, c := range m.tabs[i].state.Comments {
+			if !c.Resolved {
+				n++
+			}
+		}
+	}
+	if m.session != nil {
+		for _, c := range m.session.CJ.ReviewComments {
+			if !c.Resolved {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// doFinish persists the review, emits the finish event, and either quits
+// (approved, or nothing is waiting on this review) or parks in the waiting
+// state until the agent starts the next round.
+func (m *AppModel) doFinish() (tea.Model, tea.Cmd) {
+	m.persist()
+	approved := m.unresolvedTotal() == 0
+	if m.finishCh != nil {
+		m.finishCh <- FinishEvent{Approved: approved}
+	}
+	m.modal = noModal
+	if approved || !m.serving {
+		return m, tea.Quit
+	}
+	m.waiting = true
+	return m, nil
+}
+
+// startNextRound reloads the session from disk (picking up agent replies),
+// advances the round counter, and refreshes documents and diffs.
+func (m *AppModel) startNextRound() {
+	if m.session != nil {
+		if fresh, err := review.OpenSessionAt(m.session.Key, m.session.Dir); err == nil {
+			m.session.CJ = fresh.CJ
+		}
+		m.session.CJ.ReviewRound++
+		if err := m.session.Save(); err != nil {
+			m.err = err
+		}
+	}
+	for i := range m.tabs {
+		t := &m.tabs[i]
+		t.state = &fileReview{Comments: m.sessionComments(t.path)}
+		if t.isBinary || t.isDeleted {
+			continue
+		}
+		doc, _ := document.Load(t.path)
+		t.doc = doc
+		t.chromaLines = nil
+		t.deletedLineCache = nil
+		if m.multiFile && m.baseRef != "" {
+			if diff, err := gitpkg.DiffFile(t.path, m.baseRef); err == nil && diff != nil {
+				t.changedLines = diff.ChangedLines
+				t.deletedAfter = diff.DeletedAfter
+				t.changeChunks = computeChangeChunks(diff)
+			}
+		}
+		t.ensureHighlightCache()
+	}
+	m.waiting = false
+	m.rebuildContent()
+	m.updateCommentSidebar()
 }
 
 func (m *AppModel) handleTextModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -1688,6 +1838,21 @@ func (m AppModel) View() tea.View {
 		return v
 	}
 
+	if m.waiting {
+		round := 0
+		if m.session != nil {
+			round = m.session.CJ.ReviewRound
+		}
+		msg := fmt.Sprintf(
+			"\n  Round %d finished — %d unresolved comment(s) sent to the agent.\n\n"+
+				"  Waiting for the agent to address them and start the next round…\n\n"+
+				"  q: quit without waiting",
+			round, m.unresolvedTotal())
+		v := tea.NewView(msg)
+		v.AltScreen = true
+		return v
+	}
+
 	if m.width == 0 || len(m.tabs) == 0 || m.tab().state == nil {
 		v := tea.NewView("Loading...")
 		v.AltScreen = true
@@ -2093,16 +2258,23 @@ func (m AppModel) renderWithModal(background string) string {
 		content += m.modalTextarea.View() + "\n\n" + buttons
 		modalContent = modalStyle.Width(modalWidth).Render(content)
 
-	case approveModal:
-		title := modalTitleStyle.Render("Approve review?")
-		total := m.totalComments()
-		info := fmt.Sprintf(
-			"No new comments were added in this session.\nApproving clears the %d remaining comment(s).", total)
+	case finishModal:
+		unresolved := m.unresolvedTotal()
+		var title, info, confirmLabel string
+		if unresolved == 0 {
+			title = modalTitleStyle.Render("Approve review?")
+			info = "No unresolved comments — approving ends the review."
+			confirmLabel = "Approve"
+		} else {
+			title = modalTitleStyle.Render("Finish review?")
+			info = fmt.Sprintf("%d unresolved comment(s) will be sent to the agent.", unresolved)
+			confirmLabel = "Finish Review"
+		}
 
-		approveBtn := m.renderModalButton("Approve", "y", m.modalFocus == 0)
-		keepBtn := m.renderModalButton("Quit without approving", "n", m.modalFocus == 1)
-		buttons := lipgloss.JoinHorizontal(lipgloss.Center, approveBtn, "  ", keepBtn)
-		hint := footerStyle.Render("esc: back to review")
+		confirmBtn := m.renderModalButton(confirmLabel, "y", m.modalFocus == 0)
+		cancelBtn := m.renderModalButton("Keep reviewing", "n", m.modalFocus == 1)
+		buttons := lipgloss.JoinHorizontal(lipgloss.Center, confirmBtn, "  ", cancelBtn)
+		hint := footerStyle.Render("esc: back to review · q: quit without finishing")
 
 		modalContent = modalStyle.Width(modalWidth).Render(
 			title + "\n" + info + "\n\n" + buttons + "\n" + hint)

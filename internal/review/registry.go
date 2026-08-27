@@ -20,6 +20,13 @@ type SessionEntry struct {
 	Branch     string   `json:"branch,omitempty"`
 	ReviewPath string   `json:"review_path"`
 	StartedAt  string   `json:"started_at"`
+	PID        int      `json:"pid,omitempty"`
+	SocketPath string   `json:"socket_path,omitempty"`
+}
+
+// SocketPathFor returns the Unix socket path for a session key.
+func SocketPathFor(key string) string {
+	return filepath.Join(SessionsDir(), key+".sock")
 }
 
 // SessionsDir returns the directory holding session registry entries.

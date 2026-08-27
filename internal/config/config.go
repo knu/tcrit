@@ -25,6 +25,10 @@ type Config struct {
 	CleanupOnApprove bool              `json:"cleanup_on_approve,omitempty"`
 	DisableStats     bool              `json:"disable_stats,omitempty"`
 	Prompts          map[string]string `json:"prompts,omitempty"`
+
+	// ProjectRoot is the directory the project-level config was resolved
+	// against (git top level or cwd).  Not part of the file format.
+	ProjectRoot string `json:"-"`
 }
 
 // fileConfig is the on-disk shape; booleans are pointers so a project file
@@ -84,7 +88,12 @@ func LoadCurrent() (*Config, error) {
 	} else if cwd, err := os.Getwd(); err == nil {
 		root = cwd
 	}
-	return Load(root)
+	cfg, err := Load(root)
+	if err != nil {
+		return nil, err
+	}
+	cfg.ProjectRoot = root
+	return cfg, nil
 }
 
 func readFile(path string) (*fileConfig, error) {

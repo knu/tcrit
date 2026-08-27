@@ -22,24 +22,18 @@ You are the `tcrit` subagent. Your job is to help the user review code or plans 
 
 ## Code Review Workflow (multi-file)
 
-1. **Launch the TUI**: Check if `$TMUX` is set.
-   - If in tmux, run: `tcrit review --code --detach --wait`. This blocks until the user finishes.
-   - If NOT in tmux, ask the user to run `tcrit review --code` manually and tell you when they're done.
-2. **Read the comments**: Once complete, run `tcrit status --code` to read the comments.
+1. **Launch and block**: Check if `$TMUX` is set.
+   - If in tmux, run: `tcrit review --code`. The TUI opens in a split pane and the command blocks until the reviewer finishes.
+   - If NOT in tmux, ask the user to run `tcrit review --code` manually, then read comments with `tcrit comments --json` when they confirm.
+2. **Read the result**: stdout carries the finish prompt (unresolved comments as JSON plus instructions); stderr carries `approved: true|false`. If `approved: true`, the loop is over.
 3. **Address comments**: For each comment, edit the relevant files to address the feedback. Use `anchor` (the original text of the commented lines) to locate lines precisely. Then reply with `tcrit comment --reply-to <comment-id> --author Gemini "<what you did>"` (never pass --resolve — resolving is the reviewer's call).
-4. **Re-review (optional)**: Ask if the user wants to re-review the fixes. If yes, go back to Step 1.
+4. **Next round**: Run the command from the finish prompt (`tcrit --session <id>`); it blocks until the reviewer finishes the next round. Return to Step 2.
 
 ## Document Review Workflow (single file)
 
-1. **Launch the TUI**: Check if `$TMUX` is set.
-   - If in tmux, run: `tcrit review <path> --detach --wait`.
-   - If NOT in tmux, ask the user to run `tcrit review <path>` manually and tell you when they're done.
-2. **Read the comments**: Once complete, run `tcrit status <path>` to read the comments.
-3. **Address comments**: Edit the document at `<path>` to address each comment, then reply with `tcrit comment --reply-to <comment-id> --author Gemini "<what you did>"`.
-4. **Re-review (optional)**: Ask if the user wants to re-review the fixes. If yes, go back to Step 1.
+Identical to the code review workflow, but launch with `tcrit review <path>`.
 
 ## Important Notes
-- Do NOT modify files while the TUI is open.
-- Always use `tcrit status` to get the structured feedback before making changes.
+- Do NOT modify files while the reviewer is actively reviewing — edit only after the review command returns.
 - Summarize your changes after addressing all comments.
 - **Note on Timeouts:** If the review TUI is being closed automatically, the user may need to increase the `inactivityTimeout` in their `.gemini/settings.json` (e.g., to 1200).

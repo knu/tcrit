@@ -4,530 +4,214 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/knu/tcrit/internal/config"
+	"github.com/knu/tcrit/internal/review"
 )
 
-func TestBuildTmuxPaneCommand(t *testing.T) {
-	cmd := buildTmuxPaneCommand("/usr/local/bin/crit", "/home/user/doc.md", "crit-review-1234")
-
-	if !strings.Contains(cmd, "'/usr/local/bin/crit'") {
-		t.Errorf("expected escaped crit binary in command, got: %s", cmd)
-	}
-	if !strings.Contains(cmd, "'/home/user/doc.md'") {
-		t.Errorf("expected escaped file path in command, got: %s", cmd)
-	}
-	if !strings.Contains(cmd, "tmux wait-for -S crit-review-1234") {
-		t.Errorf("expected wait-for signal in command, got: %s", cmd)
-	}
-}
-
-func TestBuildTmuxPaneCommandEscapesQuotes(t *testing.T) {
-	cmd := buildTmuxPaneCommand("/bin/crit", "/home/user/it's a file.md", "ch-1")
-
-	if !strings.Contains(cmd, "'/home/user/it'\\''s a file.md'") {
-		t.Errorf("expected escaped single quotes in path, got: %s", cmd)
-	}
-}
-
-func TestSplitWindowArgsTargetsInvokingPane(t *testing.T) {
-	t.Setenv("TMUX_PANE", "%42")
-
-	args := splitWindowArgs(true, "crit review")
-	want := []string{"split-window", "-h", "-t", "%42", "-p", "70", "crit review"}
-	if strings.Join(args, " ") != strings.Join(want, " ") {
-		t.Errorf("splitWindowArgs = %v, want %v", args, want)
-	}
-
-	args = splitWindowArgs(false, "crit review")
-	want = []string{"split-window", "-h", "-t", "%42", "crit review"}
-	if strings.Join(args, " ") != strings.Join(want, " ") {
-		t.Errorf("splitWindowArgs = %v, want %v", args, want)
-	}
-}
-
-func TestSplitWindowArgsWithoutPaneEnv(t *testing.T) {
-	t.Setenv("TMUX_PANE", "")
-
-	args := splitWindowArgs(true, "crit review")
-	if containsArg(args, "-t") {
-		t.Errorf("expected no -t flag when TMUX_PANE is unset, got: %v", args)
-	}
-}
-
 func TestShellEscape(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
+	tests := []struct{ in, want string }{
 		{"simple", "'simple'"},
-		{"with spaces", "'with spaces'"},
-		{"it's", "'it'\\''s'"},
-		{"", "''"},
+		{"with space", "'with space'"},
+		{"it's", `'it'\''s'`},
 	}
-
 	for _, tt := range tests {
-		got := shellEscape(tt.input)
-		if got != tt.expected {
-			t.Errorf("shellEscape(%q) = %q, want %q", tt.input, got, tt.expected)
+		if got := shellEscape(tt.in); got != tt.want {
+			t.Errorf("shellEscape(%q) = %q, want %q", tt.in, got, tt.want)
 		}
 	}
 }
 
-func TestDetachRequiresTmux(t *testing.T) {
-	tmp, err := os.CreateTemp("", "crit-test-*.md")
-	if err != nil {
-		t.Fatal(err)
+func TestSplitWindowArgsTargetsInvokingPaneAndCwd(t *testing.T) {
+	t.Setenv("TMUX_PANE", "%42")
+	args := splitWindowArgs(true, "cmd")
+
+	idx := slices.Index(args, "-t")
+	if idx < 0 || args[idx+1] != "%42" {
+		t.Errorf("expected -t %%42 in %v", args)
 	}
-	defer os.Remove(tmp.Name())
-	tmp.Close()
-
-	orig := os.Getenv("TMUX")
-	os.Setenv("TMUX", "")
-	defer os.Setenv("TMUX", orig)
-
-	err = runDetachedReview(tmp.Name())
-	if err == nil {
-		t.Fatal("expected error when TMUX is not set")
+	cwd, _ := os.Getwd()
+	cIdx := slices.Index(args, "-c")
+	if cIdx < 0 || args[cIdx+1] != cwd {
+		t.Errorf("expected -c %s in %v", cwd, args)
 	}
-	if !strings.Contains(err.Error(), "requires a tmux session") {
-		t.Errorf("expected 'requires a tmux session' error, got: %s", err)
+	if !slices.Contains(args, "-p") {
+		t.Errorf("expected -p in %v", args)
 	}
-}
-
-func TestCodeReviewDetachRequiresTmux(t *testing.T) {
-	orig := os.Getenv("TMUX")
-	os.Setenv("TMUX", "")
-	defer os.Setenv("TMUX", orig)
-
-	// Simulate --detach --code flags
-	reviewDetach = true
-	reviewCode = true
-	defer func() {
-		reviewDetach = false
-		reviewCode = false
-	}()
-
-	err := runCodeReview()
-	if err == nil {
-		t.Fatal("expected error when TMUX is not set")
-	}
-	if !strings.Contains(err.Error(), "requires a tmux session") {
-		t.Errorf("expected 'requires a tmux session' error, got: %s", err)
+	if args[len(args)-1] != "cmd" {
+		t.Errorf("expected command last in %v", args)
 	}
 }
 
-// TestCodeReviewDetachRoutesToDetachedPath verifies that runCodeReview with
-// --detach enters the detached code path rather than launching the TUI directly.
-// This is the fix for https://github.com/kevindutra/crit/issues/2 where
-// --code --detach would bypass the detach check and fail with a TTY error.
-func TestCodeReviewDetachRoutesToDetachedPath(t *testing.T) {
-	origTmux := os.Getenv("TMUX")
-	os.Setenv("TMUX", "/tmp/tmux-test/default,12345,0")
-	defer os.Setenv("TMUX", origTmux)
-
-	origPath := os.Getenv("PATH")
-	os.Setenv("PATH", "")
-	defer os.Setenv("PATH", origPath)
-
-	reviewDetach = true
-	reviewCode = true
-	defer func() {
-		reviewDetach = false
-		reviewCode = false
-	}()
-
-	err := runCodeReview()
-	if err == nil {
-		t.Fatal("expected error from detached path (tmux not on PATH), but got nil")
+func TestSplitWindowArgsWithoutSize(t *testing.T) {
+	t.Setenv("TMUX_PANE", "")
+	args := splitWindowArgs(false, "cmd")
+	if slices.Contains(args, "-p") {
+		t.Errorf("expected no -p in %v", args)
 	}
-
-	// If we reach the detached path, the error will be about the tmux binary
-	// not being found. If we had NOT entered the detached path, the error
-	// would be about git repo or TUI instead.
-	if !strings.Contains(err.Error(), "tmux binary not found") {
-		t.Errorf("expected 'tmux binary not found' error (proving detached path was taken), got: %s", err)
+	if slices.Contains(args, "-t") {
+		t.Errorf("expected no -t without TMUX_PANE in %v", args)
 	}
 }
 
-// TestWaitWithoutDetachIsIgnored verifies that --wait without --detach
-// does not enter the tmux/detach path — it resets the flag and continues
-// down the normal (non-detached) code path.
-func TestWaitWithoutDetachIsIgnored(t *testing.T) {
-	reviewDetach = false
-	reviewWait = true
-	reviewCode = true
-	defer func() {
-		reviewDetach = false
-		reviewWait = false
-		reviewCode = false
-	}()
-
-	err := runCodeReview()
-
-	// --wait should have been ignored, so we should NOT get a tmux error.
-	// The test environment will produce some other error (TUI/git), but
-	// the key assertion is that we never entered the tmux detach path.
-	if err != nil && strings.Contains(err.Error(), "tmux") {
-		t.Errorf("--wait without --detach should not enter tmux path, got: %s", err)
-	}
-
-	// The flag should have been reset to false
-	if reviewWait {
-		t.Error("expected reviewWait to be reset to false")
-	}
-}
-
-// stubExecDeps replaces lookPath, resolveExec, and runCommand with test
-// doubles that avoid shelling out. It returns a pointer to a slice that
-// accumulates the args of every command passed to runCommand, and a cleanup
-// function that restores the originals.
-func stubExecDeps(t *testing.T) (*[][]string, func()) {
+// captureSpawns replaces the shell seams and records tmux invocations.
+func captureSpawns(t *testing.T) *[][]string {
 	t.Helper()
-
-	origRun := runCommand
-	origLook := lookPath
-	origResolve := resolveExec
-
-	var commands [][]string
-
-	lookPath = func(name string) (string, error) {
-		return "/usr/bin/" + name, nil
-	}
-	resolveExec = func() (string, error) {
-		return "/usr/local/bin/crit", nil
-	}
+	var calls [][]string
+	origRun, origLook, origResolve := runCommand, lookPath, resolveExec
 	runCommand = func(cmd *exec.Cmd) error {
-		commands = append(commands, cmd.Args)
+		calls = append(calls, cmd.Args)
 		return nil
 	}
+	lookPath = func(string) (string, error) { return "/usr/bin/tmux", nil }
+	resolveExec = func() (string, error) { return "/usr/local/bin/tcrit", nil }
+	t.Cleanup(func() {
+		runCommand, lookPath, resolveExec = origRun, origLook, origResolve
+	})
+	return &calls
+}
 
-	return &commands, func() {
-		runCommand = origRun
-		lookPath = origLook
-		resolveExec = origResolve
+func TestSpawnTUIPaneCodeMode(t *testing.T) {
+	calls := captureSpawns(t)
+
+	mode := &reviewMode{ref: "HEAD"}
+	if err := spawnTUIPane(mode); err != nil {
+		t.Fatalf("spawnTUIPane: %v", err)
+	}
+
+	if len(*calls) != 1 {
+		t.Fatalf("expected 1 tmux call, got %d", len(*calls))
+	}
+	cmd := (*calls)[0][len((*calls)[0])-1]
+	for _, want := range []string{"TCRIT_DETACHED=1", "_tui", "--base 'HEAD'"} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("pane command missing %q: %s", want, cmd)
+		}
 	}
 }
 
-// TestDetachedCodeReviewWaitCallsWaitFor verifies that --detach --wait --code
-// runs both the split-window command and the wait-for command.
-func TestDetachedCodeReviewWaitCallsWaitFor(t *testing.T) {
-	origTmux := os.Getenv("TMUX")
-	os.Setenv("TMUX", "/tmp/tmux-test/default,12345,0")
-	defer os.Setenv("TMUX", origTmux)
+func TestSpawnTUIPaneDocMode(t *testing.T) {
+	calls := captureSpawns(t)
 
-	commands, cleanup := stubExecDeps(t)
-	defer cleanup()
-
-	reviewDetach = true
-	reviewWait = true
-	reviewCode = true
-	defer func() {
-		reviewDetach = false
-		reviewWait = false
-		reviewCode = false
-	}()
-
-	err := runCodeReview()
-	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+	mode := &reviewMode{docPath: "docs/it's plan.md"}
+	if err := spawnTUIPane(mode); err != nil {
+		t.Fatalf("spawnTUIPane: %v", err)
 	}
 
-	if len(*commands) != 2 {
-		t.Fatalf("expected 2 commands (split-window + wait-for), got %d: %v", len(*commands), *commands)
+	cmd := (*calls)[0][len((*calls)[0])-1]
+	if !strings.Contains(cmd, `it'\''s plan.md`) {
+		t.Errorf("pane command should escape quotes: %s", cmd)
 	}
-
-	split := (*commands)[0]
-	if !containsArg(split, "split-window") {
-		t.Errorf("first command should be split-window, got: %v", split)
-	}
-
-	wait := (*commands)[1]
-	if !containsArg(wait, "wait-for") {
-		t.Errorf("second command should be wait-for, got: %v", wait)
+	if strings.Contains(cmd, "--base") {
+		t.Errorf("doc mode should not pass --base: %s", cmd)
 	}
 }
 
-// TestDetachedCodeReviewNoWaitSkipsWaitFor verifies that --detach without
-// --wait only runs the split-window command and does NOT call wait-for.
-func TestDetachedCodeReviewNoWaitSkipsWaitFor(t *testing.T) {
-	origTmux := os.Getenv("TMUX")
-	os.Setenv("TMUX", "/tmp/tmux-test/default,12345,0")
-	defer os.Setenv("TMUX", origTmux)
-
-	commands, cleanup := stubExecDeps(t)
-	defer cleanup()
-
-	reviewDetach = true
-	reviewWait = false
-	reviewCode = true
-	defer func() {
-		reviewDetach = false
-		reviewCode = false
-	}()
-
-	err := runCodeReview()
-	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
-	}
-
-	if len(*commands) != 1 {
-		t.Fatalf("expected 1 command (split-window only), got %d: %v", len(*commands), *commands)
-	}
-
-	if !containsArg((*commands)[0], "split-window") {
-		t.Errorf("expected split-window command, got: %v", (*commands)[0])
-	}
-}
-
-// TestDetachedReviewWaitCallsWaitFor verifies the single-file --detach --wait
-// path runs both split-window and wait-for.
-func TestDetachedReviewWaitCallsWaitFor(t *testing.T) {
-	origTmux := os.Getenv("TMUX")
-	os.Setenv("TMUX", "/tmp/tmux-test/default,12345,0")
-	defer os.Setenv("TMUX", origTmux)
-
-	commands, cleanup := stubExecDeps(t)
-	defer cleanup()
-
-	reviewWait = true
-	defer func() { reviewWait = false }()
-
-	tmp, err := os.CreateTemp("", "crit-test-*.md")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.Remove(tmp.Name())
-	tmp.Close()
-
-	err = runDetachedReview(tmp.Name())
-	// The wait path tries to Load() the review state file, which won't exist.
-	// That's fine — we just care that wait-for was called before that error.
-	if err != nil && !strings.Contains(err.Error(), "reading review state") {
-		t.Fatalf("unexpected error: %s", err)
-	}
-
-	if len(*commands) != 2 {
-		t.Fatalf("expected 2 commands (split-window + wait-for), got %d: %v", len(*commands), *commands)
-	}
-
-	if !containsArg((*commands)[1], "wait-for") {
-		t.Errorf("second command should be wait-for, got: %v", (*commands)[1])
-	}
-}
-
-// TestDetachedCodeReviewFallsBackWithoutPercentage verifies that when the
-// initial split-window with -p 70 fails, it retries without the percentage flag.
-func TestDetachedCodeReviewFallsBackWithoutPercentage(t *testing.T) {
-	origTmux := os.Getenv("TMUX")
-	os.Setenv("TMUX", "/tmp/tmux-test/default,12345,0")
-	defer os.Setenv("TMUX", origTmux)
-
-	origRun := runCommand
-	origLook := lookPath
-	origResolve := resolveExec
-	defer func() {
-		runCommand = origRun
-		lookPath = origLook
-		resolveExec = origResolve
-	}()
-
-	var commands [][]string
-	lookPath = func(name string) (string, error) {
-		return "/usr/bin/" + name, nil
-	}
-	resolveExec = func() (string, error) {
-		return "/usr/local/bin/crit", nil
-	}
+func TestSpawnTUIPaneRetriesWithoutPercentage(t *testing.T) {
+	var calls [][]string
+	origRun, origLook, origResolve := runCommand, lookPath, resolveExec
 	runCommand = func(cmd *exec.Cmd) error {
-		commands = append(commands, cmd.Args)
-		// Fail if -p is present (simulating the tmux percentage error)
-		if containsArg(cmd.Args, "-p") {
-			return fmt.Errorf("exit status 1")
+		calls = append(calls, cmd.Args)
+		if len(calls) == 1 {
+			return fmt.Errorf("size unavailable")
 		}
 		return nil
 	}
+	lookPath = func(string) (string, error) { return "/usr/bin/tmux", nil }
+	resolveExec = func() (string, error) { return "/usr/local/bin/tcrit", nil }
+	t.Cleanup(func() {
+		runCommand, lookPath, resolveExec = origRun, origLook, origResolve
+	})
 
-	reviewDetach = true
-	reviewWait = false
-	reviewCode = true
-	defer func() {
-		reviewDetach = false
-		reviewCode = false
-	}()
-
-	err := runCodeReview()
-	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+	if err := spawnTUIPane(&reviewMode{ref: "HEAD"}); err != nil {
+		t.Fatalf("spawnTUIPane: %v", err)
 	}
-
-	if len(commands) != 2 {
-		t.Fatalf("expected 2 commands (failed split + retry), got %d: %v", len(commands), commands)
+	if len(calls) != 2 {
+		t.Fatalf("expected retry, got %d calls", len(calls))
 	}
-
-	// First attempt should have -p 70
-	if !containsArg(commands[0], "-p") {
-		t.Errorf("first attempt should include -p, got: %v", commands[0])
+	if !slices.Contains(calls[0], "-p") {
+		t.Errorf("first attempt should include -p: %v", calls[0])
 	}
-
-	// Retry should NOT have -p
-	if containsArg(commands[1], "-p") {
-		t.Errorf("retry should not include -p, got: %v", commands[1])
+	if slices.Contains(calls[1], "-p") {
+		t.Errorf("retry should omit -p: %v", calls[1])
 	}
 }
 
-// TestDetachedReviewFallsBackWithoutPercentage verifies the same fallback
-// behavior for single-file review mode.
-func TestDetachedReviewFallsBackWithoutPercentage(t *testing.T) {
-	origTmux := os.Getenv("TMUX")
-	os.Setenv("TMUX", "/tmp/tmux-test/default,12345,0")
-	defer os.Setenv("TMUX", origTmux)
-
-	origRun := runCommand
-	origLook := lookPath
-	origResolve := resolveExec
-	defer func() {
-		runCommand = origRun
-		lookPath = origLook
-		resolveExec = origResolve
-	}()
-
-	var commands [][]string
-	lookPath = func(name string) (string, error) {
-		return "/usr/bin/" + name, nil
-	}
-	resolveExec = func() (string, error) {
-		return "/usr/local/bin/crit", nil
-	}
-	runCommand = func(cmd *exec.Cmd) error {
-		commands = append(commands, cmd.Args)
-		if containsArg(cmd.Args, "-p") {
-			return fmt.Errorf("exit status 1")
-		}
-		return nil
-	}
-
-	reviewWait = false
-	defer func() { reviewWait = false }()
-
-	tmp, err := os.CreateTemp("", "crit-test-*.md")
+func newPayloadSession(t *testing.T) *review.Session {
+	t.Helper()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Chdir(t.TempDir())
+	sess, err := review.OpenSession("", "0123456789ab")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(tmp.Name())
-	tmp.Close()
-
-	err = runDetachedReview(tmp.Name())
-	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
-	}
-
-	if len(commands) != 2 {
-		t.Fatalf("expected 2 commands (failed split + retry), got %d: %v", len(commands), commands)
-	}
-
-	if !containsArg(commands[0], "-p") {
-		t.Errorf("first attempt should include -p, got: %v", commands[0])
-	}
-	if containsArg(commands[1], "-p") {
-		t.Errorf("retry should not include -p, got: %v", commands[1])
-	}
+	return sess
 }
 
-func containsArg(args []string, target string) bool {
-	for _, a := range args {
-		if a == target {
-			return true
+func TestBuildFinishPayloadUnresolved(t *testing.T) {
+	sess := newPayloadSession(t)
+	sess.SetFileComments("a.go", "", []review.Comment{
+		{ID: "c_1", StartLine: 3, EndLine: 3, Body: "fix this"},
+		{ID: "c_2", StartLine: 9, EndLine: 9, Body: "done already", Resolved: true},
+	})
+	cfg := &config.Config{}
+
+	payload := buildFinishPayload(cfg, sess, "diff", false)
+
+	if payload.Approved {
+		t.Error("expected unapproved payload")
+	}
+	if len(payload.Comments) != 1 || payload.Comments[0].ID != "c_1" {
+		t.Errorf("expected only unresolved comments, got %+v", payload.Comments)
+	}
+	if want := "tcrit --session " + sess.Key; payload.NextCommand != want {
+		t.Errorf("NextCommand = %q, want %q", payload.NextCommand, want)
+	}
+	for _, want := range []string{
+		"The review finished with 1 unresolved comment.",
+		`"id": "c_1"`,
+		"tcrit comment --reply-to <comment-id>",
+		payload.NextCommand,
+	} {
+		if !strings.Contains(payload.Prompt, want) {
+			t.Errorf("prompt missing %q:\n%s", want, payload.Prompt)
 		}
 	}
-	return false
 }
 
-// TestDetachedCodeReviewPassesBaseFlag verifies that --base is forwarded
-// to the child crit process in the tmux split command.
-func TestDetachedCodeReviewPassesBaseFlag(t *testing.T) {
-	origTmux := os.Getenv("TMUX")
-	os.Setenv("TMUX", "/tmp/tmux-test/default,12345,0")
-	defer os.Setenv("TMUX", origTmux)
+func TestBuildFinishPayloadApproved(t *testing.T) {
+	sess := newPayloadSession(t)
+	cfg := &config.Config{}
 
-	commands, cleanup := stubExecDeps(t)
-	defer cleanup()
+	payload := buildFinishPayload(cfg, sess, "files", true)
 
-	reviewDetach = true
-	reviewWait = false
-	reviewCode = true
-	reviewBase = "abc123"
-	defer func() {
-		reviewDetach = false
-		reviewCode = false
-		reviewBase = ""
-	}()
-
-	err := runCodeReview()
-	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+	if !payload.Approved || len(payload.Comments) != 0 || payload.NextCommand != "" {
+		t.Errorf("unexpected payload: %+v", payload)
+	}
+	if payload.Prompt != "Review approved with no comments — no changes requested." {
+		t.Errorf("prompt = %q", payload.Prompt)
 	}
 
-	if len(*commands) != 1 {
-		t.Fatalf("expected 1 command, got %d: %v", len(*commands), *commands)
-	}
-
-	// The last arg to split-window is the shell command string
-	shellCmd := (*commands)[0][len((*commands)[0])-1]
-	if !strings.Contains(shellCmd, "--base 'abc123'") {
-		t.Errorf("expected --base flag in tmux command, got: %s", shellCmd)
+	sess.SetFileComments("a.go", "", []review.Comment{
+		{ID: "c_1", StartLine: 1, EndLine: 1, Body: "x", Resolved: true},
+	})
+	payload = buildFinishPayload(cfg, sess, "files", true)
+	if payload.Prompt != "Review approved. All comments are resolved — proceed with implementation." {
+		t.Errorf("prompt = %q", payload.Prompt)
 	}
 }
 
-// TestDetachedCodeReviewOmitsBaseFlagWhenEmpty verifies that --base is NOT
-// included in the tmux command when reviewBase is empty.
-func TestDetachedCodeReviewOmitsBaseFlagWhenEmpty(t *testing.T) {
-	origTmux := os.Getenv("TMUX")
-	os.Setenv("TMUX", "/tmp/tmux-test/default,12345,0")
-	defer os.Setenv("TMUX", origTmux)
+func TestBuildFinishPayloadUsesConfigPromptOverride(t *testing.T) {
+	sess := newPayloadSession(t)
+	cfg := &config.Config{Prompts: map[string]string{
+		"on_finish_approved": "inline:Custom approved for {{.session_key}}",
+	}}
 
-	commands, cleanup := stubExecDeps(t)
-	defer cleanup()
-
-	reviewDetach = true
-	reviewWait = false
-	reviewCode = true
-	reviewBase = ""
-	defer func() {
-		reviewDetach = false
-		reviewCode = false
-	}()
-
-	err := runCodeReview()
-	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
-	}
-
-	if len(*commands) != 1 {
-		t.Fatalf("expected 1 command, got %d: %v", len(*commands), *commands)
-	}
-
-	shellCmd := (*commands)[0][len((*commands)[0])-1]
-	if strings.Contains(shellCmd, "--base") {
-		t.Errorf("expected no --base flag in tmux command, got: %s", shellCmd)
-	}
-}
-
-func TestPathResolution(t *testing.T) {
-	rel := "relative/path/doc.md"
-	abs, err := filepath.Abs(rel)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	expected := filepath.Join(cwd, rel)
-	if abs != expected {
-		t.Errorf("filepath.Abs(%q) = %q, want %q", rel, abs, expected)
+	payload := buildFinishPayload(cfg, sess, "files", true)
+	if want := "Custom approved for " + sess.Key; payload.Prompt != want {
+		t.Errorf("prompt = %q, want %q", payload.Prompt, want)
 	}
 }
