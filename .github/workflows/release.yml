@@ -1,26 +1,53 @@
 name: Release
 
-on:
-  push:
-    tags:
-      - "v*"
+# Runs only on tag-shaped refs whose CI succeeded, and only after verifying
+# the tag still points at the tested commit, so the trigger is not exposed to
+# untrusted pull request code.
+on: # zizmor: ignore[dangerous-triggers]
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
   goreleaser:
+    if: >-
+      ${{
+        github.event.workflow_run.conclusion == 'success' &&
+        startsWith(github.event.workflow_run.head_branch, 'v')
+      }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Harden Runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
         with:
-          fetch-depth: 0
+          egress-policy: audit
 
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: refs/tags/${{ github.event.workflow_run.head_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify tag points at the tested commit
+        env:
+          TAG: ${{ github.event.workflow_run.head_branch }}
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse "refs/tags/$TAG^{commit}")" = "$TESTED_SHA"
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false
 
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
         with:
           version: "~> v2"
           args: release --clean
