@@ -8,9 +8,9 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "crit [file]",
+	Use:   "tcrit [file]",
 	Short: "Review markdown documents from the terminal",
-	Long:  "Crit is a terminal-based review tool for documents. It provides an interactive TUI for humans and scriptable CLI commands for automation.\n\nRun `crit <file>` to start a review (shortcut for `crit review <file>`).",
+	Long:  "TCrit is a terminal-based review tool for documents. It provides an interactive TUI for humans and scriptable CLI commands for automation.\n\nRun `tcrit <file>` to start a review (shortcut for `tcrit review <file>`).",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
@@ -28,5 +28,5 @@ func Execute() int {
 }
 
 func exitWithError(msg string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, "crit: "+msg+"\n", args...)
+	fmt.Fprintf(os.Stderr, "tcrit: "+msg+"\n", args...)
 }
