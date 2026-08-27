@@ -35,10 +35,10 @@ var (
 			Padding(0, 1)
 
 	pausedStatusBar = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.BrightWhite).
-				Background(lipgloss.Red).
-				Padding(0, 1)
+			Bold(true).
+			Foreground(lipgloss.BrightWhite).
+			Background(lipgloss.Red).
+			Padding(0, 1)
 
 	focusedBorder = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -196,7 +196,7 @@ var (
 				Bold(true)
 
 	mdTableCellStyle = lipgloss.NewStyle().
-			Foreground(muted)
+				Foreground(muted)
 
 	// Sidebar selected text (bright for contrast against highlight bg)
 	sidebarSelectedText = lipgloss.NewStyle().

@@ -15,10 +15,10 @@ type FileTab struct {
 	path         string
 	doc          *document.Document
 	state        *review.ReviewState
-	changedLines map[int]bool                  // line numbers that are added/modified
-	deletedAfter map[int][]gitpkg.DeletedLine  // deleted lines keyed by new-file line they appear after
-	changeChunks []changeChunk                 // contiguous groups of changed lines
-	cursorLine   int                           // 1-based
+	changedLines map[int]bool                 // line numbers that are added/modified
+	deletedAfter map[int][]gitpkg.DeletedLine // deleted lines keyed by new-file line they appear after
+	changeChunks []changeChunk                // contiguous groups of changed lines
+	cursorLine   int                          // 1-based
 
 	// Visual selection mode
 	selecting    bool
@@ -37,9 +37,9 @@ type FileTab struct {
 	isDeleted bool
 
 	// Cached rendering data (computed once per tab switch, not per keystroke)
-	chromaLines       []string            // syntax-highlighted lines (nil for markdown)
-	deletedLineCache  map[int][]string    // pre-highlighted deleted line content, keyed by afterLine
-	isMarkdown        bool
+	chromaLines      []string         // syntax-highlighted lines (nil for markdown)
+	deletedLineCache map[int][]string // pre-highlighted deleted line content, keyed by afterLine
+	isMarkdown       bool
 }
 
 // changeChunk represents a contiguous block of changed lines.

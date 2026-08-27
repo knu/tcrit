@@ -31,7 +31,7 @@ func TestStoreRoundTrip(t *testing.T) {
 	}
 
 	// Add comment and save
-	state.AddComment(Comment{ID: "c1", Line: 1, Body: "test comment", })
+	state.AddComment(Comment{ID: "c1", Line: 1, Body: "test comment"})
 	if err := Save(state); err != nil {
 		t.Fatalf("saving: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestMultilineBody(t *testing.T) {
 
 	state, _ := Load(docPath)
 	multiline := "First line.\nSecond line.\nThird line."
-	state.AddComment(Comment{ID: "c1", Line: 1, Body: multiline, })
+	state.AddComment(Comment{ID: "c1", Line: 1, Body: multiline})
 	if err := Save(state); err != nil {
 		t.Fatalf("saving: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestMigrationFromJSON(t *testing.T) {
 	state := &ReviewState{
 		File: docPath,
 		Comments: []Comment{
-			{ID: "legacy1", Line: 1, Body: "old comment", },
+			{ID: "legacy1", Line: 1, Body: "old comment"},
 		},
 	}
 	yamlPath := document.ReviewPath(docPath)
