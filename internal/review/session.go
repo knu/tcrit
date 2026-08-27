@@ -47,7 +47,7 @@ func LoadSession() (*CodeReviewSession, error) {
 	data, err := os.ReadFile(sessionFile)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("no active code review session (run `crit review --code` first)")
+			return nil, fmt.Errorf("no active code review session (run `tcrit review --code` first)")
 		}
 		return nil, fmt.Errorf("reading session: %w", err)
 	}

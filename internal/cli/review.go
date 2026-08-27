@@ -54,7 +54,7 @@ var reviewCmd = &cobra.Command{
 
 		// --wait without --detach: warn and ignore
 		if reviewWait && !reviewDetach {
-			fmt.Fprintln(os.Stderr, "crit: --wait requires --detach; ignoring --wait")
+			fmt.Fprintln(os.Stderr, "tcrit: --wait requires --detach; ignoring --wait")
 			reviewWait = false
 		}
 
@@ -83,7 +83,7 @@ func init() {
 func runCodeReview() error {
 	// --wait without --detach: warn and ignore
 	if reviewWait && !reviewDetach {
-		fmt.Fprintln(os.Stderr, "crit: --wait requires --detach; ignoring --wait")
+		fmt.Fprintln(os.Stderr, "tcrit: --wait requires --detach; ignoring --wait")
 		reviewWait = false
 	}
 
@@ -92,7 +92,7 @@ func runCodeReview() error {
 	}
 
 	if !git.IsGitRepo() {
-		return fmt.Errorf("crit review --code requires a git repository")
+		return fmt.Errorf("tcrit review --code requires a git repository")
 	}
 
 	var ref string
@@ -135,7 +135,7 @@ func runCodeReview() error {
 		CreatedAt: time.Now(),
 	}
 	if err := review.SaveSession(session); err != nil {
-		fmt.Fprintf(os.Stderr, "crit: warning: could not save session: %v\n", err)
+		fmt.Fprintf(os.Stderr, "tcrit: warning: could not save session: %v\n", err)
 	}
 
 	model := tui.NewCodeReviewApp(files, ref)

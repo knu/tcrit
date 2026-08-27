@@ -28,7 +28,9 @@ Then use `/crit:review` in Claude Code. It will ask whether you want to review c
 ### From source
 
 ```bash
-go install github.com/kevindutra/crit/cmd/crit@latest
+git clone https://github.com/knu/tcrit
+cd tcrit
+go install ./cmd/tcrit
 ```
 
 Make sure `$GOPATH/bin` (defaults to `~/go/bin`) is in your `PATH`:
@@ -44,8 +46,8 @@ If you prefer not to use the plugin, you can install the skill directly:
 #### Claude Code
 
 ```bash
-crit setup-claude           # Install globally (~/.claude/skills/)
-crit setup-claude --project # Install for current project only
+tcrit setup-claude           # Install globally (~/.claude/skills/)
+tcrit setup-claude --project # Install for current project only
 ```
 
 Then use `/crit-review <path>` in Claude Code for document reviews, or `/crit-code-review` for multi-file code reviews.
@@ -53,8 +55,8 @@ Then use `/crit-review <path>` in Claude Code for document reviews, or `/crit-co
 #### Gemini CLI
 
 ```bash
-crit setup-gemini           # Install globally (~/.gemini/)
-crit setup-gemini --project # Install for current project only
+tcrit setup-gemini           # Install globally (~/.gemini/)
+tcrit setup-gemini --project # Install for current project only
 ```
 
 Then use `@crit` to start a review in Gemini CLI.
@@ -79,7 +81,7 @@ If you forget, crit will tell you — but the split-pane review won't work outsi
 ## Code Review (multi-file)
 
 ```bash
-crit review --code
+tcrit review --code
 ```
 
 Detects changed files in your git repo and opens a tabbed TUI with syntax highlighting, diff markers, and inline commenting across all changed files.
@@ -90,7 +92,7 @@ Detects changed files in your git repo and opens a tabbed TUI with syntax highli
 
 ```bash
 # Get all code review comments as JSON
-crit status --code
+tcrit status --code
 ```
 
 ### How code review works
@@ -104,7 +106,7 @@ crit status --code
 ## Document Review (single file)
 
 ```bash
-crit review docs/plans/my-plan.md
+tcrit review docs/plans/my-plan.md
 ```
 
 Opens a full-screen terminal UI with syntax-highlighted markdown, a comment sidebar, and modal overlays for adding/editing comments.
@@ -115,10 +117,10 @@ When running inside tmux, you can open the TUI in a side-by-side split pane:
 
 ```bash
 # Open review in a tmux split and return immediately
-crit review docs/plan.md --detach
+tcrit review docs/plan.md --detach
 
 # Open review in a tmux split and block until it closes
-crit review docs/plan.md --detach --wait
+tcrit review docs/plan.md --detach --wait
 ```
 
 This is how the Claude Code skill invokes crit — `--detach --wait` is a single blocking call that opens the TUI next to Claude Code and waits for you to finish reviewing.
@@ -156,29 +158,29 @@ This is how the Claude Code skill invokes crit — `--detach --wait` is a single
 
 ```bash
 # Add a comment programmatically
-crit comment docs/plan.md --line 15 --body "This needs more detail"
+tcrit comment docs/plan.md --line 15 --body "This needs more detail"
 
 # Multi-line comment
-crit comment docs/plan.md --line 10 --end-line 20 --body "Rethink this section"
+tcrit comment docs/plan.md --line 10 --end-line 20 --body "Rethink this section"
 
 # Get review comments as JSON (single file)
-crit status docs/plan.md
+tcrit status docs/plan.md
 
 # Get all code review comments as JSON
-crit status --code
+tcrit status --code
 ```
 
 ## Shell Completions
 
 ```bash
 # Bash
-crit completion bash > /etc/bash_completion.d/crit
+tcrit completion bash > /etc/bash_completion.d/tcrit
 
 # Zsh
-crit completion zsh > "${fpath[1]}/_crit"
+tcrit completion zsh > "${fpath[1]}/_tcrit"
 
 # Fish
-crit completion fish > ~/.config/fish/completions/crit.fish
+tcrit completion fish > ~/.config/fish/completions/tcrit.fish
 ```
 
 ## Development
