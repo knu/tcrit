@@ -1,10 +1,10 @@
 version: 2
 
 builds:
-  - main: ./cmd/crit/
-    binary: crit
+  - main: ./cmd/tcrit/
+    binary: tcrit
     ldflags:
-      - -s -w -X main.version={{.Version}}
+      - -s -w -X github.com/knu/tcrit/internal/cli.version=v{{.Version}}
     goos:
       - darwin
       - linux

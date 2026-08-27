@@ -8,10 +8,11 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "tcrit [file]",
-	Short: "Review markdown documents from the terminal",
-	Long:  "TCrit is a terminal-based review tool for documents. It provides an interactive TUI for humans and scriptable CLI commands for automation.\n\nRun `tcrit <file>` to start a review (shortcut for `tcrit review <file>`).",
-	Args:  cobra.MaximumNArgs(1),
+	Use:     "tcrit [file]",
+	Version: versionString(),
+	Short:   "Review markdown documents from the terminal",
+	Long:    "TCrit is a terminal-based review tool for documents. It provides an interactive TUI for humans and scriptable CLI commands for automation.\n\nRun `tcrit <file>` to start a review (shortcut for `tcrit review <file>`).",
+	Args:    cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			return cmd.Help()
