@@ -46,8 +46,8 @@ If you prefer not to use the plugin, you can install the skill directly:
 #### Claude Code
 
 ```bash
-tcrit setup-claude           # Install globally (~/.claude/skills/)
-tcrit setup-claude --project # Install for current project only
+cd ~ && tcrit install claude-code   # Install globally (~/.claude/skills/)
+tcrit install claude-code           # From a repo root: install for that project
 ```
 
 Then use `/tcrit-review <path>` in Claude Code for document reviews, or `/tcrit-code-review` for multi-file code reviews.
@@ -55,11 +55,18 @@ Then use `/tcrit-review <path>` in Claude Code for document reviews, or `/tcrit-
 #### Gemini CLI
 
 ```bash
-tcrit setup-gemini           # Install globally (~/.gemini/)
-tcrit setup-gemini --project # Install for current project only
+cd ~ && tcrit install gemini        # Install globally (~/.gemini/)
+tcrit install gemini                # From a repo root: install for that project
 ```
 
 Then use `@tcrit` to start a review in Gemini CLI.
+
+#### Prompt templates
+
+```bash
+tcrit install prompts               # Copy the stock finish prompts for customization
+tcrit check                         # Report stale installed integrations
+```
 
 ## Requirements
 

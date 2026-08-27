@@ -18,6 +18,22 @@ import (
 //go:embed stock/*.md
 var stockFS embed.FS
 
+// StockTemplates returns the embedded stock template file names and contents,
+// for `tcrit install prompts` and staleness checking.
+func StockTemplates() map[string][]byte {
+	entries, err := stockFS.ReadDir("stock")
+	if err != nil {
+		return nil
+	}
+	out := make(map[string][]byte, len(entries))
+	for _, e := range entries {
+		if data, err := stockFS.ReadFile("stock/" + e.Name()); err == nil {
+			out[e.Name()] = data
+		}
+	}
+	return out
+}
+
 const fallbackPrompt = "Review finished."
 
 // Context carries the values exposed to finish templates.
