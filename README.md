@@ -8,11 +8,11 @@
 
 ## Key changes from upstream
 
-- **[Crit](https://crit.md/)-compatible agent workflow** — review commands block until the reviewer finishes, print an agent-facing result, and support iterative rounds through `tcrit --session <id>`.
+- **[Crit](https://crit.md/)-compatible agent workflow** — review commands block until the reviewer finishes, print an agent-facing result, and support iterative rounds through `tcrit --session <id>`; each round refreshes the changed-file set so newly added files appear without restarting the TUI.
 - **CritJSON review state and CLI** — comments use [Crit](https://crit.md/)-compatible `review.json` data, with `tcrit comment` and `tcrit comments` for automation.
 - **Versioned plan reviews** — `tcrit plan` saves immutable revisions and carries comment threads forward as the plan changes.
-- **Richer review lifecycle** — comment threads can be replied to, resolved, reopened, and approved together; comments and changes can be navigated across files.
-- **Improved diffs and Git handling** — inline replacements preserve whitespace, comment anchors survive edited rounds, and paths with spaces or special characters work correctly.
+- **Richer review lifecycle** — comment threads can be replied to, resolved, reopened, and approved together; resolved threads collapse out of the active comment view, while comments and changes can be navigated across files.
+- **Improved diffs and Git handling** — inline replacements preserve whitespace, long syntax-highlighted lines wrap instead of being truncated, comment anchors survive edited rounds, and paths with spaces or special characters work correctly.
 - **Gemini CLI support** — the fork adds a Gemini agent alongside upstream's Claude Code integration.
 - **[Crit](https://crit.md/) CLI alignment** — customizable finish prompts, unified integration installers, and `tcrit check` were added as part of adopting the Crit CLI workflow.
 
@@ -122,7 +122,7 @@ Running `tcrit` with no subcommand reviews the current Git changes. Running `tcr
 | `tcrit comments [--json] [--all]` | List unresolved comments, optionally including resolved comments |
 | `tcrit clear <file>` | Clear a document review; use `--code` for code review or `--all` for all reviews in the current directory |
 | `tcrit status <file>` / `tcrit status --code` | Print the document or aggregate code-review status as JSON |
-| `tcrit install <target>` | Install `claude-code`, `gemini`, `prompts`, or `all` integrations |
+| `tcrit install <target>` | Install `claude-code`, `gemini`, or `prompts`; `all` installs both agent integrations |
 | `tcrit check` | Report installed integration files that are stale |
 | `tcrit completion <shell>` | Generate completion for Bash, Zsh, Fish, or PowerShell |
 
