@@ -93,8 +93,9 @@ type AppModel struct {
 	modalTextarea   textarea.Model
 
 	// Editing state
-	editingID  string // ID of the comment being edited
-	modalFocus int    // 0=textarea, 1=save button, 2=cancel button, 3=delete button (edit modal only)
+	editingID   string // ID of the comment being edited
+	modalFocus  int    // 0=textarea, 1=save button, 2=cancel button, 3=delete button (edit modal only)
+	newFeedback bool   // true after adding or editing a comment in this round
 
 	err error
 }
@@ -674,6 +675,7 @@ func (m *AppModel) modalSubmit() {
 		}
 		t.state.Comments = append(t.state.Comments, c)
 	}
+	m.newFeedback = true
 
 	m.persist()
 	m.modal = noModal
@@ -744,6 +746,44 @@ func (m *AppModel) toggleResolve(id string) {
 	m.persist()
 	m.rebuildContent()
 	m.updateCommentSidebar()
+}
+
+// resolveAll marks every comment thread resolved in the current round.
+func (m *AppModel) resolveAll() {
+	round := 0
+	if m.session != nil {
+		round = m.session.CJ.ReviewRound
+	}
+	now := review.Now()
+	resolve := func(c *review.Comment) {
+		if c.Resolved {
+			return
+		}
+		c.Resolved = true
+		c.ResolvedRound = round
+		c.UpdatedAt = now
+	}
+
+	for i := range m.tabs {
+		if m.tabs[i].state == nil {
+			continue
+		}
+		for j := range m.tabs[i].state.Comments {
+			resolve(&m.tabs[i].state.Comments[j])
+		}
+	}
+	if m.session != nil {
+		for i := range m.session.CJ.ReviewComments {
+			resolve(&m.session.CJ.ReviewComments[i])
+		}
+		for path, file := range m.session.CJ.Files {
+			for i := range file.Comments {
+				resolve(&file.Comments[i])
+			}
+			m.session.CJ.Files[path] = file
+		}
+	}
+	m.persist()
 }
 
 // sessionComments returns the session's stored comments for a file path.
@@ -841,11 +881,19 @@ func (m *AppModel) unresolvedTotal() int {
 	return n
 }
 
+func (m *AppModel) resolvesAllOnFinish() bool {
+	return !m.newFeedback && m.unresolvedTotal() > 0
+}
+
 // doFinish persists the review, emits the finish event, and either quits
 // (approved, or nothing is waiting on this review) or parks in the waiting
 // state until the agent starts the next round.
 func (m *AppModel) doFinish() (tea.Model, tea.Cmd) {
-	m.persist()
+	if m.resolvesAllOnFinish() {
+		m.resolveAll()
+	} else {
+		m.persist()
+	}
 	approved := m.unresolvedTotal() == 0
 	if m.finishCh != nil {
 		m.finishCh <- FinishEvent{Approved: approved}
@@ -911,6 +959,7 @@ func (m *AppModel) startNextRound() {
 	m.persist()
 
 	m.waiting = false
+	m.newFeedback = false
 	m.rebuildContent()
 	m.updateCommentSidebar()
 }
@@ -2213,8 +2262,11 @@ func (m AppModel) renderFooter() string {
 			k("s", "sidebar"),
 			k("v", "select"),
 			k("enter", "comment"),
-			k("q", "save & quit"),
 		}
+		if len(t.sidebarItems) > 0 {
+			items = append(items, k("r", "resolve/unresolve"))
+		}
+		items = append(items, k("q", "save & quit"))
 		if m.multiFile {
 			items = append([]string{
 				k("tab/S-tab", "next/prev tab"),
@@ -2335,6 +2387,10 @@ func (m AppModel) renderWithModal(background string) string {
 			title = modalTitleStyle.Render("Approve review?")
 			info = "No unresolved comments — approving ends the review."
 			confirmLabel = "Approve"
+		} else if !m.newFeedback {
+			title = modalTitleStyle.Render("Resolve all & Approve?")
+			info = fmt.Sprintf("%d unresolved comment(s) will be resolved.", unresolved)
+			confirmLabel = "Resolve All & Approve"
 		} else {
 			title = modalTitleStyle.Render("Finish review?")
 			info = fmt.Sprintf("%d unresolved comment(s) will be sent to the agent.", unresolved)

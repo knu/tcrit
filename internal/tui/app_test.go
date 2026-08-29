@@ -365,6 +365,7 @@ func TestFinishModal_ResolvedCommentsStillApprove(t *testing.T) {
 
 func TestFinishModal_UnresolvedQuitsWhenNotServing(t *testing.T) {
 	app, ch := newFinishTestApp(t, []review.Comment{testComment()}, false)
+	app.newFeedback = true
 	app, _ = pressKeyCmd(app, 'q')
 
 	app, cmd := pressKeyCmd(app, 'y')
@@ -382,6 +383,7 @@ func TestFinishModal_UnresolvedQuitsWhenNotServing(t *testing.T) {
 
 func TestFinishModal_UnresolvedWaitsWhenServing(t *testing.T) {
 	app, ch := newFinishTestApp(t, []review.Comment{testComment()}, true)
+	app.newFeedback = true
 	app, _ = pressKeyCmd(app, 'q')
 
 	app, cmd := pressKeyCmd(app, 'y')
@@ -413,6 +415,60 @@ func TestFinishModal_EscReturnsToReview(t *testing.T) {
 	case <-ch:
 		t.Error("expected no finish event on cancel")
 	default:
+	}
+}
+
+func TestFinishModal_NoNewFeedbackResolvesAllAndApproves(t *testing.T) {
+	comment := testComment()
+	app, ch := newFinishTestApp(t, []review.Comment{comment}, true)
+	app.session.CJ.ReviewComments = []review.Comment{{
+		ID: "r_test01", Body: "overall feedback", CreatedAt: review.Now(),
+	}}
+	app, _ = pressKeyCmd(app, 'q')
+	app.width = 80
+	app.height = 24
+
+	rendered := app.renderWithModal(strings.Repeat(" ", 80))
+	if !strings.Contains(rendered, "Resolve all & Approve?") {
+		t.Fatalf("expected resolve-all prompt, got:\n%s", rendered)
+	}
+
+	app, cmd := pressKeyCmd(app, 'y')
+
+	if !isQuit(cmd) {
+		t.Fatal("expected approval to quit even while serving")
+	}
+	if ev := takeEvent(t, ch); !ev.Approved {
+		t.Error("expected approved finish event")
+	}
+	if !app.tabs[0].state.Comments[0].Resolved {
+		t.Error("expected file comment resolved")
+	}
+	if !app.session.CJ.ReviewComments[0].Resolved {
+		t.Error("expected review comment resolved")
+	}
+	if got := app.tabs[0].state.Comments[0].ResolvedRound; got != 1 {
+		t.Errorf("resolved round = %d, want 1", got)
+	}
+}
+
+func TestResolveKey_TogglesSelectedComment(t *testing.T) {
+	app, _ := newFinishTestApp(t, []review.Comment{testComment()}, false)
+	app.focused = commentPane
+	app.updateCommentSidebar()
+
+	app = pressKey(app, 'r')
+
+	comment := app.tabs[0].state.Comments[0]
+	if !comment.Resolved || comment.ResolvedRound != 1 {
+		t.Fatalf("expected resolved comment in round 1, got %+v", comment)
+	}
+
+	app = pressKey(app, 'r')
+
+	comment = app.tabs[0].state.Comments[0]
+	if comment.Resolved || comment.ResolvedRound != 0 {
+		t.Fatalf("expected unresolved comment with cleared round, got %+v", comment)
 	}
 }
 
