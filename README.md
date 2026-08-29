@@ -1,16 +1,26 @@
 <p align="center">
-  <img src="assets/crit_logo.png" alt="crit" width="300">
+  <img src="assets/crit_logo.png" alt="tcrit" width="300">
 </p>
 
-# crit
+# tcrit
 
-> This is **tcrit**, a fork of [kevindutra/crit](https://github.com/kevindutra/crit).  It installs the command as `tcrit` and includes fixes and improvements not yet merged upstream.
+> **tcrit** is a fork of [kevindutra/crit](https://github.com/kevindutra/crit). It installs the command as `tcrit` and includes fixes and improvements not yet merged upstream.
+
+## Key changes from upstream
+
+- **[Crit](https://crit.md/)-compatible agent workflow** — review commands block until the reviewer finishes, print an agent-facing result, and support iterative rounds through `tcrit --session <id>`.
+- **CritJSON review state and CLI** — comments use [Crit](https://crit.md/)-compatible `review.json` data, with `tcrit comment` and `tcrit comments` for automation.
+- **Versioned plan reviews** — `tcrit plan` saves immutable revisions and carries comment threads forward as the plan changes.
+- **Richer review lifecycle** — comment threads can be replied to, resolved, reopened, and approved together; comments and changes can be navigated across files.
+- **Improved diffs and Git handling** — inline replacements preserve whitespace, comment anchors survive edited rounds, and paths with spaces or special characters work correctly.
+- **Gemini CLI support** — the fork adds a Gemini agent alongside upstream's Claude Code integration.
+- **[Crit](https://crit.md/) CLI alignment** — customizable finish prompts, unified integration installers, and `tcrit check` were added as part of adopting the Crit CLI workflow.
 
 TUI for reviewing AI-generated code and plans — built for human-in-the-loop agentic coding workflows.
 
-Read a plan or review code changes across multiple files, leave inline comments, and let Claude Code address your feedback automatically.
+Read a plan or review code changes across multiple files, leave inline comments, and let your coding agent address the feedback automatically.
 
-Built for the human-in-the-loop workflow: Your agent the writes code or a plan, you review it in a TUI, your agent seamlessly reads your comments and makes changes.
+Your agent writes code or a plan, you review it in the TUI, and the agent reads your comments and makes changes for the next round.
 
 ![crit code review demo](demo/code-review.gif)
 
@@ -25,9 +35,17 @@ tcrit is available as a Claude Code plugin. Add the marketplace and install:
 /plugin install tcrit
 ```
 
-Then use `/tcrit:review` in Claude Code. It will ask whether you want to review code changes or a document, open the TUI, and after you close it, Claude reads your comments and makes changes.
+Then use `/tcrit:review` in Claude Code. It asks whether you want to review code changes or a document, opens the TUI, and has Claude address your comments after each round.
 
-### From source
+### Command-line binary
+
+With [mise](https://mise.jdx.dev/):
+
+```bash
+mise install github:knu/tcrit
+```
+
+With Go:
 
 ```bash
 go install github.com/knu/tcrit/cmd/tcrit@latest
@@ -50,7 +68,11 @@ cd ~ && tcrit install claude-code   # Install globally (~/.claude/skills/)
 tcrit install claude-code           # From a repo root: install for that project
 ```
 
-Then use `/tcrit-review <path>` in Claude Code for document reviews, or `/tcrit-code-review` for multi-file code reviews.
+The manual install provides these skills:
+
+- `/tcrit-review` — choose between code and document/plan review
+- `/tcrit-code-review` — review Git changes with `tcrit review --code`
+- `/tcrit-plan-review <path>` — review immutable versions of a plan with `tcrit plan <path>`
 
 #### Gemini CLI
 
@@ -64,14 +86,15 @@ Then use `@tcrit` to start a review in Gemini CLI.
 #### Prompt templates
 
 ```bash
-tcrit install prompts               # Copy the stock finish prompts for customization
+cd ~ && tcrit install prompts        # Install global templates under ~/.config/tcrit/prompts/
+tcrit install prompts                # From a repo root: install under .tcrit/prompts/
 tcrit check                         # Report stale installed integrations
 ```
 
 ## Requirements
 
-- **Go 1.21+** for building from source
-- **tmux** — required for the Claude Code integration. Crit opens the review TUI in a tmux split pane next to Claude Code.
+- **Go 1.25+** for building from source
+- **tmux** for split-pane agent workflows. Without tmux, tcrit can run the TUI directly in an interactive terminal.
 
 ### Starting a tmux session
 
@@ -83,23 +106,43 @@ tmux new -s work
 claude
 ```
 
-If you forget, tcrit will tell you — but the split-pane review won't work outside of tmux.
+Without tmux, launch tcrit yourself in an interactive terminal when an agent asks you to review.
+
+## CLI overview
+
+Running `tcrit` with no subcommand reviews the current Git changes. Running `tcrit <file>` reviews one document.
+
+| Command | Purpose |
+|---------|---------|
+| `tcrit [file]` | Review current Git changes, or review `file` when given |
+| `tcrit review [--base <ref>] [file]` | Explicit form of the default review command; `--code` is accepted but unnecessary without a file |
+| `tcrit plan [--name <slug>] [file]` | Create or continue a versioned plan review; reads stdin when `file` is omitted |
+| `tcrit --session <id>` | Reconnect to a running review and start its next round |
+| `tcrit comment ...` | Add comments or replies, import JSON, or clear the selected review |
+| `tcrit comments [--json] [--all]` | List unresolved comments, optionally including resolved comments |
+| `tcrit clear <file>` | Clear a document review; use `--code` for code review or `--all` for all reviews in the current directory |
+| `tcrit status <file>` / `tcrit status --code` | Print the document or aggregate code-review status as JSON |
+| `tcrit install <target>` | Install `claude-code`, `gemini`, `prompts`, or `all` integrations |
+| `tcrit check` | Report installed integration files that are stale |
+| `tcrit completion <shell>` | Generate completion for Bash, Zsh, Fish, or PowerShell |
 
 ## Code Review (multi-file)
 
 ```bash
-tcrit review --code
+tcrit
+# Equivalent explicit form; use --base <ref> to choose another diff base
+tcrit review
 ```
 
 Detects changed files in your git repo and opens a tabbed TUI with syntax highlighting, diff markers, and inline commenting across all changed files.
 
-- Diffs against unstaged changes by default, falls back to `HEAD~1` or `main`
+- Diffs staged, unstaged, and untracked changes against `HEAD` by default; falls back to `HEAD~1` or `main` when the worktree is clean
 - Green gutter markers highlight changed lines
 - Comments are aggregated across all files in the session
 
 ```bash
-# Get all code review comments as JSON
-tcrit status --code
+# Get unresolved comments in the agent-facing format
+tcrit comments --json
 ```
 
 ### How code review works
@@ -118,10 +161,7 @@ tcrit plan docs/plans/my-plan.md            # slug derived from the first headin
 tcrit plan --name auth docs/plans/plan.md   # pinned slug
 ```
 
-Saves the document as an immutable numbered version under
-`$XDG_STATE_HOME/tcrit/plans/<slug>/` and opens a review of the latest
-version. Re-running with the same slug saves the next version and starts
-the next review round; comments carry forward onto the revised text.
+Saves the document as an immutable numbered version under `$XDG_STATE_HOME/tcrit/plans/<slug>/` (or `~/.local/state/tcrit/plans/<slug>/` when `XDG_STATE_HOME` is unset) and opens a review of the latest version. Re-running with the same slug saves the next version and starts the next review round; comments carry forward onto the revised text. The command also accepts plan content on stdin.
 
 ## Document Review (single file)
 
@@ -139,7 +179,7 @@ When `tcrit review` runs inside tmux (as the Claude Code skill does), the TUI au
 
 1. Claude writes a plan (or you open any markdown file)
 2. `tcrit review <path>` opens the TUI — read through and leave inline comments
-3. Finish the review with `q`; comments are saved as crit-compatible `review.json` under `$XDG_STATE_HOME/tcrit/`
+3. Finish the review with `q`; comments are saved as crit-compatible `review.json` under `$XDG_STATE_HOME/tcrit/reviews/` (or `~/.local/state/tcrit/reviews/`)
 4. Claude receives the unresolved comments from the blocking command (or via `tcrit comments --json`), edits the document, and replies to each comment
 5. Claude runs the printed `tcrit --session <id>`; the TUI reloads with the fixes for the next round
 
@@ -154,7 +194,7 @@ When `tcrit review` runs inside tmux (as the Claude Code skill does), the TUI au
 | `v`                                   | Visual select mode (multi-line comments) |
 | `s`                                   | Toggle comment sidebar                   |
 | `[` / `]`                             | Jump to prev / next comment              |
-| `r`                                   | Resolve / unresolve the focused comment |
+| `r`                                   | Resolve / unresolve the focused comment  |
 | `q`                                   | Finish review (Approve when no unresolved comments remain) |
 
 **Code review only:**
@@ -187,8 +227,10 @@ tcrit comment --json --file comments.json
 tcrit comments
 tcrit comments --json
 
-# Remove the review
-tcrit comment --clear
+# Clear review state
+tcrit clear docs/plan.md
+tcrit clear --code
+tcrit clear --all
 
 # Get review comments as JSON (single file)
 tcrit status docs/plan.md
