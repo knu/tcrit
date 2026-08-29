@@ -196,6 +196,68 @@ func TestCommentNavigationWrapsReviewAndVisitsSameLineThreads(t *testing.T) {
 	}
 }
 
+func newChangeNavigationTestApp() AppModel {
+	app := newCommentNavigationTestApp()
+	app.tabs[0].changeChunks = []changeChunk{
+		{startLine: 2, endLine: 2},
+		{startLine: 4, endLine: 4},
+	}
+	app.tabs[2].changeChunks = []changeChunk{
+		{startLine: 1, endLine: 1},
+		{startLine: 3, endLine: 3},
+	}
+	return app
+}
+
+func TestChangeNavigationCrossesFilesWithoutWrapping(t *testing.T) {
+	app := newChangeNavigationTestApp()
+	app.tabs[0].cursorLine = 4
+
+	app = pressKey(app, 'n')
+	if app.activeTab != 2 || app.tab().cursorLine != 1 {
+		t.Fatalf("next change = tab %d, line %d; want tab 2, line 1", app.activeTab, app.tab().cursorLine)
+	}
+
+	app = pressKey(app, 'N')
+	if app.activeTab != 0 || app.tab().cursorLine != 4 {
+		t.Fatalf("previous change = tab %d, line %d; want tab 0, line 4", app.activeTab, app.tab().cursorLine)
+	}
+
+	app.activeTab = 2
+	app.tabs[2].cursorLine = 3
+	app = pressKey(app, 'n')
+	if app.activeTab != 2 || app.tab().cursorLine != 3 {
+		t.Fatalf("next change wrapped to tab %d, line %d", app.activeTab, app.tab().cursorLine)
+	}
+
+	app.activeTab = 0
+	app.tabs[0].cursorLine = 2
+	app = pressKey(app, 'N')
+	if app.activeTab != 0 || app.tab().cursorLine != 2 {
+		t.Fatalf("previous change wrapped to tab %d, line %d", app.activeTab, app.tab().cursorLine)
+	}
+}
+
+func TestAngleBracketsMoveToFileBoundaries(t *testing.T) {
+	app := newChangeNavigationTestApp()
+	app.tabs[0].cursorLine = 2
+	app.tabs[0].cursorOnAnnotation = true
+
+	app = pressKey(app, '>')
+	if app.tab().cursorLine != 4 || app.tab().cursorOnAnnotation {
+		t.Fatalf("> moved to line %d, annotation=%t; want line 4", app.tab().cursorLine, app.tab().cursorOnAnnotation)
+	}
+
+	app = pressKey(app, '<')
+	if app.tab().cursorLine != 1 || app.tab().cursorOnAnnotation {
+		t.Fatalf("< moved to line %d, annotation=%t; want line 1", app.tab().cursorLine, app.tab().cursorOnAnnotation)
+	}
+
+	if !strings.Contains(app.renderFooter(), "</>") {
+		t.Errorf("footer does not advertise angle-bracket navigation: %q", app.renderFooter())
+	}
+}
+
 func TestDocRenderedMsg_LoadsExistingComments(t *testing.T) {
 	// Create a temp directory and test file
 	tmpDir := t.TempDir()

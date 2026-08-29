@@ -380,6 +380,12 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, keys.PrevComment):
 			m.jumpToComment(-1)
 			return m, nil
+		case key.Matches(msg, keys.NextChange):
+			m.jumpToChange(1)
+			return m, nil
+		case key.Matches(msg, keys.PrevChange):
+			m.jumpToChange(-1)
+			return m, nil
 		}
 	}
 
@@ -459,46 +465,6 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			t.cursorAnnoIdx = 0
 			t.cursorLine = t.doc.LineCount()
 			moved = true
-		case key.Matches(msg, keys.NextChange):
-			if len(t.changeChunks) > 0 {
-				target := -1
-				for i, chunk := range t.changeChunks {
-					if chunk.startLine > t.cursorLine {
-						target = i
-						break
-					}
-				}
-				if target == -1 {
-					target = 0
-				}
-				chunk := t.changeChunks[target]
-				t.cursorLine = chunk.startLine
-				t.cursorOnAnnotation = false
-				t.cursorAnnoIdx = 0
-				m.rebuildContent()
-				m.scrollToChunk(chunk)
-				return m, nil
-			}
-		case key.Matches(msg, keys.PrevChange):
-			if len(t.changeChunks) > 0 {
-				target := -1
-				for i := len(t.changeChunks) - 1; i >= 0; i-- {
-					if t.changeChunks[i].startLine < t.cursorLine {
-						target = i
-						break
-					}
-				}
-				if target == -1 {
-					target = len(t.changeChunks) - 1
-				}
-				chunk := t.changeChunks[target]
-				t.cursorLine = chunk.startLine
-				t.cursorOnAnnotation = false
-				t.cursorAnnoIdx = 0
-				m.rebuildContent()
-				m.scrollToChunk(chunk)
-				return m, nil
-			}
 		case key.Matches(msg, keys.Resolve):
 			if t.cursorOnAnnotation {
 				anns := m.annotationsAfterLine(t.cursorLine)
@@ -1163,6 +1129,52 @@ func (m *AppModel) selectComment(tabIndex int, target commentTarget) {
 	m.rebuildContent()
 	m.updateCommentSidebar()
 	m.scrollToCursor()
+}
+
+// jumpToChange moves to the adjacent change in tab and line order.  Unlike
+// comment navigation, it stops at the beginning and end of the review.
+func (m *AppModel) jumpToChange(step int) bool {
+	t := m.tab()
+	if step > 0 {
+		for _, chunk := range t.changeChunks {
+			if chunk.startLine > t.cursorLine {
+				m.selectChange(m.activeTab, chunk)
+				return true
+			}
+		}
+	} else {
+		for i := len(t.changeChunks) - 1; i >= 0; i-- {
+			if t.changeChunks[i].startLine < t.cursorLine {
+				m.selectChange(m.activeTab, t.changeChunks[i])
+				return true
+			}
+		}
+	}
+
+	for tabIndex := m.activeTab + step; tabIndex >= 0 && tabIndex < len(m.tabs); tabIndex += step {
+		chunks := m.tabs[tabIndex].changeChunks
+		if len(chunks) == 0 {
+			continue
+		}
+		chunk := chunks[0]
+		if step < 0 {
+			chunk = chunks[len(chunks)-1]
+		}
+		m.selectChange(tabIndex, chunk)
+		return true
+	}
+	return false
+}
+
+func (m *AppModel) selectChange(tabIndex int, chunk changeChunk) {
+	m.activeTab = tabIndex
+	t := m.tab()
+	t.cursorLine = chunk.startLine
+	t.cursorOnAnnotation = false
+	t.cursorAnnoIdx = 0
+	m.rebuildContent()
+	m.updateCommentSidebar()
+	m.scrollToChunk(chunk)
 }
 
 // sidebarItem represents a comment in the sidebar list.
@@ -2296,6 +2308,7 @@ func (m AppModel) renderFooter() string {
 	} else {
 		items = []string{
 			k("j/k", "move"),
+			k("</>", "file top/bottom"),
 			k("[/]", "prev/next comment"),
 			k("shift+↑↓", "page"),
 			k("s", "sidebar"),
