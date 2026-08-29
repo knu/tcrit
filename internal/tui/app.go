@@ -1307,13 +1307,12 @@ func (m *AppModel) selectChange(tabIndex int, chunk changeChunk) {
 
 // sidebarItem represents a comment in the sidebar list.
 type sidebarItem struct {
-	id       string
-	line     int
-	endLine  int
-	body     string
-	author   string
-	resolved bool
-	replies  []review.Reply
+	id      string
+	line    int
+	endLine int
+	body    string
+	author  string
+	replies []review.Reply
 }
 
 // annotation represents an inline comment to render.
@@ -1571,6 +1570,9 @@ func (m *AppModel) rebuildContent() {
 // classic "body + label + borders" baseline, keeping scroll math in sync with
 // renderAnnotationBox.
 func annotationExtraLines(ann annotation) int {
+	if ann.resolved {
+		return 0
+	}
 	return len(ann.replies)
 }
 
@@ -1593,18 +1595,21 @@ func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused boo
 	if ann.resolved {
 		header += " " + resolvedBadge.Render("✓ resolved")
 	}
-	boxContent.WriteString(header + "\n")
-	boxContent.WriteString(clampLines(ann.body, 3))
-	for _, r := range ann.replies {
-		reply := r.Body
-		if i := strings.IndexByte(reply, '\n'); i >= 0 {
-			reply = reply[:i] + "…"
+	boxContent.WriteString(header)
+	if !ann.resolved {
+		boxContent.WriteString("\n")
+		boxContent.WriteString(clampLines(ann.body, 3))
+		for _, r := range ann.replies {
+			reply := r.Body
+			if i := strings.IndexByte(reply, '\n'); i >= 0 {
+				reply = reply[:i] + "…"
+			}
+			who := r.Author
+			if who == "" {
+				who = "reply"
+			}
+			boxContent.WriteString("\n" + replyStyle.Render(fmt.Sprintf("↳ %s: %s", who, reply)))
 		}
-		who := r.Author
-		if who == "" {
-			who = "reply"
-		}
-		boxContent.WriteString("\n" + replyStyle.Render(fmt.Sprintf("↳ %s: %s", who, reply)))
 	}
 	boxStyle := inlineCommentBox
 
@@ -2021,7 +2026,10 @@ func (m *AppModel) extraLinesPerDocLine() map[int]int {
 
 	if t.state != nil {
 		for _, c := range t.state.Comments {
-			bodyLines := strings.Count(c.Body, "\n") + 1
+			bodyLines := 0
+			if !c.Resolved {
+				bodyLines = strings.Count(c.Body, "\n") + 1
+			}
 			counts[c.EndAt()] += bodyLines + 3 + annotationExtraLines(newAnnotation(c))
 		}
 	}
@@ -2050,10 +2058,12 @@ func (m *AppModel) updateCommentSidebar() {
 
 	t.sidebarItems = nil
 	for _, c := range t.state.Comments {
+		if c.Resolved {
+			continue
+		}
 		t.sidebarItems = append(t.sidebarItems, sidebarItem{
 			id: c.ID, line: c.StartLine, endLine: c.EndLine,
-			body: c.Body, author: c.Author, resolved: c.Resolved,
-			replies: c.Replies,
+			body: c.Body, author: c.Author, replies: c.Replies,
 		})
 	}
 	sort.Slice(t.sidebarItems, func(i, j int) bool { return t.sidebarItems[i].line < t.sidebarItems[j].line })
@@ -2068,7 +2078,11 @@ func (m *AppModel) updateCommentSidebar() {
 	var b strings.Builder
 
 	if len(t.sidebarItems) == 0 {
-		b.WriteString(commentStyle.Render("No comments yet.\n\nPress enter to comment.\n\nUse 'v' to select\nmultiple lines first."))
+		message := "No comments yet.\n\nPress enter to comment.\n\nUse 'v' to select\nmultiple lines first."
+		if len(t.state.Comments) > 0 {
+			message = "All comments resolved."
+		}
+		b.WriteString(commentStyle.Render(message))
 		m.commentViewport.SetContent(b.String())
 		return
 	}
@@ -2086,10 +2100,6 @@ func (m *AppModel) updateCommentSidebar() {
 		if it.author != "" {
 			lineInfo += " " + commentLineStyle.Render(it.author)
 		}
-		if it.resolved {
-			lineInfo += " " + resolvedBadge.Render("✓")
-		}
-
 		cursorCol := lipgloss.NewStyle().Width(2)
 		prefix := cursorCol.Render("")
 		if isSelected {
@@ -2129,6 +2139,16 @@ func (m *AppModel) updateCommentSidebar() {
 	m.commentViewport.SetContent(b.String())
 }
 
+func unresolvedCommentCount(comments []review.Comment) int {
+	count := 0
+	for _, c := range comments {
+		if !c.Resolved {
+			count++
+		}
+	}
+	return count
+}
+
 func (m AppModel) View() tea.View {
 	if m.err != nil {
 		v := tea.NewView(fmt.Sprintf("Error: %v\n\nPress q to quit.", m.err))
@@ -2160,7 +2180,7 @@ func (m AppModel) View() tea.View {
 	t := m.tab()
 
 	// Header
-	commentCount := len(t.state.Comments)
+	commentCount := unresolvedCommentCount(t.state.Comments)
 	displayPath := t.path
 	if m.filePath != "" {
 		displayPath = m.filePath
@@ -2443,7 +2463,7 @@ func (m AppModel) renderFooter() string {
 			k("v", "select"),
 			k("enter", "comment"),
 		}
-		if len(t.sidebarItems) > 0 {
+		if len(t.state.Comments) > 0 {
 			items = append(items, k("r", "resolve/unresolve"))
 		}
 		items = append(items, k("q", "save & quit"))

@@ -590,6 +590,8 @@ func TestFinishModal_NoNewFeedbackResolvesAllAndApproves(t *testing.T) {
 
 func TestResolveKey_TogglesSelectedComment(t *testing.T) {
 	app, _ := newFinishTestApp(t, []review.Comment{testComment()}, false)
+	app.commentViewport.SetWidth(40)
+	app.commentViewport.SetHeight(20)
 	app.focused = commentPane
 	app.updateCommentSidebar()
 
@@ -599,12 +601,77 @@ func TestResolveKey_TogglesSelectedComment(t *testing.T) {
 	if !comment.Resolved || comment.ResolvedRound != 1 {
 		t.Fatalf("expected resolved comment in round 1, got %+v", comment)
 	}
+	if len(app.tabs[0].sidebarItems) != 0 {
+		t.Fatalf("resolved comment remained in sidebar: %+v", app.tabs[0].sidebarItems)
+	}
+	if got := app.commentViewport.View(); !strings.Contains(got, "All comments resolved.") {
+		t.Fatalf("resolved sidebar message = %q", got)
+	}
 
+	// The inline annotation remains available so the thread can be reopened.
+	app.focused = contentPane
+	app.tabs[0].doc = &document.Document{Path: "test.go", Content: "line", Lines: []string{"line"}}
+	app.tabs[0].cursorLine = comment.EndAt()
+	app.tabs[0].cursorOnAnnotation = true
+	app.tabs[0].cursorAnnoIdx = 0
 	app = pressKey(app, 'r')
 
 	comment = app.tabs[0].state.Comments[0]
 	if comment.Resolved || comment.ResolvedRound != 0 {
 		t.Fatalf("expected unresolved comment with cleared round, got %+v", comment)
+	}
+}
+
+func TestCommentSidebarHidesResolvedThreads(t *testing.T) {
+	unresolved := testComment()
+	unresolved.ID = "c_unresolved"
+	unresolved.Body = "still open"
+	resolved := testComment()
+	resolved.ID = "c_resolved"
+	resolved.Body = "already handled"
+	resolved.Resolved = true
+
+	app, _ := newFinishTestApp(t, []review.Comment{resolved, unresolved}, false)
+	app.commentViewport.SetWidth(40)
+	app.commentViewport.SetHeight(20)
+	app.updateCommentSidebar()
+
+	items := app.tabs[0].sidebarItems
+	if len(items) != 1 || items[0].id != unresolved.ID {
+		t.Fatalf("sidebar items = %+v, want only %s", items, unresolved.ID)
+	}
+	rendered := app.commentViewport.View()
+	if strings.Contains(rendered, resolved.Body) {
+		t.Errorf("resolved thread visible in sidebar: %q", rendered)
+	}
+	if !strings.Contains(rendered, unresolved.Body) {
+		t.Errorf("unresolved thread missing from sidebar: %q", rendered)
+	}
+	if got := unresolvedCommentCount(app.tabs[0].state.Comments); got != 1 {
+		t.Errorf("unresolved comment count = %d, want 1", got)
+	}
+}
+
+func TestRenderAnnotationBoxCollapsesResolvedThread(t *testing.T) {
+	app, _ := newFinishTestApp(t, nil, false)
+	ann := newAnnotation(review.Comment{
+		ID: "c_resolved", StartLine: 1, EndLine: 1,
+		Body: "please fix", Resolved: true,
+		Replies: []review.Reply{{Author: "AI", Body: "fixed"}},
+	})
+
+	box := app.renderAnnotationBox(ann, 40, false)
+	if !strings.Contains(box, "resolved") {
+		t.Fatalf("resolved annotation box = %q", box)
+	}
+	if strings.Contains(box, "please fix") || strings.Contains(box, "fixed") {
+		t.Fatalf("resolved annotation body remained visible: %q", box)
+	}
+	if got := strings.Count(box, "\n"); got != 3 {
+		t.Fatalf("resolved annotation box height = %d lines, want 3", got)
+	}
+	if got := annotationExtraLines(ann); got != 0 {
+		t.Fatalf("resolved annotation extra lines = %d, want 0", got)
 	}
 }
 
@@ -664,8 +731,11 @@ func TestEnterAddsThenEditsOwnCurrentRoundReply(t *testing.T) {
 		ID: "rp_ai", Author: "AI", Body: "addressed", ReviewRound: 1,
 	}}
 	app, _ := newFinishTestApp(t, []review.Comment{comment}, false)
-	app.focused = commentPane
-	app.updateCommentSidebar()
+	app.focused = contentPane
+	app.tabs[0].doc = &document.Document{Path: "test.go", Content: "line", Lines: []string{"line"}}
+	app.tabs[0].cursorLine = comment.EndAt()
+	app.tabs[0].cursorOnAnnotation = true
+	app.tabs[0].cursorAnnoIdx = 0
 
 	app = pressKey(app, tea.KeyEnter)
 	if app.modal != replyModal || app.editingID != comment.ID {
