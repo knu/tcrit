@@ -674,6 +674,81 @@ func TestCommentSidebarHidesResolvedThreads(t *testing.T) {
 	}
 }
 
+func TestFileCommentShortcutCreatesSidebarOnlyComment(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\n")
+	app.contentViewport.SetWidth(80)
+	app.commentViewport.SetWidth(40)
+	app.commentViewport.SetHeight(20)
+
+	app = pressKey(app, 'f')
+	if app.modal != fileCommentModal {
+		t.Fatalf("f opened modal %v, want file comment modal", app.modal)
+	}
+
+	app.modalTextarea.SetValue("applies to the whole file")
+	app.modalSubmit()
+
+	comments := app.tabs[0].state.Comments
+	if len(comments) != 1 {
+		t.Fatalf("comments = %+v, want one file comment", comments)
+	}
+	comment := comments[0]
+	if comment.Scope != "file" || comment.StartLine != 0 || comment.EndLine != 0 || comment.Anchor != "" {
+		t.Fatalf("file comment has line metadata: %+v", comment)
+	}
+	if got := app.session.FileComments(app.tab().path); len(got) != 1 || got[0].Scope != "file" {
+		t.Fatalf("persisted comments = %+v, want one file comment", got)
+	}
+	if got := app.commentViewport.View(); !strings.Contains(got, "File") || !strings.Contains(got, comment.Body) {
+		t.Fatalf("sidebar = %q, want file comment", got)
+	}
+	if targets := app.commentTargets(0); len(targets) != 0 {
+		t.Fatalf("file comment became an inline navigation target: %+v", targets)
+	}
+	if got := app.contentViewport.View(); strings.Contains(got, comment.Body) {
+		t.Fatalf("file comment rendered inline: %q", got)
+	}
+}
+
+func TestCommentSidebarSortsFileCommentsBeforeLineComments(t *testing.T) {
+	line := testComment()
+	line.ID = "c_line"
+	file := review.Comment{ID: "c_file", Scope: "file", Body: "whole file"}
+	app, _ := newFinishTestApp(t, []review.Comment{line, file}, false)
+	app.commentViewport.SetWidth(40)
+	app.commentViewport.SetHeight(20)
+
+	app.updateCommentSidebar()
+
+	items := app.tabs[0].sidebarItems
+	if len(items) != 2 || items[0].id != file.ID || items[1].id != line.ID {
+		t.Fatalf("sidebar items = %+v, want file comment before line comment", items)
+	}
+}
+
+func TestSidebarNavigationToFileCommentKeepsLineCursor(t *testing.T) {
+	line := testComment()
+	line.ID = "c_line"
+	line.StartLine = 3
+	line.EndLine = 3
+	file := review.Comment{ID: "c_file", Scope: "file", Body: "whole file"}
+	app := setupAppWithDoc(t, "one\ntwo\nthree\n")
+	app.tabs[0].state.Comments = []review.Comment{file, line}
+	app.focused = commentPane
+	app.tabs[0].cursorLine = 3
+	app.tabs[0].sidebarCursor = 1
+	app.updateCommentSidebar()
+
+	app = pressKey(app, 'k')
+
+	if app.tabs[0].sidebarCursor != 0 {
+		t.Fatalf("sidebar cursor = %d, want file comment", app.tabs[0].sidebarCursor)
+	}
+	if app.tabs[0].cursorLine != 3 {
+		t.Fatalf("line cursor = %d, want it unchanged", app.tabs[0].cursorLine)
+	}
+}
+
 func TestRenderAnnotationBoxCollapsesResolvedThread(t *testing.T) {
 	app, _ := newFinishTestApp(t, nil, false)
 	ann := newAnnotation(review.Comment{

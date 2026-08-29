@@ -22,6 +22,7 @@ type keyMap struct {
 	PrevChange   key.Binding
 	TabSearch    key.Binding
 	Resolve      key.Binding
+	FileComment  key.Binding
 }
 
 var keys = keyMap{
@@ -44,4 +45,5 @@ var keys = keyMap{
 	PrevChange:   key.NewBinding(key.WithKeys("N"), key.WithHelp("N", "prev change")),
 	TabSearch:    key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search tabs")),
 	Resolve:      key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "resolve/unresolve")),
+	FileComment:  key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "comment on file")),
 }

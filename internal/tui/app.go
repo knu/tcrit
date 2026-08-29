@@ -31,6 +31,7 @@ type modalType int
 const (
 	noModal modalType = iota
 	commentModal
+	fileCommentModal
 	replyModal
 	editModal
 	finishModal
@@ -259,7 +260,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	var cmd tea.Cmd
-	if m.modal == commentModal || m.modal == replyModal || m.modal == editModal {
+	if m.modal == commentModal || m.modal == fileCommentModal || m.modal == replyModal || m.modal == editModal {
 		m.modalTextarea, cmd = m.modalTextarea.Update(msg)
 		return m, cmd
 	}
@@ -275,7 +276,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.modal == commentModal || m.modal == replyModal || m.modal == editModal {
+	if m.modal == commentModal || m.modal == fileCommentModal || m.modal == replyModal || m.modal == editModal {
 		return m.handleTextModal(msg)
 	}
 	if m.modal == finishModal {
@@ -337,6 +338,16 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.rebuildContent()
 			return m, nil
 		}
+
+	case key.Matches(msg, keys.FileComment):
+		if !t.selecting && t.state != nil {
+			m.modal = fileCommentModal
+			m.modalFocus = 0
+			m.modalTextarea.Placeholder = "Type your file comment..."
+			m.modalTextarea.Reset()
+			m.modalTextarea.Focus()
+		}
+		return m, nil
 	}
 
 	// Tab switching (multi-file mode)
@@ -524,8 +535,10 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.updateCommentSidebar()
 			m.rebuildContent()
 			sel := t.sidebarItems[t.sidebarCursor]
-			t.cursorLine = sel.line
-			m.scrollToAnnotation(sel.line, sel.endLine)
+			if sel.scope != "file" {
+				t.cursorLine = sel.line
+				m.scrollToAnnotation(sel.line, sel.endLine)
+			}
 			return m, nil
 		}
 
@@ -644,6 +657,20 @@ func (m *AppModel) modalSubmit() {
 			Body:      body,
 			Author:    m.author,
 			Scope:     "line",
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+		if m.session != nil {
+			c.ReviewRound = m.session.CJ.ReviewRound
+		}
+		t.state.Comments = append(t.state.Comments, c)
+	case fileCommentModal:
+		now := review.Now()
+		c := review.Comment{
+			ID:        review.RandomCommentID(),
+			Body:      body,
+			Author:    m.author,
+			Scope:     "file",
 			CreatedAt: now,
 			UpdatedAt: now,
 		}
@@ -1227,6 +1254,9 @@ func (m *AppModel) annotationsAfterLine(lineNum int) []annotation {
 	}
 	var anns []annotation
 	for _, c := range t.state.Comments {
+		if c.Scope == "file" {
+			continue
+		}
 		if c.EndAt() == lineNum {
 			anns = append(anns, newAnnotation(c))
 		}
@@ -1248,6 +1278,9 @@ func (m *AppModel) commentTargets(tabIndex int) []commentTarget {
 	indices := make(map[int]int)
 	targets := make([]commentTarget, 0, len(t.state.Comments))
 	for _, c := range t.state.Comments {
+		if c.Scope == "file" {
+			continue
+		}
 		line := c.EndAt()
 		targets = append(targets, commentTarget{line: line, annoIdx: indices[line]})
 		indices[line]++
@@ -1371,6 +1404,7 @@ func (m *AppModel) selectChange(tabIndex int, chunk changeChunk) {
 // sidebarItem represents a comment in the sidebar list.
 type sidebarItem struct {
 	id      string
+	scope   string
 	line    int
 	endLine int
 	body    string
@@ -1420,6 +1454,9 @@ func (m *AppModel) rebuildContent() {
 	annosByEndLine := make(map[int][]annotation)
 	if t.state != nil {
 		for _, c := range t.state.Comments {
+			if c.Scope == "file" {
+				continue
+			}
 			endAt := c.EndAt()
 			annosByEndLine[endAt] = append(annosByEndLine[endAt], newAnnotation(c))
 		}
@@ -1429,6 +1466,9 @@ func (m *AppModel) rebuildContent() {
 	annotatedLines := make(map[int]int)
 	if t.state != nil {
 		for _, c := range t.state.Comments {
+			if c.Scope == "file" {
+				continue
+			}
 			for l := c.StartLine; l <= c.EndAt(); l++ {
 				annotatedLines[l]++
 			}
@@ -2078,6 +2118,9 @@ func (m *AppModel) extraLinesPerDocLine() map[int]int {
 
 	if t.state != nil {
 		for _, c := range t.state.Comments {
+			if c.Scope == "file" {
+				continue
+			}
 			bodyLines := 0
 			if !c.Resolved {
 				bodyLines = strings.Count(c.Body, "\n") + 1
@@ -2114,11 +2157,19 @@ func (m *AppModel) updateCommentSidebar() {
 			continue
 		}
 		t.sidebarItems = append(t.sidebarItems, sidebarItem{
-			id: c.ID, line: c.StartLine, endLine: c.EndLine,
+			id: c.ID, scope: c.Scope, line: c.StartLine, endLine: c.EndLine,
 			body: c.Body, author: c.Author, replies: c.Replies,
 		})
 	}
-	sort.Slice(t.sidebarItems, func(i, j int) bool { return t.sidebarItems[i].line < t.sidebarItems[j].line })
+	sort.SliceStable(t.sidebarItems, func(i, j int) bool {
+		if t.sidebarItems[i].scope == "file" {
+			return t.sidebarItems[j].scope != "file"
+		}
+		if t.sidebarItems[j].scope == "file" {
+			return false
+		}
+		return t.sidebarItems[i].line < t.sidebarItems[j].line
+	})
 
 	if t.sidebarCursor >= len(t.sidebarItems) {
 		t.sidebarCursor = len(t.sidebarItems) - 1
@@ -2130,7 +2181,7 @@ func (m *AppModel) updateCommentSidebar() {
 	var b strings.Builder
 
 	if len(t.sidebarItems) == 0 {
-		message := "No comments yet.\n\nPress enter to comment.\n\nUse 'v' to select\nmultiple lines first."
+		message := "No comments yet.\n\nPress enter for a line comment,\nor 'f' for a file comment."
 		if len(t.state.Comments) > 0 {
 			message = "All comments resolved."
 		}
@@ -2143,7 +2194,9 @@ func (m *AppModel) updateCommentSidebar() {
 		isSelected := m.focused == commentPane && idx == t.sidebarCursor
 
 		var lineInfo string
-		if it.endLine > it.line {
+		if it.scope == "file" {
+			lineInfo = "File"
+		} else if it.endLine > it.line {
 			lineInfo = fmt.Sprintf("L%d-%d", it.line, it.endLine)
 		} else {
 			lineInfo = fmt.Sprintf("L%d", it.line)
@@ -2514,6 +2567,7 @@ func (m AppModel) renderFooter() string {
 			k("s", "sidebar"),
 			k("v", "select"),
 			k("enter", "comment"),
+			k("f", "file comment"),
 		}
 		if len(t.state.Comments) > 0 {
 			items = append(items, k("r", "resolve/unresolve"))
@@ -2607,6 +2661,16 @@ func (m AppModel) renderWithModal(background string) string {
 		modalContent = modalStyle.Width(modalWidth).Render(
 			title + "\n" + contextBox + "\n\n" + m.modalTextarea.View() + "\n\n" + buttons)
 
+	case fileCommentModal:
+		title := modalTitleStyle.Render("Add File Comment")
+		path := contextBoxStyle.Width(innerWidth - 2).Render(m.tab().path)
+		saveBtn := m.renderModalButton("Save", "ctrl+s", m.modalFocus == 1)
+		cancelBtn := m.renderModalButton("Cancel", "esc", m.modalFocus == 2)
+		buttons := lipgloss.JoinHorizontal(lipgloss.Center, saveBtn, "  ", cancelBtn)
+
+		modalContent = modalStyle.Width(modalWidth).Render(
+			title + "\n" + path + "\n\n" + m.modalTextarea.View() + "\n\n" + buttons)
+
 	case replyModal, editModal:
 		titleText := "Edit Comment"
 		if m.modal == replyModal {
@@ -2618,11 +2682,15 @@ func (m AppModel) renderWithModal(background string) string {
 		var contextSection, threadSection string
 		for _, c := range m.tabs[m.activeTab].state.Comments {
 			if c.ID == m.editingID {
-				start := c.StartLine
-				end := c.EndAt()
-				contextSection = contextBoxStyle.
-					Width(innerWidth - 2).
-					Render(m.renderContextPreview(start, end, innerWidth-4))
+				if c.Scope == "file" {
+					contextSection = contextBoxStyle.Width(innerWidth - 2).Render(m.tab().path)
+				} else {
+					start := c.StartLine
+					end := c.EndAt()
+					contextSection = contextBoxStyle.
+						Width(innerWidth - 2).
+						Render(m.renderContextPreview(start, end, innerWidth-4))
+				}
 				if m.modal == replyModal || m.editingReplyID != "" {
 					var thread strings.Builder
 					author := c.Author

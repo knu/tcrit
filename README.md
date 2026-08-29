@@ -11,6 +11,7 @@
 - **[Crit](https://crit.md/)-compatible agent workflow** — review commands block until the reviewer finishes, print an agent-facing result, and support iterative rounds through `tcrit --session <id>`; each round refreshes the changed-file set so newly added files appear without restarting the TUI.
 - **Native tmux context discovery** — tcrit finds the invoking pane from the agent's process ancestry even when tools such as Codex do not inherit `$TMUX` or `$TMUX_PANE`.
 - **CritJSON review state and CLI** — comments use [Crit](https://crit.md/)-compatible `review.json` data, with `tcrit comment` and `tcrit comments` for automation.
+- **File-level comments** — reviewers can press `f` to comment on the active file, with file threads kept in the comment sidebar instead of attached to a line.
 - **Versioned plan reviews** — `tcrit plan` saves immutable revisions and carries comment threads forward as the plan changes.
 - **Richer review lifecycle** — comment threads can be replied to, resolved, reopened, and approved together; resolved threads collapse out of the active comment view, while comments and changes can be navigated across files.
 - **Improved diffs and Git handling** — inline replacements preserve whitespace, long syntax-highlighted lines wrap instead of being truncated, comment anchors survive edited rounds, and paths with spaces or special characters work correctly.
@@ -194,6 +195,7 @@ Tcrit resolves the tmux server and pane from the invoking process tree, so this 
 | `ctrl+d` / `ctrl+u` / `PgDn` / `PgUp` | Half page down / up                      |
 | `g` / `G` / `Home` / `End`            | Jump to top / bottom                     |
 | `enter`                               | Add comment at current line              |
+| `f`                                   | Add comment on the current file          |
 | `v`                                   | Visual select mode (multi-line comments) |
 | `s`                                   | Toggle comment sidebar                   |
 | `[` / `]`                             | Jump to prev / next comment              |
