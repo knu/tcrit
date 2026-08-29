@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -893,5 +894,57 @@ func TestRoundStart_ReloadsCommentsAndAdvancesRound(t *testing.T) {
 	}
 	if !comments[0].CarriedForward || comments[0].ID == "c_test01" {
 		t.Errorf("expected a re-minted carried-forward comment, got %+v", comments[0])
+	}
+}
+
+func TestRoundStartRefreshesCodeReviewTabs(t *testing.T) {
+	t.Chdir(t.TempDir())
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, output)
+		}
+	}
+
+	runGit("init", "--quiet")
+	if err := os.WriteFile("existing.go", []byte("package existing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "existing.go")
+	runGit("-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--quiet", "-m", "initial")
+	if err := os.WriteFile("existing.go", []byte("package existing\n\nvar changed = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := gitpkg.ChangedFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := NewCodeReviewApp(files, "HEAD", AppConfig{})
+	if len(app.tabs) != 1 {
+		t.Fatalf("initial tabs = %d, want 1", len(app.tabs))
+	}
+
+	newFiles := []string{"go.mod", "internal/cli/process_darwin.go", "internal/cli/process_linux.go", "internal/cli/process_other.go"}
+	for _, path := range newFiles {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("new file\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit("add", path)
+	}
+
+	app.startNextRound()
+	want := []string{"existing.go", "go.mod", "internal/cli/process_darwin.go", "internal/cli/process_linux.go", "internal/cli/process_other.go"}
+	if len(app.tabs) != len(want) {
+		t.Fatalf("refreshed tabs = %d, want %d", len(app.tabs), len(want))
+	}
+	for i, path := range want {
+		if app.tabs[i].path != path {
+			t.Errorf("tab %d = %q, want %q", i, app.tabs[i].path, path)
+		}
 	}
 }

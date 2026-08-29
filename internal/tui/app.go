@@ -965,6 +965,11 @@ func (m *AppModel) startNextRound() {
 			m.session.CJ = fresh.CJ
 		}
 	}
+	if m.multiFile && m.baseRef != "" {
+		if files, err := gitpkg.ChangedFilesFrom(m.baseRef); err == nil {
+			m.syncCodeReviewTabs(files)
+		}
+	}
 
 	now := review.Now()
 	for i := range m.tabs {
@@ -983,6 +988,10 @@ func (m *AppModel) startNextRound() {
 		}
 		t.state = &fileReview{Comments: comments}
 		if m.multiFile && m.baseRef != "" {
+			t.changedLines = nil
+			t.inlineChanges = nil
+			t.deletedAfter = nil
+			t.changeChunks = nil
 			if diff, err := gitpkg.DiffFile(t.path, m.baseRef); err == nil && diff != nil {
 				t.changedLines = diff.ChangedLines
 				t.inlineChanges = diff.InlineChanges
@@ -1003,6 +1012,60 @@ func (m *AppModel) startNextRound() {
 	m.newFeedback = false
 	m.rebuildContent()
 	m.updateCommentSidebar()
+}
+
+func (m *AppModel) syncCodeReviewTabs(files []gitpkg.FileChange) {
+	activePath := ""
+	if m.activeTab >= 0 && m.activeTab < len(m.tabs) {
+		activePath = m.tabs[m.activeTab].path
+	}
+
+	existing := make(map[string]FileTab, len(m.tabs))
+	for _, t := range m.tabs {
+		existing[t.path] = t
+	}
+
+	changed := make(map[string]bool, len(files))
+	tabs := make([]FileTab, 0, len(files))
+	for _, f := range files {
+		changed[f.Path] = true
+		t, ok := existing[f.Path]
+		if !ok {
+			t = newFileTab(f.Path, nil)
+		}
+		t.isBinary = f.Status == gitpkg.StatusBinary
+		t.isDeleted = f.Status == gitpkg.StatusDeleted
+		tabs = append(tabs, t)
+	}
+
+	for _, t := range m.tabs {
+		hasComments := t.state != nil && len(t.state.Comments) > 0
+		if !hasComments {
+			hasComments = len(m.sessionComments(t.path)) > 0
+		}
+		if changed[t.path] || !hasComments {
+			continue
+		}
+		tabs = append(tabs, t)
+	}
+
+	sort.Slice(tabs, func(i, j int) bool { return tabs[i].path < tabs[j].path })
+	m.tabs = tabs
+	if len(tabs) == 0 {
+		m.activeTab = 0
+		return
+	}
+	if activePath != "" {
+		for i := range tabs {
+			if tabs[i].path == activePath {
+				m.activeTab = i
+				return
+			}
+		}
+	}
+	if m.activeTab >= len(tabs) {
+		m.activeTab = len(tabs) - 1
+	}
 }
 
 func (m *AppModel) handleTextModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
