@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.5.0
+
+### Added
+
+- **File-level comments** — press `f` to comment on the active file without attaching feedback to a specific line; file threads appear at the top of the comment sidebar
+- **Keyboard help** — press `?` for a compact reference covering navigation, review, search, selection, and dialog controls
+- **Native tmux context discovery** — tcrit can find the invoking pane through process ancestry when agent environments do not inherit `TMUX` or `TMUX_PANE`
+
+### Changed
+
+- Resolved comment threads collapse out of the active sidebar while remaining available inline for reopening
+- Code review tabs refresh between rounds so newly added and removed files appear without restarting the TUI
+- The persistent footer now emphasizes review-specific actions and leaves conventional navigation keys to the help screen
+
+### Fixed
+
+- Concurrent CLI comments and replies no longer overwrite one another
+- Long syntax-highlighted source lines wrap instead of being truncated
+- Nested Markdown styles preserve ANSI colors and backgrounds correctly
+
 ## 0.4.0
 
 ### Changed
