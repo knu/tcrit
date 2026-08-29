@@ -331,6 +331,19 @@ type BulkStats struct {
 // ApplyBulk validates and applies all entries to this session in one atomic
 // write.  Any entry error aborts the batch before anything is saved.
 func (s *Session) ApplyBulk(entries []BulkCommentEntry, globalAuthor, userID string) (BulkStats, error) {
+	var stats BulkStats
+	err := s.Update(func(s *Session) error {
+		var err error
+		stats, err = s.applyBulk(entries, globalAuthor, userID)
+		return err
+	})
+	if err != nil {
+		return BulkStats{}, err
+	}
+	return stats, nil
+}
+
+func (s *Session) applyBulk(entries []BulkCommentEntry, globalAuthor, userID string) (BulkStats, error) {
 	if len(entries) == 0 {
 		return BulkStats{}, fmt.Errorf("no comment entries provided")
 	}
@@ -344,9 +357,6 @@ func (s *Session) ApplyBulk(entries []BulkCommentEntry, globalAuthor, userID str
 		} else {
 			stats.Comments++
 		}
-	}
-	if err := s.Save(); err != nil {
-		return BulkStats{}, err
 	}
 	return stats, nil
 }

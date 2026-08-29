@@ -130,6 +130,9 @@ func TestBulkEntryLineFieldForms(t *testing.T) {
 
 	sess := newTestSession(t)
 	sess.SetFileComments("a.go", "", []Comment{{ID: "c_1", StartLine: 1, EndLine: 1}})
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
 	stats, err := sess.ApplyBulk(entries, "AI", "")
 	if err != nil {
 		t.Fatalf("ApplyBulk: %v", err)

@@ -71,8 +71,29 @@ func (s *Session) SetFileComments(path, status string, comments []Comment) {
 	s.CJ.Files[key] = f
 }
 
-// Save writes review.json atomically under an advisory file lock.
+// Save writes the in-memory review state atomically under an advisory file lock.
 func (s *Session) Save() error {
+	return s.withLock(s.saveLocked)
+}
+
+// Update reloads the latest review state and applies fn while holding the
+// advisory lock, then saves the result.  Keeping the full read-modify-write
+// cycle under one lock prevents concurrent CLI commands from losing updates.
+func (s *Session) Update(fn func(*Session) error) error {
+	return s.withLock(func() error {
+		fresh, err := openSessionAt(s.Key, s.Dir)
+		if err != nil {
+			return err
+		}
+		s.CJ = fresh.CJ
+		if err := fn(s); err != nil {
+			return err
+		}
+		return s.saveLocked()
+	})
+}
+
+func (s *Session) withLock(fn func() error) error {
 	if err := os.MkdirAll(s.Dir, 0o755); err != nil {
 		return fmt.Errorf("creating review dir: %w", err)
 	}
@@ -89,11 +110,12 @@ func (s *Session) Save() error {
 	if !locked {
 		return fmt.Errorf("could not acquire lock on %s — another process may be writing. Try again", lockPath)
 	}
-	defer func() {
-		_ = fileLock.Unlock()
-		_ = os.Remove(lockPath)
-	}()
+	defer func() { _ = fileLock.Unlock() }()
+	return fn()
+}
 
+func (s *Session) saveLocked() error {
+	reviewPath := s.Path()
 	s.CJ.Touch()
 	data, err := json.MarshalIndent(&s.CJ, "", "  ")
 	if err != nil {

@@ -98,8 +98,10 @@ func runReviewComment(output, author, body string) error {
 	if err != nil {
 		return err
 	}
-	sess.AppendReviewComment(body, author, "")
-	if err := sess.Save(); err != nil {
+	if err := sess.Update(func(s *review.Session) error {
+		s.AppendReviewComment(body, author, "")
+		return nil
+	}); err != nil {
 		return err
 	}
 	fmt.Println("Added review comment")
@@ -116,8 +118,10 @@ func runFileOrLineComment(output, author, loc, body string) error {
 		if err := validateCommentPath(path); err != nil {
 			return err
 		}
-		sess.AppendLineComment(path, start, end, body, author, "")
-		if err := sess.Save(); err != nil {
+		if err := sess.Update(func(s *review.Session) error {
+			s.AppendLineComment(path, start, end, body, author, "")
+			return nil
+		}); err != nil {
 			return err
 		}
 		if end > start {
@@ -128,17 +132,20 @@ func runFileOrLineComment(output, author, loc, body string) error {
 		return nil
 	}
 
-	// File-level comment: the path must exist on disk or in the review.
-	if _, statErr := os.Stat(loc); statErr != nil {
-		if _, ok := sess.CJ.Files[review.NormalizePath(loc)]; !ok {
-			return fmt.Errorf("invalid location %q — expected <path>:<line[-end]>, or a valid file path for file-level comments", loc)
-		}
-	}
 	if err := validateCommentPath(loc); err != nil {
 		return err
 	}
-	sess.AppendFileComment(loc, body, author, "")
-	if err := sess.Save(); err != nil {
+	if err := sess.Update(func(s *review.Session) error {
+		// File-level comments must target a path on disk or in the latest
+		// review state loaded inside the update transaction.
+		if _, statErr := os.Stat(loc); statErr != nil {
+			if _, ok := s.CJ.Files[review.NormalizePath(loc)]; !ok {
+				return fmt.Errorf("invalid location %q — expected <path>:<line[-end]>, or a valid file path for file-level comments", loc)
+			}
+		}
+		s.AppendFileComment(loc, body, author, "")
+		return nil
+	}); err != nil {
 		return err
 	}
 	fmt.Printf("Added file comment on %s\n", review.NormalizePath(loc))
@@ -174,7 +181,9 @@ func runCommentReply(output, author, replyTo, body string) error {
 	if err != nil {
 		return err
 	}
-	err = sess.AppendReply(replyTo, body, author, "", commentResolve, commentPath)
+	err = sess.Update(func(s *review.Session) error {
+		return s.AppendReply(replyTo, body, author, "", commentResolve, commentPath)
+	})
 	var notFound *review.CommentNotFoundError
 	if errors.As(err, &notFound) && commentSession == "" && commentPlan == "" {
 		// The target may live in another registered review; redirect there.
@@ -187,13 +196,12 @@ func runCommentReply(output, author, replyTo, body string) error {
 		}
 		sess = found[0]
 		fmt.Fprintf(os.Stderr, "Note: comment %s found in session %s\n", replyTo, sess.Key)
-		if err := sess.AppendReply(replyTo, body, author, "", commentResolve, commentPath); err != nil {
+		if err := sess.Update(func(s *review.Session) error {
+			return s.AppendReply(replyTo, body, author, "", commentResolve, commentPath)
+		}); err != nil {
 			return err
 		}
 	} else if err != nil {
-		return err
-	}
-	if err := sess.Save(); err != nil {
 		return err
 	}
 	fmt.Printf("Replied to %s\n", replyTo)

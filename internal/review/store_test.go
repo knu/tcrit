@@ -70,6 +70,63 @@ func TestSessionRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSessionUpdatePreservesConcurrentReplies(t *testing.T) {
+	setupStateDir(t)
+
+	sess, err := OpenSession("", "0123456789ab")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess.SetFileComments("a.go", "", []Comment{
+		{ID: "c_first", Body: "first"},
+		{ID: "c_second", Body: "second"},
+	})
+	if err := sess.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := OpenSession("", sess.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := OpenSession("", sess.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	update := func(s *Session, id, body string) {
+		<-start
+		errs <- s.Update(func(s *Session) error {
+			return s.AppendReply(id, body, "AI", "", false, "")
+		})
+	}
+	go update(first, "c_first", "first reply")
+	go update(second, "c_second", "second reply")
+	close(start)
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatalf("updating session: %v", err)
+		}
+	}
+
+	reloaded, err := OpenSession("", sess.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	comments := reloaded.FileComments("a.go")
+	if len(comments) != 2 {
+		t.Fatalf("comments = %+v, want two", comments)
+	}
+	if len(comments[0].Replies) != 1 || comments[0].Replies[0].Body != "first reply" {
+		t.Errorf("first reply lost: %+v", comments[0].Replies)
+	}
+	if len(comments[1].Replies) != 1 || comments[1].Replies[0].Body != "second reply" {
+		t.Errorf("second reply lost: %+v", comments[1].Replies)
+	}
+}
+
 func TestSessionKeyPathNormalization(t *testing.T) {
 	setupStateDir(t)
 	os.WriteFile("plan.md", []byte("# Test\n"), 0o644)
