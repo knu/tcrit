@@ -1892,6 +1892,18 @@ func formatTableSep(colWidths []int) string {
 }
 
 func highlightInline(line string) string {
+	// Render links before injecting any ANSI styles. CSI sequences also start
+	// with "[", so running the Markdown link regexp afterward can mistake an
+	// escape sequence followed by a link for part of the link label.
+	line = reLink.ReplaceAllStringFunc(line, func(match string) string {
+		idx := strings.Index(match, "](")
+		if idx < 0 {
+			return match
+		}
+		text := match[1:idx]
+		return mdLinkStyle.Render(text)
+	})
+
 	line = reCode.ReplaceAllStringFunc(line, func(match string) string {
 		inner := match[1 : len(match)-1]
 		return mdCodeStyle.Render(" " + inner + " ")
@@ -1915,15 +1927,6 @@ func highlightInline(line string) string {
 		prefix := match[:start]
 		suffix := match[end:]
 		return prefix + mdItalicStyle.Render(inner) + suffix
-	})
-
-	line = reLink.ReplaceAllStringFunc(line, func(match string) string {
-		idx := strings.Index(match, "](")
-		if idx < 0 {
-			return match
-		}
-		text := match[1:idx]
-		return mdLinkStyle.Render(text)
 	})
 
 	return line
