@@ -17,84 +17,66 @@ The `tcrit` binary must be installed and on PATH. If not installed:
 go install github.com/knu/tcrit/cmd/tcrit@latest
 ```
 
-## Step 1: Launch the TUI
+## Step 1: Launch the review and block
 
-When starting a new review task, reset state left over from an earlier task once, from the project root.  This removes saved review comments and the code review session while preserving `.crit/.gitignore`:
+When starting a new review task (not a later round of the same task), reset state left over from an earlier task once, from the project root:
 
 ```bash
 tcrit clear --all
 ```
 
-Do not run it again when reopening the review after addressing comments.  Keep the existing review state throughout that review-fix-re-review cycle.
-
 Check if `$TMUX` is set:
 
-If in tmux, run this command with a **timeout of 600000** (10 minutes) since it blocks until the user finishes reviewing:
+If in tmux, run this command with a **timeout of 600000** (10 minutes) since it blocks until the reviewer finishes:
+
 ```bash
-tcrit review $ARGUMENTS --detach --wait
+tcrit plan $ARGUMENTS
 ```
-If the command runner yields an execution session ID, the command is still running even if its initial output says that the review opened.  Keep polling that execution session until the process exits.  A quick exit is a valid completed review; do not impose a minimum wait.  Continue to Step 2 only after the process exits, and never use a fixed sleep in place of session polling.
 
+`tcrit plan` saves the document as a versioned plan (slug derived from its first heading; pass `--name <slug>` to pin it) and opens the review of the latest version.
 
-If not in tmux (command fails with "requires a tmux session"), ask the user to run the TUI manually:
+The TUI opens in a tmux split pane; the command blocks until the reviewer approves or finishes with comments. If the command runner yields an execution session ID, keep polling that execution session until the process exits. A quick exit is a valid completed review; do not impose a minimum wait, and never use a fixed sleep in place of session polling.
+
+If not in tmux (the command fails with "no tmux session"), ask the user to run the TUI manually:
 
 > Please run this in your terminal, review the document, and let me know when you're done:
 >
 > ```
-> tcrit review $ARGUMENTS
+> tcrit plan $ARGUMENTS
 > ```
 
-Wait for the user to confirm before proceeding.
+Wait for the user to confirm, then read the comments with `tcrit comments --json` instead of relying on the command output below.
 
-## Step 2: Read the comments
+## Step 2: Read the result
 
-After the user confirms the review is complete, read the review comments:
+When the command completes, read **stdout** and follow its instructions. Check **stderr** for `approved: true` or `approved: false`.
 
-```bash
-tcrit status $ARGUMENTS
-```
+- `approved: true` — the review is done; stop the loop and proceed.
+- `approved: false` — stdout contains the unresolved comments as JSON and the command to run for the next round.
 
-This outputs JSON with the file path and comments array.
+Fallback (mid-round re-entry or headless): `tcrit comments --json` lists the unresolved comments.
 
-## Step 3: Address comments
+## Step 3: Address each comment
 
-For each comment in the `comments` array:
+For each unresolved comment:
 
-1. Read the `line` number and `content_snippet` to locate where in the document the comment applies
+1. Read the `start_line`/`end_line` numbers and `anchor` to locate where in the document the comment applies
 2. Read the `body` for what the reviewer wants changed
 3. Edit the document at `$ARGUMENTS` to address the comment
+4. Reply recording what you did, using the exact command form shown in the finish prompt (for plans it includes `--plan <slug>`; do NOT pass `--resolve` — resolving is the reviewer's call):
 
-After addressing ALL comments, summarize what you changed.
-
-## Step 4: Prompt for next action
-
-After addressing all comments and summarizing the changes, use the `AskUserQuestion` tool to ask:
-
-- **Question:** "I've addressed all your comments. What would you like to do next?"
-- **Header:** "Next action"
-- **Options:**
-  - **Re-review** — Open TCrit again to review the document
-  - **Continue** — Done, move on
-
-If the user provides free-form input (via the "Other" option), respond accordingly, then ask again with `AskUserQuestion` until they pick Re-review or Continue.
-
-If the user chooses **Re-review**, use `AskUserQuestion` again to ask:
-
-- **Question:** "Keep existing comments or clear them before re-reviewing?"
-- **Header:** "Comments"
-- **Options:**
-  - **Keep** — Keep existing comments visible during re-review
-  - **Clear** — Remove all comments before re-reviewing
-
-If clear, run:
 ```bash
-tcrit clear $ARGUMENTS
+tcrit comment --plan <slug> --reply-to <comment-id> --author 'Claude Code' "<what you did>"
 ```
-Then go back to Step 1. If keep, go back to Step 1 directly.
 
-If the user chooses **Continue**, done.
+## Step 4: Start the next round
+
+Run the command printed at the end of the finish prompt (for plans it looks like `tcrit plan --name <slug> $ARGUMENTS`, which saves the revised document as a new version), again with a long timeout. It signals the waiting TUI to reload your edits and replies, then blocks until the reviewer finishes the next round. Return to Step 2.
+
+When a round ends with `approved: true`, the loop is over.
 
 ## Important notes
 
-- Do NOT modify the document while the TUI is open — only edit after it exits
-- The `content_snippet` field shows the line content when the comment was created — use it to find the right location even if line numbers have shifted
+- Do NOT modify the document while the reviewer is actively reviewing — edit only after the review command returns
+- The `anchor` field holds the full text of the commented lines when the comment was created — use it to find the right location even if line numbers have shifted
+- `resolved: false` or a missing `resolved` field both mean unresolved

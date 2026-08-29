@@ -110,6 +110,13 @@ var (
 				Foreground(lipgloss.Blue).
 				Bold(true)
 
+	resolvedBadge = lipgloss.NewStyle().
+			Foreground(lipgloss.Green).
+			Bold(true)
+
+	replyStyle = lipgloss.NewStyle().
+			Foreground(subtle)
+
 	// Annotation gutter marker
 	annotationGutter = lipgloss.NewStyle().
 				Foreground(lipgloss.BrightCyan).

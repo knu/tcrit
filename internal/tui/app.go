@@ -7,14 +7,12 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/google/uuid"
 
 	"github.com/knu/tcrit/internal/document"
 	gitpkg "github.com/knu/tcrit/internal/git"
@@ -34,8 +32,30 @@ const (
 	noModal modalType = iota
 	commentModal
 	editModal
-	approveModal
+	finishModal
 )
+
+// FinishEvent is emitted on the finish channel when the reviewer finishes a
+// round.  The runner turns it into a payload for blocked agent clients.
+type FinishEvent struct {
+	Approved bool
+}
+
+// RoundStartMsg tells the TUI an agent requested the next review round:
+// reload comments (including agent replies) and file contents, and advance
+// the round counter.
+type RoundStartMsg struct{}
+
+// AppConfig carries the cross-cutting dependencies of the TUI.
+type AppConfig struct {
+	Session *review.Session
+	Author  string
+	// Serving is true when an agent client may be blocked on this review;
+	// an unresolved finish then parks the TUI in a waiting state instead
+	// of quitting.
+	Serving  bool
+	FinishCh chan<- FinishEvent
+}
 
 // gutterWidth is the total width of the left gutter: line number (5) + marker (1) + space (1).
 const gutterWidth = 7
@@ -56,6 +76,16 @@ type AppModel struct {
 	// Single-file mode (legacy)
 	filePath string
 
+	// Review session backing all tabs, and the author stamped on new comments.
+	session *review.Session
+	author  string
+
+	// Finish-flow state (see AppConfig).
+	serving  bool
+	finishCh chan<- FinishEvent
+	waiting  bool
+	baseRef  string
+
 	detached bool
 
 	contentViewport viewport.Model
@@ -66,10 +96,6 @@ type AppModel struct {
 	editingID  string // ID of the comment being edited
 	modalFocus int    // 0=textarea, 1=save button, 2=cancel button, 3=delete button (edit modal only)
 
-	// True once the reviewer adds or edits a comment in this session;
-	// quitting without new feedback offers to approve and clear comments.
-	newFeedback bool
-
 	err error
 }
 
@@ -78,7 +104,7 @@ func (m *AppModel) tab() *FileTab {
 	return &m.tabs[m.activeTab]
 }
 
-func NewApp(filePath string) AppModel {
+func NewApp(filePath string, cfg AppConfig) AppModel {
 	ta := textarea.New()
 	ta.Placeholder = "Type your comment..."
 	ta.ShowLineNumbers = false
@@ -93,7 +119,11 @@ func NewApp(filePath string) AppModel {
 		filePath:        filePath,
 		tabs:            []FileTab{tab},
 		activeTab:       0,
-		detached:        os.Getenv("CRIT_DETACHED") == "1",
+		session:         cfg.Session,
+		author:          cfg.Author,
+		serving:         cfg.Serving,
+		finishCh:        cfg.FinishCh,
+		detached:        os.Getenv("TCRIT_DETACHED") == "1",
 		contentViewport: viewport.New(),
 		commentViewport: viewport.New(),
 		modalTextarea:   ta,
@@ -101,7 +131,7 @@ func NewApp(filePath string) AppModel {
 }
 
 // NewCodeReviewApp creates a multi-file code review TUI.
-func NewCodeReviewApp(files []gitpkg.FileChange, ref string) AppModel {
+func NewCodeReviewApp(files []gitpkg.FileChange, ref string, cfg AppConfig) AppModel {
 	ta := textarea.New()
 	ta.Placeholder = "Type your comment..."
 	ta.ShowLineNumbers = false
@@ -134,7 +164,12 @@ func NewCodeReviewApp(files []gitpkg.FileChange, ref string) AppModel {
 		tabs:            tabs,
 		activeTab:       0,
 		multiFile:       true,
-		detached:        os.Getenv("CRIT_DETACHED") == "1",
+		session:         cfg.Session,
+		author:          cfg.Author,
+		serving:         cfg.Serving,
+		finishCh:        cfg.FinishCh,
+		baseRef:         ref,
+		detached:        os.Getenv("TCRIT_DETACHED") == "1",
 		contentViewport: viewport.New(),
 		commentViewport: viewport.New(),
 		modalTextarea:   ta,
@@ -192,27 +227,15 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case docRenderedMsg:
-		// Load documents and existing review state for each tab
+		// Load documents and existing review comments for each tab
 		for i := range m.tabs {
 			t := &m.tabs[i]
+			t.state = &fileReview{Comments: m.sessionComments(t.path)}
 			if t.isBinary || t.isDeleted {
-				t.state = &review.ReviewState{
-					File:     t.path,
-					Comments: []review.Comment{},
-				}
 				continue
 			}
 			doc, _ := document.Load(t.path)
 			t.doc = doc
-			// Load existing review state (returns empty state if none exists)
-			state, err := review.Load(t.path)
-			if err != nil {
-				state = &review.ReviewState{
-					File:     t.path,
-					Comments: []review.Comment{},
-				}
-			}
-			t.state = state
 			t.ensureHighlightCache()
 		}
 
@@ -222,6 +245,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case errMsg:
 		m.err = msg.err
+		return m, nil
+
+	case RoundStartMsg:
+		m.startNextRound()
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -248,8 +275,16 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.modal == commentModal || m.modal == editModal {
 		return m.handleTextModal(msg)
 	}
-	if m.modal == approveModal {
-		return m.handleApproveModal(msg)
+	if m.modal == finishModal {
+		return m.handleFinishModal(msg)
+	}
+
+	// While waiting for the agent's next round, only quitting is possible.
+	if m.waiting {
+		if key.Matches(msg, keys.Quit) {
+			return m, tea.Quit
+		}
+		return m, nil
 	}
 
 	// Tab search input mode
@@ -261,20 +296,11 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	switch {
 	case key.Matches(msg, keys.Quit):
-		// Auto-save all tabs on quit
-		for i := range m.tabs {
-			if m.tabs[i].state != nil {
-				review.Save(m.tabs[i].state)
-			}
-		}
-		// Quitting without new feedback while older comments remain is
-		// ambiguous: offer to approve by clearing them.
-		if !m.newFeedback && m.totalComments() > 0 {
-			m.modal = approveModal
-			m.modalFocus = 0
-			return m, nil
-		}
-		return m, tea.Quit
+		// Finishing is an explicit act: q opens the Approve/Finish modal.
+		m.persist()
+		m.modal = finishModal
+		m.modalFocus = 0
+		return m, nil
 
 	case key.Matches(msg, keys.Cancel):
 		// Esc cancels selection
@@ -429,10 +455,7 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				}
 				var best *target
 				for _, c := range t.state.Comments {
-					endAt := c.Line
-					if c.EndLine > 0 {
-						endAt = c.EndLine
-					}
+					endAt := c.EndAt()
 					if endAt > t.cursorLine || (endAt == t.cursorLine && !t.cursorOnAnnotation) {
 						if best == nil || endAt < best.endLine {
 							best = &target{endLine: endAt, idx: 0}
@@ -441,10 +464,7 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				}
 				if best == nil {
 					for _, c := range t.state.Comments {
-						endAt := c.Line
-						if c.EndLine > 0 {
-							endAt = c.EndLine
-						}
+						endAt := c.EndAt()
 						if best == nil || endAt < best.endLine {
 							best = &target{endLine: endAt, idx: 0}
 						}
@@ -465,10 +485,7 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				}
 				var best *target
 				for _, c := range t.state.Comments {
-					endAt := c.Line
-					if c.EndLine > 0 {
-						endAt = c.EndLine
-					}
+					endAt := c.EndAt()
 					if endAt < t.cursorLine || (endAt == t.cursorLine && !t.cursorOnAnnotation) {
 						if best == nil || endAt > best.endLine {
 							best = &target{endLine: endAt, idx: 0}
@@ -477,10 +494,7 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				}
 				if best == nil {
 					for _, c := range t.state.Comments {
-						endAt := c.Line
-						if c.EndLine > 0 {
-							endAt = c.EndLine
-						}
+						endAt := c.EndAt()
 						if best == nil || endAt > best.endLine {
 							best = &target{endLine: endAt, idx: 0}
 						}
@@ -531,6 +545,14 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				t.cursorAnnoIdx = 0
 				m.rebuildContent()
 				m.scrollToChunk(chunk)
+				return m, nil
+			}
+		case key.Matches(msg, keys.Resolve):
+			if t.cursorOnAnnotation {
+				anns := m.annotationsAfterLine(t.cursorLine)
+				if t.cursorAnnoIdx < len(anns) {
+					m.toggleResolve(anns[t.cursorAnnoIdx].id)
+				}
 				return m, nil
 			}
 		case key.Matches(msg, keys.Confirm):
@@ -594,6 +616,12 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Toggle resolution on the selected annotation
+		if key.Matches(msg, keys.Resolve) {
+			m.toggleResolve(t.sidebarItems[t.sidebarCursor].id)
+			return m, nil
+		}
+
 		// Enter to edit selected annotation
 		if key.Matches(msg, keys.Confirm) {
 			sel := t.sidebarItems[t.sidebarCursor]
@@ -622,32 +650,32 @@ func (m *AppModel) modalSubmit() {
 		for i := range t.state.Comments {
 			if t.state.Comments[i].ID == m.editingID {
 				t.state.Comments[i].Body = body
+				t.state.Comments[i].UpdatedAt = review.Now()
 				break
 			}
 		}
 		m.editingID = ""
 	} else {
 		startLine, endLine := m.selectionRange()
-		snippet := ""
-		if t.doc != nil {
-			snippet = strings.TrimSpace(t.doc.LineAt(startLine))
-		}
-
+		now := review.Now()
 		c := review.Comment{
-			ID:             uuid.NewString()[:8],
-			Line:           startLine,
-			ContentSnippet: snippet,
-			Body:           body,
-			CreatedAt:      time.Now(),
+			ID:        review.RandomCommentID(),
+			StartLine: startLine,
+			EndLine:   endLine,
+			Anchor:    m.anchorText(t, startLine, endLine),
+			Body:      body,
+			Author:    m.author,
+			Scope:     "line",
+			CreatedAt: now,
+			UpdatedAt: now,
 		}
-		if startLine != endLine {
-			c.EndLine = endLine
+		if m.session != nil {
+			c.ReviewRound = m.session.CJ.ReviewRound
 		}
-		t.state.AddComment(c)
+		t.state.Comments = append(t.state.Comments, c)
 	}
-	m.newFeedback = true
 
-	review.Save(t.state)
+	m.persist()
 	m.modal = noModal
 	m.modalTextarea.Blur()
 	t.selecting = false
@@ -660,9 +688,14 @@ func (m *AppModel) modalDelete() {
 	if t.state == nil || m.editingID == "" {
 		return
 	}
-	t.state.DeleteComment(m.editingID)
+	for i, c := range t.state.Comments {
+		if c.ID == m.editingID {
+			t.state.Comments = append(t.state.Comments[:i], t.state.Comments[i+1:]...)
+			break
+		}
+	}
 	m.editingID = ""
-	review.Save(t.state)
+	m.persist()
 	m.modal = noModal
 	m.modalTextarea.Blur()
 	t.cursorOnAnnotation = false
@@ -682,19 +715,82 @@ func (m *AppModel) totalComments() int {
 	return n
 }
 
-// approveAndClear removes all comments from every tab, marking the review
-// as approved for consumers that treat zero comments as approval.
-func (m *AppModel) approveAndClear() {
-	for i := range m.tabs {
-		if m.tabs[i].state != nil {
-			m.tabs[i].state.Comments = nil
-			review.Save(m.tabs[i].state)
+// toggleResolve flips a comment's resolution state, stamping ResolvedRound
+// with the current round on resolve (mirroring crit's reply semantics).
+func (m *AppModel) toggleResolve(id string) {
+	t := m.tab()
+	if t.state == nil {
+		return
+	}
+	round := 0
+	if m.session != nil {
+		round = m.session.CJ.ReviewRound
+	}
+	for i := range t.state.Comments {
+		if t.state.Comments[i].ID != id {
+			continue
 		}
+		c := &t.state.Comments[i]
+		if c.Resolved {
+			c.Resolved = false
+			c.ResolvedRound = 0
+		} else {
+			c.Resolved = true
+			c.ResolvedRound = round
+		}
+		c.UpdatedAt = review.Now()
+		break
+	}
+	m.persist()
+	m.rebuildContent()
+	m.updateCommentSidebar()
+}
+
+// sessionComments returns the session's stored comments for a file path.
+func (m *AppModel) sessionComments(path string) []review.Comment {
+	if m.session == nil {
+		return []review.Comment{}
+	}
+	comments := m.session.FileComments(path)
+	if comments == nil {
+		comments = []review.Comment{}
+	}
+	return comments
+}
+
+// anchorText joins the full text of lines start..end as the comment's
+// drift-correction anchor.
+func (m *AppModel) anchorText(t *FileTab, start, end int) string {
+	if t.doc == nil {
+		return ""
+	}
+	lines := make([]string, 0, end-start+1)
+	for l := start; l <= end && l <= t.doc.LineCount(); l++ {
+		lines = append(lines, t.doc.LineAt(l))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// persist writes every tab's comments back into the session and saves it.
+func (m *AppModel) persist() {
+	if m.session == nil {
+		return
+	}
+	for i := range m.tabs {
+		if m.tabs[i].state == nil {
+			continue
+		}
+		m.session.SetFileComments(m.tabs[i].path, "", m.tabs[i].state.Comments)
+	}
+	if err := m.session.Save(); err != nil {
+		m.err = err
 	}
 }
 
-// handleApproveModal processes keys for the approve-on-quit confirmation.
-func (m *AppModel) handleApproveModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+// handleFinishModal processes keys for the finish-review confirmation.
+// Confirming emits the finish event; q abandons the session without
+// finishing (blocked clients see the connection close).
+func (m *AppModel) handleFinishModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if key.Matches(msg, keys.Cancel) {
 		m.modal = noModal
 		return m, nil
@@ -702,21 +798,120 @@ func (m *AppModel) handleApproveModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 
 	switch msg.String() {
 	case "y", "Y":
-		m.approveAndClear()
-		return m, tea.Quit
-	case "n", "N", "q", "ctrl+c":
+		return m.doFinish()
+	case "n", "N":
 		m.modal = noModal
+		return m, nil
+	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "left", "right", "h", "l", "tab", "shift+tab":
 		m.modalFocus = 1 - m.modalFocus
 		return m, nil
 	case "enter":
 		if m.modalFocus == 0 {
-			m.approveAndClear()
+			return m.doFinish()
 		}
-		return m, tea.Quit
+		m.modal = noModal
+		return m, nil
 	}
 	return m, nil
+}
+
+// unresolvedTotal counts unresolved comments across tabs and the session's
+// review-level comments.
+func (m *AppModel) unresolvedTotal() int {
+	n := 0
+	for i := range m.tabs {
+		if m.tabs[i].state == nil {
+			continue
+		}
+		for _, c := range m.tabs[i].state.Comments {
+			if !c.Resolved {
+				n++
+			}
+		}
+	}
+	if m.session != nil {
+		for _, c := range m.session.CJ.ReviewComments {
+			if !c.Resolved {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// doFinish persists the review, emits the finish event, and either quits
+// (approved, or nothing is waiting on this review) or parks in the waiting
+// state until the agent starts the next round.
+func (m *AppModel) doFinish() (tea.Model, tea.Cmd) {
+	m.persist()
+	approved := m.unresolvedTotal() == 0
+	if m.finishCh != nil {
+		m.finishCh <- FinishEvent{Approved: approved}
+	}
+	m.modal = noModal
+	if approved || !m.serving {
+		return m, tea.Quit
+	}
+	m.waiting = true
+	return m, nil
+}
+
+// startNextRound reloads the session from disk (picking up agent replies),
+// carries comments forward onto the agent's edits with drift correction,
+// advances the round counter, and refreshes documents and diffs.
+func (m *AppModel) startNextRound() {
+	// Capture the content the current comments were authored against
+	// before reloading, then reload the session so agent-side replies and
+	// resolutions written to review.json are picked up.
+	prevContents := make(map[string]string, len(m.tabs))
+	for i := range m.tabs {
+		if m.tabs[i].doc != nil {
+			prevContents[m.tabs[i].path] = m.tabs[i].doc.Content
+		}
+	}
+	if m.session != nil {
+		if fresh, err := review.OpenSessionAt(m.session.Key, m.session.Dir); err == nil {
+			m.session.CJ = fresh.CJ
+		}
+	}
+
+	now := review.Now()
+	for i := range m.tabs {
+		t := &m.tabs[i]
+		comments := m.sessionComments(t.path)
+		if t.isBinary || t.isDeleted {
+			t.state = &fileReview{Comments: comments}
+			continue
+		}
+		doc, _ := document.Load(t.path)
+		t.doc = doc
+		t.chromaLines = nil
+		t.deletedLineCache = nil
+		if prev, ok := prevContents[t.path]; ok && t.doc != nil {
+			comments = review.CarryForwardFile(comments, prev, t.doc.Content, now)
+		}
+		t.state = &fileReview{Comments: comments}
+		if m.multiFile && m.baseRef != "" {
+			if diff, err := gitpkg.DiffFile(t.path, m.baseRef); err == nil && diff != nil {
+				t.changedLines = diff.ChangedLines
+				t.deletedAfter = diff.DeletedAfter
+				t.changeChunks = computeChangeChunks(diff)
+			}
+		}
+		t.ensureHighlightCache()
+	}
+
+	// Advance the round only after carry-forward, mirroring crit's ordering.
+	if m.session != nil {
+		m.session.CJ.ReviewRound++
+	}
+	m.persist()
+
+	m.waiting = false
+	m.rebuildContent()
+	m.updateCommentSidebar()
 }
 
 func (m *AppModel) handleTextModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -874,15 +1069,8 @@ func (m *AppModel) annotationsAfterLine(lineNum int) []annotation {
 	}
 	var anns []annotation
 	for _, c := range t.state.Comments {
-		endAt := c.Line
-		if c.EndLine > 0 {
-			endAt = c.EndLine
-		}
-		if endAt == lineNum {
-			anns = append(anns, annotation{
-				id: c.ID, body: c.Body,
-				line: c.Line, endLine: c.EndLine,
-			})
+		if c.EndAt() == lineNum {
+			anns = append(anns, newAnnotation(c))
 		}
 	}
 	return anns
@@ -890,18 +1078,32 @@ func (m *AppModel) annotationsAfterLine(lineNum int) []annotation {
 
 // sidebarItem represents a comment in the sidebar list.
 type sidebarItem struct {
-	id      string
-	line    int
-	endLine int
-	body    string
+	id       string
+	line     int
+	endLine  int
+	body     string
+	author   string
+	resolved bool
+	replies  []review.Reply
 }
 
 // annotation represents an inline comment to render.
 type annotation struct {
-	id      string
-	body    string
-	line    int
-	endLine int
+	id       string
+	body     string
+	line     int
+	endLine  int
+	author   string
+	resolved bool
+	replies  []review.Reply
+}
+
+func newAnnotation(c review.Comment) annotation {
+	return annotation{
+		id: c.ID, body: c.Body,
+		line: c.StartLine, endLine: c.EndLine,
+		author: c.Author, resolved: c.Resolved, replies: c.Replies,
+	}
 }
 
 // rebuildContent renders the document line-by-line with cursor, selection,
@@ -927,14 +1129,8 @@ func (m *AppModel) rebuildContent() {
 	annosByEndLine := make(map[int][]annotation)
 	if t.state != nil {
 		for _, c := range t.state.Comments {
-			endAt := c.Line
-			if c.EndLine > 0 {
-				endAt = c.EndLine
-			}
-			annosByEndLine[endAt] = append(annosByEndLine[endAt], annotation{
-				id: c.ID, body: c.Body,
-				line: c.Line, endLine: c.EndLine,
-			})
+			endAt := c.EndAt()
+			annosByEndLine[endAt] = append(annosByEndLine[endAt], newAnnotation(c))
 		}
 	}
 
@@ -942,11 +1138,7 @@ func (m *AppModel) rebuildContent() {
 	annotatedLines := make(map[int]int)
 	if t.state != nil {
 		for _, c := range t.state.Comments {
-			end := c.Line
-			if c.EndLine > 0 {
-				end = c.EndLine
-			}
-			for l := c.Line; l <= end; l++ {
+			for l := c.StartLine; l <= c.EndAt(); l++ {
 				annotatedLines[l]++
 			}
 		}
@@ -1142,10 +1334,17 @@ func (m *AppModel) rebuildContent() {
 	m.contentViewport.SetContent(b.String())
 }
 
+// annotationExtraLines counts the lines an annotation box renders beyond the
+// classic "body + label + borders" baseline, keeping scroll math in sync with
+// renderAnnotationBox.
+func annotationExtraLines(ann annotation) int {
+	return len(ann.replies)
+}
+
 // renderAnnotationBox renders a bordered annotation box indented under the gutter.
 func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused bool) string {
 	var lineLabel string
-	if ann.endLine > 0 {
+	if ann.endLine > ann.line {
 		lineLabel = fmt.Sprintf("L%d-%d", ann.line, ann.endLine)
 	} else {
 		lineLabel = fmt.Sprintf("L%d", ann.line)
@@ -1154,8 +1353,26 @@ func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused boo
 	var boxContent strings.Builder
 	label := inlineLabelComment.Render("comment")
 	lineRef := commentLineStyle.Render(lineLabel)
-	boxContent.WriteString(fmt.Sprintf("%s %s\n", label, lineRef))
+	header := fmt.Sprintf("%s %s", label, lineRef)
+	if ann.author != "" {
+		header += " " + commentLineStyle.Render("— "+ann.author)
+	}
+	if ann.resolved {
+		header += " " + resolvedBadge.Render("✓ resolved")
+	}
+	boxContent.WriteString(header + "\n")
 	boxContent.WriteString(clampLines(ann.body, 3))
+	for _, r := range ann.replies {
+		reply := r.Body
+		if i := strings.IndexByte(reply, '\n'); i >= 0 {
+			reply = reply[:i] + "…"
+		}
+		who := r.Author
+		if who == "" {
+			who = "reply"
+		}
+		boxContent.WriteString("\n" + replyStyle.Render(fmt.Sprintf("↳ %s: %s", who, reply)))
+	}
 	boxStyle := inlineCommentBox
 
 	if focused {
@@ -1528,12 +1745,8 @@ func (m *AppModel) extraLinesPerDocLine() map[int]int {
 
 	if t.state != nil {
 		for _, c := range t.state.Comments {
-			endAt := c.Line
-			if c.EndLine > 0 {
-				endAt = c.EndLine
-			}
 			bodyLines := strings.Count(c.Body, "\n") + 1
-			counts[endAt] += bodyLines + 3
+			counts[c.EndAt()] += bodyLines + 3 + annotationExtraLines(newAnnotation(c))
 		}
 	}
 
@@ -1560,8 +1773,9 @@ func (m *AppModel) updateCommentSidebar() {
 	t.sidebarItems = nil
 	for _, c := range t.state.Comments {
 		t.sidebarItems = append(t.sidebarItems, sidebarItem{
-			id: c.ID, line: c.Line, endLine: c.EndLine,
-			body: c.Body,
+			id: c.ID, line: c.StartLine, endLine: c.EndLine,
+			body: c.Body, author: c.Author, resolved: c.Resolved,
+			replies: c.Replies,
 		})
 	}
 	sort.Slice(t.sidebarItems, func(i, j int) bool { return t.sidebarItems[i].line < t.sidebarItems[j].line })
@@ -1585,12 +1799,18 @@ func (m *AppModel) updateCommentSidebar() {
 		isSelected := m.focused == commentPane && idx == t.sidebarCursor
 
 		var lineInfo string
-		if it.endLine > 0 {
+		if it.endLine > it.line {
 			lineInfo = fmt.Sprintf("L%d-%d", it.line, it.endLine)
 		} else {
 			lineInfo = fmt.Sprintf("L%d", it.line)
 		}
 		lineInfo = commentLineStyle.Render(lineInfo)
+		if it.author != "" {
+			lineInfo += " " + commentLineStyle.Render(it.author)
+		}
+		if it.resolved {
+			lineInfo += " " + resolvedBadge.Render("✓")
+		}
 
 		cursorCol := lipgloss.NewStyle().Width(2)
 		prefix := cursorCol.Render("")
@@ -1614,6 +1834,17 @@ func (m *AppModel) updateCommentSidebar() {
 				b.WriteString("\n")
 			}
 		}
+		for _, r := range it.replies {
+			reply := r.Body
+			if i := strings.IndexByte(reply, '\n'); i >= 0 {
+				reply = reply[:i] + "…"
+			}
+			who := r.Author
+			if who == "" {
+				who = "reply"
+			}
+			b.WriteString("\n " + replyStyle.Render(fmt.Sprintf("↳ %s: %s", who, reply)))
+		}
 		b.WriteString("\n\n")
 	}
 
@@ -1623,6 +1854,21 @@ func (m *AppModel) updateCommentSidebar() {
 func (m AppModel) View() tea.View {
 	if m.err != nil {
 		v := tea.NewView(fmt.Sprintf("Error: %v\n\nPress q to quit.", m.err))
+		v.AltScreen = true
+		return v
+	}
+
+	if m.waiting {
+		round := 0
+		if m.session != nil {
+			round = m.session.CJ.ReviewRound
+		}
+		msg := fmt.Sprintf(
+			"\n  Round %d finished — %d unresolved comment(s) sent to the agent.\n\n"+
+				"  Waiting for the agent to address them and start the next round…\n\n"+
+				"  q: quit without waiting",
+			round, m.unresolvedTotal())
+		v := tea.NewView(msg)
 		v.AltScreen = true
 		return v
 	}
@@ -2012,11 +2258,8 @@ func (m AppModel) renderWithModal(background string) string {
 		var contextSection string
 		for _, c := range m.tabs[m.activeTab].state.Comments {
 			if c.ID == m.editingID {
-				start := c.Line
-				end := c.EndLine
-				if end == 0 {
-					end = start
-				}
+				start := c.StartLine
+				end := c.EndAt()
 				contextSection = contextBoxStyle.
 					Width(innerWidth - 2).
 					Render(m.renderContextPreview(start, end, innerWidth-4))
@@ -2035,16 +2278,23 @@ func (m AppModel) renderWithModal(background string) string {
 		content += m.modalTextarea.View() + "\n\n" + buttons
 		modalContent = modalStyle.Width(modalWidth).Render(content)
 
-	case approveModal:
-		title := modalTitleStyle.Render("Approve review?")
-		total := m.totalComments()
-		info := fmt.Sprintf(
-			"No new comments were added in this session.\nApproving clears the %d remaining comment(s).", total)
+	case finishModal:
+		unresolved := m.unresolvedTotal()
+		var title, info, confirmLabel string
+		if unresolved == 0 {
+			title = modalTitleStyle.Render("Approve review?")
+			info = "No unresolved comments — approving ends the review."
+			confirmLabel = "Approve"
+		} else {
+			title = modalTitleStyle.Render("Finish review?")
+			info = fmt.Sprintf("%d unresolved comment(s) will be sent to the agent.", unresolved)
+			confirmLabel = "Finish Review"
+		}
 
-		approveBtn := m.renderModalButton("Approve", "y", m.modalFocus == 0)
-		keepBtn := m.renderModalButton("Quit without approving", "n", m.modalFocus == 1)
-		buttons := lipgloss.JoinHorizontal(lipgloss.Center, approveBtn, "  ", keepBtn)
-		hint := footerStyle.Render("esc: back to review")
+		confirmBtn := m.renderModalButton(confirmLabel, "y", m.modalFocus == 0)
+		cancelBtn := m.renderModalButton("Keep reviewing", "n", m.modalFocus == 1)
+		buttons := lipgloss.JoinHorizontal(lipgloss.Center, confirmBtn, "  ", cancelBtn)
+		hint := footerStyle.Render("esc: back to review · q: quit without finishing")
 
 		modalContent = modalStyle.Width(modalWidth).Render(
 			title + "\n" + info + "\n\n" + buttons + "\n" + hint)

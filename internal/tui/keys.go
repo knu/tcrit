@@ -21,6 +21,7 @@ type keyMap struct {
 	NextChange   key.Binding
 	PrevChange   key.Binding
 	TabSearch    key.Binding
+	Resolve      key.Binding
 }
 
 var keys = keyMap{
@@ -42,4 +43,5 @@ var keys = keyMap{
 	NextChange:   key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "next change")),
 	PrevChange:   key.NewBinding(key.WithKeys("N"), key.WithHelp("N", "prev change")),
 	TabSearch:    key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search tabs")),
+	Resolve:      key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "resolve/unresolve")),
 }

@@ -8,16 +8,15 @@ import (
 	"strings"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
+	"github.com/knu/tcrit/internal/config"
 	"github.com/knu/tcrit/internal/git"
+	"github.com/knu/tcrit/internal/ipc"
 	"github.com/knu/tcrit/internal/review"
-	"github.com/knu/tcrit/internal/tui"
 )
 
-var reviewDetach bool
-var reviewWait bool
 var reviewCode bool
 var reviewBase string
 
@@ -35,166 +34,277 @@ var resolveExec = func() (string, error) {
 
 var reviewCmd = &cobra.Command{
 	Use:   "review [file]",
-	Short: "Launch interactive TUI review",
-	Args:  cobra.MaximumNArgs(1),
+	Short: "Review git changes (default) or a single document",
+	Long: `Open a review and block until the human finishes it.
+
+With no file argument, reviews the current git changes (multi-file mode).
+With a file argument, reviews that document.
+
+Inside tmux the TUI opens in a split pane and this command blocks until
+the reviewer approves or finishes with comments, printing the resulting
+agent prompt on stdout and "approved: true|false" on stderr.  Outside
+tmux the TUI runs in the current terminal.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if reviewCode {
-			return runCodeReview()
-		}
-
-		if len(args) == 0 {
-			return fmt.Errorf("file argument required (use --code for code review mode)")
-		}
-
-		filePath := args[0]
-
-		if _, err := os.Stat(filePath); os.IsNotExist(err) {
-			return fmt.Errorf("file not found: %s", filePath)
-		}
-
-		// --wait without --detach: warn and ignore
-		if reviewWait && !reviewDetach {
-			fmt.Fprintln(os.Stderr, "tcrit: --wait requires --detach; ignoring --wait")
-			reviewWait = false
-		}
-
-		if reviewDetach {
-			return runDetachedReview(filePath)
-		}
-
-		model := tui.NewApp(filePath)
-		p := tea.NewProgram(model)
-		if _, err := p.Run(); err != nil {
-			return fmt.Errorf("TUI error: %w", err)
-		}
-
-		return nil
+		return runReview(args)
 	},
 }
 
-func init() {
-	rootCmd.AddCommand(reviewCmd)
-	reviewCmd.Flags().BoolVar(&reviewDetach, "detach", false, "open review in a tmux split pane")
-	reviewCmd.Flags().BoolVar(&reviewWait, "wait", false, "block until the detached review completes (requires --detach)")
-	reviewCmd.Flags().BoolVar(&reviewCode, "code", false, "review code changes (multi-file mode)")
-	reviewCmd.Flags().StringVar(&reviewBase, "base", "", "base commit to diff against (used with --code)")
+// reviewMode describes what is being reviewed.
+type reviewMode struct {
+	docPath  string // non-empty for single-document and plan modes
+	ref      string // diff base for code mode
+	files    []git.FileChange
+	planSlug string // non-empty for plan mode
+	planFile string // original plan path ("" when read from stdin)
 }
 
-func runCodeReview() error {
-	// --wait without --detach: warn and ignore
-	if reviewWait && !reviewDetach {
-		fmt.Fprintln(os.Stderr, "tcrit: --wait requires --detach; ignoring --wait")
-		reviewWait = false
+func (m *reviewMode) code() bool { return m.docPath == "" }
+
+func (m *reviewMode) plan() bool { return m.planSlug != "" }
+
+func (m *reviewMode) promptMode() string {
+	if m.code() {
+		return "diff"
+	}
+	return "files"
+}
+
+func (m *reviewMode) internalMode() string {
+	switch {
+	case m.plan():
+		return "plan"
+	case m.code():
+		return "git"
+	default:
+		return "files"
+	}
+}
+
+func runReview(args []string) error {
+	review.WarnLegacyState()
+
+	cfg, err := config.LoadCurrent()
+	if err != nil {
+		return err
 	}
 
-	if reviewDetach {
-		return runDetachedCodeReview()
+	mode, err := resolveReviewMode(args, cfg)
+	if err != nil {
+		return err
+	}
+
+	sess, err := openReviewSession(cfg, mode)
+	if err != nil {
+		return err
+	}
+
+	return runReviewFlow(cfg, sess, mode)
+}
+
+// runReviewFlow connects to a live session, spawns the TUI in a tmux split,
+// or runs the TUI inline, then handles the finish result.
+func runReviewFlow(cfg *config.Config, sess *review.Session, mode *reviewMode) error {
+	sock := review.SocketPathFor(sess.Key)
+	if ipc.Alive(sock) {
+		return runReviewCycle(cfg, sess, sock)
+	}
+
+	if os.Getenv("TMUX") != "" {
+		if err := spawnTUIPane(mode); err != nil {
+			return err
+		}
+		if err := ipc.WaitAlive(sock, 15*time.Second); err != nil {
+			return err
+		}
+		return runReviewCycle(cfg, sess, sock)
+	}
+
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		payload, err := runTUISession(cfg, sess, mode, false)
+		if err != nil {
+			return err
+		}
+		if payload == nil {
+			fmt.Fprintln(os.Stderr, "approved: false")
+			return fmt.Errorf("review ended without finishing")
+		}
+		printFinish(payload)
+		if payload.Approved {
+			cleanupOnApprove(cfg, sess)
+		}
+		return nil
+	}
+
+	return fmt.Errorf("no tmux session and no terminal to open the TUI in; run inside tmux, or have the reviewer run `tcrit%s` in a terminal", reviewArgSuffix(mode))
+}
+
+func reviewArgSuffix(mode *reviewMode) string {
+	if mode.code() {
+		return ""
+	}
+	return " " + mode.docPath
+}
+
+// resolveReviewMode classifies the arguments and, for code mode, detects
+// the changed files up front so failures surface before any TUI spawns.
+func resolveReviewMode(args []string, cfg *config.Config) (*reviewMode, error) {
+	if len(args) == 1 && !reviewCode {
+		filePath := args[0]
+		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+			return nil, fmt.Errorf("file not found: %s", filePath)
+		}
+		return &reviewMode{docPath: filePath}, nil
 	}
 
 	if !git.IsGitRepo() {
-		return fmt.Errorf("tcrit review --code requires a git repository")
+		return nil, fmt.Errorf("code review requires a git repository (pass a file argument to review a document)")
+	}
+
+	base := reviewBase
+	if base == "" {
+		base = cfg.BaseBranch
 	}
 
 	var ref string
 	var files []git.FileChange
 	var err error
-
-	if reviewBase != "" {
-		ref = reviewBase
+	if base != "" {
+		ref = base
 		files, err = git.ChangedFilesFrom(ref)
 		if err != nil {
-			return fmt.Errorf("detecting changed files from %s: %w", ref, err)
+			return nil, fmt.Errorf("detecting changed files from %s: %w", ref, err)
 		}
 		if len(files) == 0 {
-			return fmt.Errorf("no changed files found relative to %s", ref)
+			return nil, fmt.Errorf("no changed files found relative to %s", ref)
 		}
 	} else {
 		ref = "HEAD"
 		files, err = git.ChangedFiles()
 		if err != nil {
-			return fmt.Errorf("detecting changed files: %w", err)
+			return nil, fmt.Errorf("detecting changed files: %w", err)
 		}
 		if len(files) == 0 {
-			// Interactive fallback: try other refs
-			var fallbackErr error
-			ref, files, fallbackErr = interactiveFallback()
-			if fallbackErr != nil {
-				return fallbackErr
+			ref, files, err = fallbackRef()
+			if err != nil {
+				return nil, err
 			}
 		}
 	}
+	return &reviewMode{ref: ref, files: files}, nil
+}
 
-	// Save session manifest
-	var paths []string
-	for _, f := range files {
-		paths = append(paths, f.Path)
+func openReviewSession(cfg *config.Config, mode *reviewMode) (*review.Session, error) {
+	if !mode.code() {
+		sess, err := review.OpenDocSession(cfg.Output, mode.docPath)
+		if err != nil {
+			return nil, fmt.Errorf("loading review state: %w", err)
+		}
+		return sess, nil
 	}
-	session := &review.CodeReviewSession{
-		Files:     paths,
-		DiffBase:  ref,
-		CreatedAt: time.Now(),
+
+	sess, err := review.OpenCodeSession(cfg.Output)
+	if err != nil {
+		return nil, fmt.Errorf("loading review state: %w", err)
 	}
-	if err := review.SaveSession(session); err != nil {
+	sess.CJ.BaseRef = mode.ref
+	for _, f := range mode.files {
+		sess.SetFileComments(f.Path, f.Status.String(), sess.FileComments(f.Path))
+	}
+	if err := sess.Save(); err != nil {
 		fmt.Fprintf(os.Stderr, "tcrit: warning: could not save session: %v\n", err)
 	}
+	return sess, nil
+}
 
-	model := tui.NewCodeReviewApp(files, ref)
-	p := tea.NewProgram(model)
-	if _, err := p.Run(); err != nil {
-		return fmt.Errorf("TUI error: %w", err)
+// runReviewCycle blocks on the session socket until the reviewer finishes,
+// then prints the agent-facing result and applies approval cleanup.
+func runReviewCycle(cfg *config.Config, sess *review.Session, sock string) error {
+	payload, err := ipc.ReviewCycle(sock)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "approved: false")
+		return err
 	}
-
+	printFinish(payload)
+	if payload.Approved {
+		cleanupOnApprove(cfg, sess)
+	}
 	return nil
 }
 
-func runDetachedCodeReview() error {
-	if os.Getenv("TMUX") == "" {
-		return fmt.Errorf("--detach requires a tmux session (TMUX environment variable not set)")
+// printFinish writes the agent contract: the rendered prompt on stdout and
+// the approval verdict on stderr.
+func printFinish(payload *ipc.FinishPayload) {
+	if payload.Approved {
+		fmt.Fprintln(os.Stderr, "approved: true")
+	} else {
+		fmt.Fprintln(os.Stderr, "approved: false")
 	}
+	if payload.Prompt != "" {
+		fmt.Println(payload.Prompt)
+	}
+}
 
+func cleanupOnApprove(cfg *config.Config, sess *review.Session) {
+	if !cfg.CleanupOnApprove {
+		return
+	}
+	if err := sess.Clear(); err != nil {
+		fmt.Fprintf(os.Stderr, "tcrit: warning: could not clean up review: %v\n", err)
+	}
+}
+
+// spawnTUIPane opens the TUI in a tmux split pane running `tcrit _tui`.
+func spawnTUIPane(mode *reviewMode) error {
 	tmuxBin, err := lookPath("tmux")
 	if err != nil {
 		return fmt.Errorf("tmux binary not found on PATH: %w", err)
 	}
-
-	critBin, err := resolveExec()
+	tcritBin, err := resolveExec()
 	if err != nil {
-		return fmt.Errorf("resolving crit binary path: %w", err)
+		return fmt.Errorf("resolving tcrit binary path: %w", err)
 	}
 
-	channel := fmt.Sprintf("crit-review-%d", os.Getpid())
-	baseFlag := ""
-	if reviewBase != "" {
-		baseFlag = " --base " + shellEscape(reviewBase)
+	// tmux panes inherit the server's environment, not the caller's, so
+	// pass through the variables that decide where session state lives.
+	envPrefix := "TCRIT_DETACHED=1"
+	for _, name := range []string{"XDG_STATE_HOME", "XDG_CONFIG_HOME"} {
+		if val := os.Getenv(name); val != "" {
+			envPrefix += " " + name + "=" + shellEscape(val)
+		}
 	}
-	critCmd := fmt.Sprintf("CRIT_DETACHED=1 %s review --code%s ; tmux wait-for -S %s",
-		shellEscape(critBin), baseFlag, channel)
 
-	splitCmd := exec.Command(tmuxBin, splitWindowArgs(true, critCmd)...)
+	var tuiCmd string
+	switch {
+	case mode.plan():
+		tuiCmd = fmt.Sprintf("%s %s _tui --plan %s",
+			envPrefix, shellEscape(tcritBin), shellEscape(mode.planSlug))
+	case mode.code():
+		tuiCmd = fmt.Sprintf("%s %s _tui --base %s",
+			envPrefix, shellEscape(tcritBin), shellEscape(mode.ref))
+	default:
+		absPath, err := filepath.Abs(mode.docPath)
+		if err != nil {
+			return fmt.Errorf("resolving absolute path: %w", err)
+		}
+		tuiCmd = fmt.Sprintf("%s %s _tui %s",
+			envPrefix, shellEscape(tcritBin), shellEscape(absPath))
+	}
+
+	splitCmd := exec.Command(tmuxBin, splitWindowArgs(true, tuiCmd)...)
 	if err := runCommand(splitCmd); err != nil {
-		// Retry without -p flag — percentage sizing fails when parent pane
-		// size isn't available (e.g. invoked from a subprocess like Claude Code)
-		splitCmd = exec.Command(tmuxBin, splitWindowArgs(false, critCmd)...)
+		// Retry without -p — percentage sizing fails when the parent pane
+		// size isn't available (e.g. invoked from an agent subprocess).
+		splitCmd = exec.Command(tmuxBin, splitWindowArgs(false, tuiCmd)...)
 		if err := runCommand(splitCmd); err != nil {
 			return fmt.Errorf("failed to open tmux pane: %w", err)
 		}
 	}
-
-	fmt.Fprintln(os.Stderr, "Opened code review in tmux pane")
-
-	if reviewWait {
-		waitCmd := exec.Command(tmuxBin, "wait-for", channel)
-		if err := runCommand(waitCmd); err != nil {
-			return fmt.Errorf("review pane terminated abnormally")
-		}
-
-		fmt.Fprintln(os.Stdout, "Code review complete.")
-	}
-
+	fmt.Fprintln(os.Stderr, "Opened review in tmux pane")
 	return nil
 }
 
-func interactiveFallback() (string, []git.FileChange, error) {
+func fallbackRef() (string, []git.FileChange, error) {
 	// Try common alternatives in order
 	alternatives := []struct {
 		label string
@@ -218,57 +328,6 @@ func interactiveFallback() (string, []git.FileChange, error) {
 	return "", nil, fmt.Errorf("no changed files found")
 }
 
-func runDetachedReview(filePath string) error {
-	if os.Getenv("TMUX") == "" {
-		return fmt.Errorf("--detach requires a tmux session (TMUX environment variable not set)")
-	}
-
-	tmuxBin, err := lookPath("tmux")
-	if err != nil {
-		return fmt.Errorf("tmux binary not found on PATH: %w", err)
-	}
-
-	absPath, err := filepath.Abs(filePath)
-	if err != nil {
-		return fmt.Errorf("resolving absolute path: %w", err)
-	}
-
-	critBin, err := resolveExec()
-	if err != nil {
-		return fmt.Errorf("resolving crit binary path: %w", err)
-	}
-
-	channel := fmt.Sprintf("crit-review-%d", os.Getpid())
-	critCmd := buildTmuxPaneCommand(critBin, absPath, channel)
-
-	splitCmd := exec.Command(tmuxBin, splitWindowArgs(true, critCmd)...)
-	if err := runCommand(splitCmd); err != nil {
-		// Retry without -p flag — percentage sizing fails when parent pane
-		// size isn't available (e.g. invoked from a subprocess like Claude Code)
-		splitCmd = exec.Command(tmuxBin, splitWindowArgs(false, critCmd)...)
-		if err := runCommand(splitCmd); err != nil {
-			return fmt.Errorf("failed to open tmux pane: %w", err)
-		}
-	}
-
-	fmt.Fprintln(os.Stderr, "Opened review in tmux pane")
-
-	if reviewWait {
-		waitCmd := exec.Command(tmuxBin, "wait-for", channel)
-		if err := runCommand(waitCmd); err != nil {
-			return fmt.Errorf("review pane terminated abnormally")
-		}
-
-		state, err := review.Load(absPath)
-		if err != nil {
-			return fmt.Errorf("reading review state: %w", err)
-		}
-		fmt.Fprintf(os.Stdout, "Review complete. %d comments.\n", len(state.Comments))
-	}
-
-	return nil
-}
-
 // resolveExecutable returns the absolute path to the currently running binary.
 func resolveExecutable() (string, error) {
 	exe, err := os.Executable()
@@ -279,26 +338,38 @@ func resolveExecutable() (string, error) {
 }
 
 // splitWindowArgs builds the tmux split-window arguments, targeting the
-// invoking pane via TMUX_PANE rather than the currently active pane.
-func splitWindowArgs(withSize bool, critCmd string) []string {
+// invoking pane via TMUX_PANE and pinning the pane's working directory to
+// the caller's so both sides derive the same session key.
+func splitWindowArgs(withSize bool, tuiCmd string) []string {
 	args := []string{"split-window", "-h"}
 	if pane := os.Getenv("TMUX_PANE"); pane != "" {
 		args = append(args, "-t", pane)
 	}
+	if cwd, err := os.Getwd(); err == nil {
+		args = append(args, "-c", cwd)
+	}
 	if withSize {
 		args = append(args, "-p", "70")
 	}
-	return append(args, critCmd)
-}
-
-// buildTmuxPaneCommand constructs the shell command string to run inside a tmux split pane.
-// It runs crit review for the given file, then signals the wait-for channel on completion.
-func buildTmuxPaneCommand(critBin, absPath, channel string) string {
-	return fmt.Sprintf("CRIT_DETACHED=1 %s review %s ; tmux wait-for -S %s",
-		shellEscape(critBin), shellEscape(absPath), channel)
+	return append(args, tuiCmd)
 }
 
 // shellEscape escapes a string for safe embedding in a POSIX shell command.
 func shellEscape(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+func init() {
+	rootCmd.AddCommand(reviewCmd)
+	reviewCmd.Flags().BoolVar(&reviewCode, "code", false, "review code changes (default when no file argument is given)")
+	reviewCmd.Flags().StringVar(&reviewBase, "base", "", "base ref to diff against in code mode")
+	reviewCmd.Flags().StringVar(&reviewBase, "base-branch", "", "alias for --base")
+	reviewCmd.Flags().MarkHidden("base-branch")
+
+	// Deprecated no-ops: blocking on a tmux split pane is now the default.
+	var deprecatedDetach, deprecatedWait bool
+	reviewCmd.Flags().BoolVar(&deprecatedDetach, "detach", false, "deprecated: no-op")
+	reviewCmd.Flags().BoolVar(&deprecatedWait, "wait", false, "deprecated: no-op")
+	reviewCmd.Flags().MarkHidden("detach")
+	reviewCmd.Flags().MarkHidden("wait")
 }

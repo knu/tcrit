@@ -10,11 +10,17 @@ import (
 	"github.com/knu/tcrit/internal/review"
 )
 
+// fileReview holds the in-memory comments for one tab; they are written
+// back to the session's CritJSON whenever the app persists.
+type fileReview struct {
+	Comments []review.Comment
+}
+
 // FileTab holds per-file state for a single tab in the code review TUI.
 type FileTab struct {
 	path         string
 	doc          *document.Document
-	state        *review.ReviewState
+	state        *fileReview
 	changedLines map[int]bool                 // line numbers that are added/modified
 	deletedAfter map[int][]gitpkg.DeletedLine // deleted lines keyed by new-file line they appear after
 	changeChunks []changeChunk                // contiguous groups of changed lines

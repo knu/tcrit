@@ -3,61 +3,56 @@ package review
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"time"
+	"sort"
 
-	"github.com/knu/tcrit/internal/document"
-	"gopkg.in/yaml.v3"
+	"github.com/knu/tcrit/internal/git"
 )
 
-const sessionFile = ".crit/code-review.yaml"
-
-// CodeReviewSession tracks which files belong to the current code review.
-type CodeReviewSession struct {
-	Files     []string  `yaml:"files"`
-	DiffBase  string    `yaml:"diff_base"`
-	CreatedAt time.Time `yaml:"created_at"`
+// OpenCodeSession opens the git-mode review session for the current working
+// directory and branch.
+func OpenCodeSession(dataRoot string) (*Session, error) {
+	branch, err := git.CurrentBranch()
+	if err != nil {
+		branch = ""
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("resolving cwd: %w", err)
+	}
+	key := SessionKey(cwd, branch, nil)
+	s, err := OpenSession(dataRoot, key)
+	if err != nil {
+		return nil, err
+	}
+	s.CJ.Branch = branch
+	s.Meta = SessionEntry{Key: key, CWD: cwd, Branch: branch}
+	return s, nil
 }
 
-// SaveSession writes the session manifest.
-func SaveSession(session *CodeReviewSession) error {
-	if err := document.EnsureDirs(); err != nil {
-		return err
-	}
-
-	data, err := yaml.Marshal(session)
+// OpenDocSession opens the files-mode review session for a single document.
+func OpenDocSession(dataRoot, docPath string) (*Session, error) {
+	cwd, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("marshaling session: %w", err)
+		return nil, fmt.Errorf("resolving cwd: %w", err)
 	}
-
-	dir := filepath.Dir(sessionFile)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("creating session dir: %w", err)
+	args := []string{NormalizePath(docPath)}
+	key := SessionKey(cwd, "", args)
+	s, err := OpenSession(dataRoot, key)
+	if err != nil {
+		return nil, err
 	}
-
-	if err := os.WriteFile(sessionFile, data, 0644); err != nil {
-		return fmt.Errorf("writing session file: %w", err)
-	}
-
-	return nil
+	s.Meta = SessionEntry{Key: key, CWD: cwd, Args: args}
+	return s, nil
 }
 
-// LoadSession reads the current code review session.
-func LoadSession() (*CodeReviewSession, error) {
-	data, err := os.ReadFile(sessionFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("no active code review session (run `tcrit review --code` first)")
-		}
-		return nil, fmt.Errorf("reading session: %w", err)
+// SortedFiles returns the session's file paths in stable sorted order.
+func (s *Session) SortedFiles() []string {
+	paths := make([]string, 0, len(s.CJ.Files))
+	for p := range s.CJ.Files {
+		paths = append(paths, p)
 	}
-
-	var session CodeReviewSession
-	if err := yaml.Unmarshal(data, &session); err != nil {
-		return nil, fmt.Errorf("parsing session: %w", err)
-	}
-
-	return &session, nil
+	sort.Strings(paths)
+	return paths
 }
 
 // CodeFileStatus represents a single file's review status in aggregate output.
@@ -72,26 +67,27 @@ type CodeReviewStatus struct {
 	TotalComments int              `json:"total_comments"`
 }
 
-// AggregateStatus loads ReviewState for all files in the current session.
-func AggregateStatus() (*CodeReviewStatus, error) {
-	session, err := LoadSession()
+// AggregateStatus summarizes the current code review session.
+func AggregateStatus(dataRoot string) (*CodeReviewStatus, error) {
+	s, err := OpenCodeSession(dataRoot)
 	if err != nil {
 		return nil, err
 	}
-
-	result := &CodeReviewStatus{}
-	for _, file := range session.Files {
-		state, err := Load(file)
-		if err != nil {
-			// Skip files that can't be loaded
-			continue
-		}
-		result.Files = append(result.Files, CodeFileStatus{
-			File:     file,
-			Comments: state.Comments,
-		})
-		result.TotalComments += len(state.Comments)
+	if len(s.CJ.Files) == 0 {
+		return nil, fmt.Errorf("no active code review session (run `tcrit review --code` first)")
 	}
 
+	result := &CodeReviewStatus{}
+	for _, path := range s.SortedFiles() {
+		comments := s.CJ.Files[path].Comments
+		if comments == nil {
+			comments = []Comment{}
+		}
+		result.Files = append(result.Files, CodeFileStatus{
+			File:     path,
+			Comments: comments,
+		})
+		result.TotalComments += len(comments)
+	}
 	return result, nil
 }

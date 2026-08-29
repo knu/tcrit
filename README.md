@@ -46,8 +46,8 @@ If you prefer not to use the plugin, you can install the skill directly:
 #### Claude Code
 
 ```bash
-tcrit setup-claude           # Install globally (~/.claude/skills/)
-tcrit setup-claude --project # Install for current project only
+cd ~ && tcrit install claude-code   # Install globally (~/.claude/skills/)
+tcrit install claude-code           # From a repo root: install for that project
 ```
 
 Then use `/tcrit-review <path>` in Claude Code for document reviews, or `/tcrit-code-review` for multi-file code reviews.
@@ -55,11 +55,18 @@ Then use `/tcrit-review <path>` in Claude Code for document reviews, or `/tcrit-
 #### Gemini CLI
 
 ```bash
-tcrit setup-gemini           # Install globally (~/.gemini/)
-tcrit setup-gemini --project # Install for current project only
+cd ~ && tcrit install gemini        # Install globally (~/.gemini/)
+tcrit install gemini                # From a repo root: install for that project
 ```
 
 Then use `@tcrit` to start a review in Gemini CLI.
+
+#### Prompt templates
+
+```bash
+tcrit install prompts               # Copy the stock finish prompts for customization
+tcrit check                         # Report stale installed integrations
+```
 
 ## Requirements
 
@@ -97,11 +104,24 @@ tcrit status --code
 
 ### How code review works
 
-1. Run `tcrit review --code` — tcrit detects changed files and opens the tabbed TUI
+1. An agent (or you) runs `tcrit review --code` — inside tmux the TUI opens in a split pane and the command blocks
 2. Navigate between files and leave inline comments on the changes
-3. Quit the TUI — comments are saved to `.crit/`
-4. `tcrit status --code` outputs all comments across files as JSON
-5. Claude (or any tool) reads the comments and edits the files
+3. Press `q` — with unresolved comments the button is **Finish Review**, without any it is **Approve**
+4. On finish, the blocked command prints the unresolved comments and instructions on stdout and `approved: true|false` on stderr
+5. The agent edits the files, replies with `tcrit comment --reply-to`, and runs the printed `tcrit --session <id>` to start the next round; the waiting TUI reloads with the fixes and replies
+6. Resolve comments with `r` and approve to end the loop
+
+## Plan Review (versioned)
+
+```bash
+tcrit plan docs/plans/my-plan.md            # slug derived from the first heading
+tcrit plan --name auth docs/plans/plan.md   # pinned slug
+```
+
+Saves the document as an immutable numbered version under
+`$XDG_STATE_HOME/tcrit/plans/<slug>/` and opens a review of the latest
+version. Re-running with the same slug saves the next version and starts
+the next review round; comments carry forward onto the revised text.
 
 ## Document Review (single file)
 
@@ -113,25 +133,15 @@ Opens a full-screen terminal UI with syntax-highlighted markdown, a comment side
 
 ### tmux split pane mode
 
-When running inside tmux, you can open the TUI in a side-by-side split pane:
-
-```bash
-# Open review in a tmux split and return immediately
-tcrit review docs/plan.md --detach
-
-# Open review in a tmux split and block until it closes
-tcrit review docs/plan.md --detach --wait
-```
-
-This is how the Claude Code skill invokes tcrit — `--detach --wait` is a single blocking call that opens the TUI next to Claude Code and waits for you to finish reviewing.
+When `tcrit review` runs inside tmux (as the Claude Code skill does), the TUI automatically opens in a side-by-side split pane while the invoking command blocks until you finish the review — the same feedback loop as [crit](https://github.com/tomasz-tomczyk/crit), with a TUI in place of the browser.
 
 ### How document review works
 
 1. Claude writes a plan (or you open any markdown file)
 2. `tcrit review <path>` opens the TUI — read through and leave inline comments
-3. Comments are stored as JSON in a local `.crit/` directory (gitignored by default)
-4. `tcrit status <path>` outputs comments as JSON for Claude (or any tool) to consume
-5. Claude reads the comments, edits the document, and you can re-review
+3. Finish the review with `q`; comments are saved as crit-compatible `review.json` under `$XDG_STATE_HOME/tcrit/`
+4. Claude receives the unresolved comments from the blocking command (or via `tcrit comments --json`), edits the document, and replies to each comment
+5. Claude runs the printed `tcrit --session <id>`; the TUI reloads with the fixes for the next round
 
 ## Keybindings
 
@@ -144,7 +154,8 @@ This is how the Claude Code skill invokes tcrit — `--detach --wait` is a singl
 | `v`                                   | Visual select mode (multi-line comments) |
 | `s`                                   | Toggle comment sidebar                   |
 | `[` / `]`                             | Jump to prev / next comment              |
-| `q`                                   | Save & quit (offers to approve when no new comments were added) |
+| `r`                                   | Resolve / unresolve the focused comment |
+| `q`                                   | Finish review (Approve when no unresolved comments remain) |
 
 **Code review only:**
 
@@ -156,12 +167,28 @@ This is how the Claude Code skill invokes tcrit — `--detach --wait` is a singl
 
 ## Scriptable CLI
 
-```bash
-# Add a comment programmatically
-tcrit comment docs/plan.md --line 15 --body "This needs more detail"
+The comment CLI follows [crit](https://github.com/tomasz-tomczyk/crit)'s
+syntax, so agent tooling written for crit works against TCrit reviews:
 
-# Multi-line comment
-tcrit comment docs/plan.md --line 10 --end-line 20 --body "Rethink this section"
+```bash
+# Review-level, file-level, and line-level comments
+tcrit comment "Overall this looks good"
+tcrit comment docs/plan.md "Needs a rewrite"
+tcrit comment docs/plan.md:15 "This needs more detail"
+tcrit comment docs/plan.md:10-20 "Rethink this section"
+
+# Reply to a comment (e.g. an AI explaining how it addressed feedback)
+tcrit comment --reply-to c_a3f8b2 --author 'Claude Code' "Split into two functions"
+
+# Bulk import comments and replies from JSON
+tcrit comment --json --file comments.json
+
+# List unresolved comments (add --all for resolved ones, --json for JSON)
+tcrit comments
+tcrit comments --json
+
+# Remove the review
+tcrit comment --clear
 
 # Get review comments as JSON (single file)
 tcrit status docs/plan.md

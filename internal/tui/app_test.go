@@ -5,13 +5,23 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/knu/tcrit/internal/document"
 	"github.com/knu/tcrit/internal/review"
 )
+
+// setupSession points XDG state at a temp dir and opens a doc session there.
+func setupSession(t *testing.T, docPath string) *review.Session {
+	t.Helper()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	sess, err := review.OpenDocSession("", docPath)
+	if err != nil {
+		t.Fatalf("opening session: %v", err)
+	}
+	return sess
+}
 
 func setupAppWithDoc(t *testing.T, content string) AppModel {
 	t.Helper()
@@ -20,7 +30,7 @@ func setupAppWithDoc(t *testing.T, content string) AppModel {
 	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
 		t.Fatalf("failed to write test file: %v", err)
 	}
-	app := NewApp(testFile)
+	app := NewApp(testFile, AppConfig{Session: setupSession(t, testFile), Author: "Tester"})
 	app.tabs = []FileTab{{path: testFile}}
 	app.activeTab = 0
 	updated, _ := app.Update(docRenderedMsg{})
@@ -105,7 +115,7 @@ func TestNavigationPgDownClampsAtBottom(t *testing.T) {
 }
 
 func TestNewApp(t *testing.T) {
-	app := NewApp("test.md")
+	app := NewApp("test.md", AppConfig{})
 	if app.filePath != "test.md" {
 		t.Errorf("expected filePath 'test.md', got %s", app.filePath)
 	}
@@ -119,24 +129,23 @@ func TestDocRenderedMsg_LoadsExistingComments(t *testing.T) {
 		t.Fatalf("failed to write test file: %v", err)
 	}
 
-	// Save a review state with comments for that file
+	// Save review comments for that file in the session
+	sess := setupSession(t, testFile)
 	comment := review.Comment{
-		ID:             "test-comment-1",
-		Line:           1,
-		ContentSnippet: "package main",
-		Body:           "This is a test comment",
-		CreatedAt:      time.Now(),
+		ID:        "test-comment-1",
+		StartLine: 1,
+		EndLine:   1,
+		Anchor:    "package main",
+		Body:      "This is a test comment",
+		CreatedAt: review.Now(),
 	}
-	state := &review.ReviewState{
-		File:     testFile,
-		Comments: []review.Comment{comment},
-	}
-	if err := review.Save(state); err != nil {
+	sess.SetFileComments(testFile, "", []review.Comment{comment})
+	if err := sess.Save(); err != nil {
 		t.Fatalf("failed to save review state: %v", err)
 	}
 
 	// Create an AppModel with a tab for the test file
-	app := NewApp(testFile)
+	app := NewApp(testFile, AppConfig{Session: sess, Author: "Tester"})
 	app.tabs = []FileTab{
 		{path: testFile},
 	}
@@ -163,7 +172,7 @@ func TestDocRenderedMsg_LoadsExistingComments(t *testing.T) {
 }
 
 func newScrollTestApp(path string, lines []string, isMarkdown bool, width, height int) AppModel {
-	app := NewApp(path)
+	app := NewApp(path, AppConfig{})
 	app.tabs[0].doc = &document.Document{
 		Path:    path,
 		Content: strings.Join(lines, "\n"),
@@ -223,12 +232,18 @@ func TestScrollToChunk_SourceWithLongLines(t *testing.T) {
 	}
 }
 
-func newApproveTestApp(t *testing.T, comments []review.Comment) AppModel {
+func newFinishTestApp(t *testing.T, comments []review.Comment, serving bool) (AppModel, chan FinishEvent) {
 	t.Helper()
 	t.Chdir(t.TempDir())
-	app := NewApp("test.go")
-	app.tabs[0].state = &review.ReviewState{File: "test.go", Comments: comments}
-	return app
+	finishCh := make(chan FinishEvent, 4)
+	app := NewApp("test.go", AppConfig{
+		Session:  setupSession(t, "test.go"),
+		Author:   "Tester",
+		Serving:  serving,
+		FinishCh: finishCh,
+	})
+	app.tabs[0].state = &fileReview{Comments: comments}
+	return app, finishCh
 }
 
 func pressKeyCmd(app AppModel, code rune) (AppModel, tea.Cmd) {
@@ -251,24 +266,35 @@ func isQuit(cmd tea.Cmd) bool {
 }
 
 func testComment() review.Comment {
-	return review.Comment{ID: "c1", Line: 1, Body: "please fix", CreatedAt: time.Now()}
+	return review.Comment{ID: "c_test01", StartLine: 1, EndLine: 1, Body: "please fix", CreatedAt: review.Now()}
 }
 
-func TestQuitWithRemainingComments_PromptsApproval(t *testing.T) {
-	app := newApproveTestApp(t, []review.Comment{testComment()})
+func takeEvent(t *testing.T, ch chan FinishEvent) FinishEvent {
+	t.Helper()
+	select {
+	case ev := <-ch:
+		return ev
+	default:
+		t.Fatal("expected a finish event")
+		return FinishEvent{}
+	}
+}
+
+func TestQuit_OpensFinishModal(t *testing.T) {
+	app, _ := newFinishTestApp(t, []review.Comment{testComment()}, false)
 
 	app, cmd := pressKeyCmd(app, 'q')
 
 	if isQuit(cmd) {
-		t.Fatal("expected quit to be intercepted by approval prompt")
+		t.Fatal("expected quit to be intercepted by the finish modal")
 	}
-	if app.modal != approveModal {
-		t.Fatalf("expected approveModal, got %v", app.modal)
+	if app.modal != finishModal {
+		t.Fatalf("expected finishModal, got %v", app.modal)
 	}
 }
 
-func TestApproveModal_ApproveClearsComments(t *testing.T) {
-	app := newApproveTestApp(t, []review.Comment{testComment()})
+func TestFinishModal_ApproveQuitsAndEmitsApproved(t *testing.T) {
+	app, ch := newFinishTestApp(t, nil, false)
 	app, _ = pressKeyCmd(app, 'q')
 
 	app, cmd := pressKeyCmd(app, 'y')
@@ -276,34 +302,64 @@ func TestApproveModal_ApproveClearsComments(t *testing.T) {
 	if !isQuit(cmd) {
 		t.Fatal("expected quit after approving")
 	}
-	if len(app.tabs[0].state.Comments) != 0 {
-		t.Errorf("expected comments cleared, got %d", len(app.tabs[0].state.Comments))
+	if ev := takeEvent(t, ch); !ev.Approved {
+		t.Error("expected approved finish event")
 	}
-	state, err := review.Load("test.go")
-	if err != nil {
-		t.Fatalf("loading saved state: %v", err)
-	}
-	if len(state.Comments) != 0 {
-		t.Errorf("expected persisted comments cleared, got %d", len(state.Comments))
-	}
+	_ = app
 }
 
-func TestApproveModal_DeclineKeepsComments(t *testing.T) {
-	app := newApproveTestApp(t, []review.Comment{testComment()})
+func TestFinishModal_ResolvedCommentsStillApprove(t *testing.T) {
+	resolved := testComment()
+	resolved.Resolved = true
+	app, ch := newFinishTestApp(t, []review.Comment{resolved}, false)
 	app, _ = pressKeyCmd(app, 'q')
 
-	app, cmd := pressKeyCmd(app, 'n')
+	_, cmd := pressKeyCmd(app, 'y')
 
 	if !isQuit(cmd) {
-		t.Fatal("expected quit after declining")
+		t.Fatal("expected quit: all comments resolved means approved")
 	}
-	if len(app.tabs[0].state.Comments) != 1 {
-		t.Errorf("expected comments kept, got %d", len(app.tabs[0].state.Comments))
+	if ev := takeEvent(t, ch); !ev.Approved {
+		t.Error("expected approved finish event when all comments are resolved")
 	}
 }
 
-func TestApproveModal_EscReturnsToReview(t *testing.T) {
-	app := newApproveTestApp(t, []review.Comment{testComment()})
+func TestFinishModal_UnresolvedQuitsWhenNotServing(t *testing.T) {
+	app, ch := newFinishTestApp(t, []review.Comment{testComment()}, false)
+	app, _ = pressKeyCmd(app, 'q')
+
+	app, cmd := pressKeyCmd(app, 'y')
+
+	if !isQuit(cmd) {
+		t.Fatal("expected quit in inline mode")
+	}
+	if ev := takeEvent(t, ch); ev.Approved {
+		t.Error("expected unapproved finish event")
+	}
+	if app.waiting {
+		t.Error("inline mode should not enter the waiting state")
+	}
+}
+
+func TestFinishModal_UnresolvedWaitsWhenServing(t *testing.T) {
+	app, ch := newFinishTestApp(t, []review.Comment{testComment()}, true)
+	app, _ = pressKeyCmd(app, 'q')
+
+	app, cmd := pressKeyCmd(app, 'y')
+
+	if isQuit(cmd) {
+		t.Fatal("expected the serving TUI to keep running")
+	}
+	if !app.waiting {
+		t.Error("expected waiting state after unresolved finish")
+	}
+	if ev := takeEvent(t, ch); ev.Approved {
+		t.Error("expected unapproved finish event")
+	}
+}
+
+func TestFinishModal_EscReturnsToReview(t *testing.T) {
+	app, ch := newFinishTestApp(t, []review.Comment{testComment()}, false)
 	app, _ = pressKeyCmd(app, 'q')
 
 	app, cmd := pressKeyCmd(app, tea.KeyEscape)
@@ -314,34 +370,70 @@ func TestApproveModal_EscReturnsToReview(t *testing.T) {
 	if app.modal != noModal {
 		t.Fatalf("expected modal dismissed, got %v", app.modal)
 	}
-	if len(app.tabs[0].state.Comments) != 1 {
-		t.Errorf("expected comments kept, got %d", len(app.tabs[0].state.Comments))
+	select {
+	case <-ch:
+		t.Error("expected no finish event on cancel")
+	default:
 	}
 }
 
-func TestQuitWithNewFeedback_NoPrompt(t *testing.T) {
-	app := newApproveTestApp(t, []review.Comment{testComment()})
-	app.newFeedback = true
+func TestFinishModal_QuitWithoutFinishing(t *testing.T) {
+	app, ch := newFinishTestApp(t, []review.Comment{testComment()}, true)
+	app, _ = pressKeyCmd(app, 'q')
 
-	app, cmd := pressKeyCmd(app, 'q')
+	_, cmd := pressKeyCmd(app, 'q')
 
 	if !isQuit(cmd) {
-		t.Fatal("expected direct quit when new feedback was given")
+		t.Fatal("expected q in the modal to quit without finishing")
 	}
-	if app.modal != noModal {
-		t.Fatalf("expected no modal, got %v", app.modal)
+	select {
+	case <-ch:
+		t.Error("expected no finish event when quitting without finishing")
+	default:
 	}
 }
 
-func TestQuitWithNoComments_NoPrompt(t *testing.T) {
-	app := newApproveTestApp(t, nil)
-
-	app, cmd := pressKeyCmd(app, 'q')
-
-	if !isQuit(cmd) {
-		t.Fatal("expected direct quit with no comments")
+func TestRoundStart_ReloadsCommentsAndAdvancesRound(t *testing.T) {
+	app, _ := newFinishTestApp(t, []review.Comment{testComment()}, true)
+	if err := os.WriteFile("test.go", []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if app.modal != noModal {
-		t.Fatalf("expected no modal, got %v", app.modal)
+	app.persist()
+	// Load the document so the next round has previous content to carry
+	// comments forward from; docRenderedMsg reloads state from the session.
+	updated0, _ := app.Update(docRenderedMsg{})
+	app = updated0.(AppModel)
+	app.waiting = true
+
+	// Simulate the agent replying via the CLI while the TUI waits.
+	other, err := review.OpenDocSession("", "test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := other.AppendReply("c_test01", "fixed it", "AI", "", true, ""); err != nil {
+		t.Fatalf("reply: %v", err)
+	}
+	if err := other.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, _ := app.Update(RoundStartMsg{})
+	app = updated.(AppModel)
+
+	if app.waiting {
+		t.Error("round start should leave the waiting state")
+	}
+	if app.session.CJ.ReviewRound != 2 {
+		t.Errorf("expected round 2, got %d", app.session.CJ.ReviewRound)
+	}
+	comments := app.tabs[0].state.Comments
+	if len(comments) != 1 || len(comments[0].Replies) != 1 {
+		t.Fatalf("expected reloaded comment with reply, got %+v", comments)
+	}
+	if !comments[0].Resolved {
+		t.Error("expected reloaded comment to be resolved")
+	}
+	if !comments[0].CarriedForward || comments[0].ID == "c_test01" {
+		t.Errorf("expected a re-minted carried-forward comment, got %+v", comments[0])
 	}
 }

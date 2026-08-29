@@ -1,12 +1,19 @@
 {
   "name": "tcrit",
-  "description": "Review markdown documents with an interactive TUI. Leave inline comments, then let Claude address the feedback automatically.",
-  "version": "1.2.2",
+  "description": "Review code changes and documents with an interactive TUI. Leave inline comments, then let Claude address the feedback and reply automatically.",
+  "version": "0.4.0",
   "author": {
-    "name": "Kevin Dutra"
+    "name": "Akinori Musha"
   },
   "homepage": "https://github.com/knu/tcrit",
   "repository": "https://github.com/knu/tcrit",
   "license": "MIT",
-  "keywords": ["review", "markdown", "tui", "diff", "critique"]
+  "keywords": [
+    "review",
+    "code-review",
+    "markdown",
+    "tui",
+    "diff",
+    "critique"
+  ]
 }

@@ -6,140 +6,168 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/knu/tcrit/internal/document"
 )
 
-func TestStoreRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
+func setupStateDir(t *testing.T) {
+	t.Helper()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Chdir(t.TempDir())
+}
 
-	docPath := filepath.Join(dir, "plan.md")
-	os.WriteFile(docPath, []byte("# Test\n"), 0644)
+func TestSessionRoundTrip(t *testing.T) {
+	setupStateDir(t)
+	os.WriteFile("plan.md", []byte("# Test\n"), 0o644)
 
-	document.EnsureDirs()
-
-	// Load returns empty state for new file
-	state, err := Load(docPath)
+	sess, err := OpenDocSession("", "plan.md")
 	if err != nil {
-		t.Fatalf("loading: %v", err)
+		t.Fatalf("opening session: %v", err)
 	}
-	if len(state.Comments) != 0 {
-		t.Error("expected no comments")
+	if got := len(sess.FileComments("plan.md")); got != 0 {
+		t.Errorf("expected no comments, got %d", got)
+	}
+	if sess.CJ.ReviewRound != 1 {
+		t.Errorf("expected review round 1, got %d", sess.CJ.ReviewRound)
 	}
 
-	// Add comment and save
-	state.AddComment(Comment{ID: "c1", Line: 1, Body: "test comment"})
-	if err := Save(state); err != nil {
+	now := Now()
+	multiline := "First line.\nSecond line.\nThird line."
+	comment := Comment{
+		ID: "c_abc123", StartLine: 1, EndLine: 1, Anchor: "# Test",
+		Body: multiline, Author: "Tester", Scope: "line",
+		CreatedAt: now, UpdatedAt: now, ReviewRound: 1,
+	}
+	sess.SetFileComments("plan.md", "", []Comment{comment})
+	if err := sess.Save(); err != nil {
 		t.Fatalf("saving: %v", err)
 	}
 
-	// Verify file is YAML
-	reviewPath := document.ReviewPath(docPath)
-	if !strings.HasSuffix(reviewPath, ".yaml") {
-		t.Errorf("expected .yaml extension, got %s", reviewPath)
-	}
-	data, err := os.ReadFile(reviewPath)
+	data, err := os.ReadFile(sess.Path())
 	if err != nil {
 		t.Fatalf("reading review file: %v", err)
 	}
-	content := string(data)
-	if strings.Contains(content, "{") {
-		t.Error("review file looks like JSON, expected YAML")
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("review file is not valid JSON: %v", err)
+	}
+	if _, ok := raw["files"]; !ok {
+		t.Error("review file missing files map")
 	}
 
-	// Reload and verify
-	loaded, err := Load(docPath)
+	reloaded, err := OpenDocSession("", "plan.md")
 	if err != nil {
-		t.Fatalf("reloading: %v", err)
+		t.Fatalf("reopening: %v", err)
 	}
-	if len(loaded.Comments) != 1 {
-		t.Fatalf("expected 1 comment, got %d", len(loaded.Comments))
+	comments := reloaded.FileComments("plan.md")
+	if len(comments) != 1 {
+		t.Fatalf("expected 1 comment, got %d", len(comments))
 	}
-	if loaded.Comments[0].Body != "test comment" {
-		t.Errorf("comment body mismatch: %s", loaded.Comments[0].Body)
+	c := comments[0]
+	if c.Body != multiline {
+		t.Errorf("body mismatch:\ngot:  %q\nwant: %q", c.Body, multiline)
+	}
+	if c.Author != "Tester" || c.Anchor != "# Test" || c.Scope != "line" {
+		t.Errorf("field mismatch: %+v", c)
 	}
 }
 
-func TestMultilineBody(t *testing.T) {
-	dir := t.TempDir()
-	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
+func TestSessionKeyPathNormalization(t *testing.T) {
+	setupStateDir(t)
+	os.WriteFile("plan.md", []byte("# Test\n"), 0o644)
 
-	docPath := filepath.Join(dir, "plan.md")
-	os.WriteFile(docPath, []byte("# Test\n"), 0644)
+	rel, err := OpenDocSession("", "plan.md")
+	if err != nil {
+		t.Fatalf("opening with relative path: %v", err)
+	}
+	cwd, _ := os.Getwd()
+	abs, err := OpenDocSession("", filepath.Join(cwd, "plan.md"))
+	if err != nil {
+		t.Fatalf("opening with absolute path: %v", err)
+	}
+	if rel.Key != abs.Key {
+		t.Errorf("relative and absolute paths yield different keys: %s vs %s", rel.Key, abs.Key)
+	}
+	dotted, err := OpenDocSession("", "./plan.md")
+	if err != nil {
+		t.Fatalf("opening with dotted path: %v", err)
+	}
+	if rel.Key != dotted.Key {
+		t.Errorf("dotted path yields a different key: %s vs %s", rel.Key, dotted.Key)
+	}
+}
 
-	document.EnsureDirs()
+func TestSessionKeyDistinctPerMode(t *testing.T) {
+	cwd := "/tmp/project"
+	doc := SessionKey(cwd, "", []string{"plan.md"})
+	git := SessionKey(cwd, "main", nil)
+	other := SessionKey(cwd, "topic", nil)
+	if doc == git {
+		t.Error("files-mode and git-mode keys should differ")
+	}
+	if git == other {
+		t.Error("keys should differ across branches")
+	}
+	if len(doc) != 12 || !isHex(doc) {
+		t.Errorf("expected 12 hex chars, got %q", doc)
+	}
+}
 
-	state, _ := Load(docPath)
-	multiline := "First line.\nSecond line.\nThird line."
-	state.AddComment(Comment{ID: "c1", Line: 1, Body: multiline})
-	if err := Save(state); err != nil {
+func isHex(s string) bool {
+	return strings.IndexFunc(s, func(r rune) bool {
+		return !strings.ContainsRune("0123456789abcdef", r)
+	}) < 0
+}
+
+func TestUnresolvedComments(t *testing.T) {
+	cj := NewCritJSON()
+	cj.ReviewComments = []Comment{
+		{ID: "r_1", Scope: "review"},
+		{ID: "r_2", Scope: "review", Resolved: true},
+	}
+	cj.Files["a.go"] = CritJSONFile{Comments: []Comment{
+		{ID: "c_1"},
+		{ID: "c_2", Resolved: true},
+		{ID: "c_3"},
+	}}
+	if got := cj.TotalComments(); got != 5 {
+		t.Errorf("TotalComments = %d, want 5", got)
+	}
+	if got := cj.UnresolvedComments(); got != 3 {
+		t.Errorf("UnresolvedComments = %d, want 3", got)
+	}
+}
+
+func TestSessionClearRemovesFolderAndRegistryEntry(t *testing.T) {
+	setupStateDir(t)
+	os.WriteFile("plan.md", []byte("# Test\n"), 0o644)
+
+	sess, err := OpenDocSession("", "plan.md")
+	if err != nil {
+		t.Fatalf("opening session: %v", err)
+	}
+	sess.SetFileComments("plan.md", "", []Comment{{ID: "c_abc123", StartLine: 1, EndLine: 1, Body: "x"}})
+	if err := sess.Save(); err != nil {
 		t.Fatalf("saving: %v", err)
 	}
 
-	// Verify YAML uses block scalar (no \n escapes)
-	data, _ := os.ReadFile(document.ReviewPath(docPath))
-	content := string(data)
-	if strings.Contains(content, `\n`) {
-		t.Error("YAML should not contain escaped newlines")
-	}
-
-	// Round-trip preserves multiline
-	loaded, err := Load(docPath)
+	entries, err := ListSessionEntries()
 	if err != nil {
-		t.Fatalf("reloading: %v", err)
+		t.Fatalf("listing sessions: %v", err)
 	}
-	if loaded.Comments[0].Body != multiline {
-		t.Errorf("multiline body mismatch:\ngot:  %q\nwant: %q", loaded.Comments[0].Body, multiline)
+	if len(entries) != 1 || entries[0].Key != sess.Key {
+		t.Fatalf("expected one registry entry for %s, got %+v", sess.Key, entries)
 	}
-}
 
-func TestMigrationFromJSON(t *testing.T) {
-	dir := t.TempDir()
-	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
-
-	docPath := filepath.Join(dir, "plan.md")
-	os.WriteFile(docPath, []byte("# Test\n"), 0644)
-
-	document.EnsureDirs()
-
-	// Write a legacy JSON review file
-	state := &ReviewState{
-		File: docPath,
-		Comments: []Comment{
-			{ID: "legacy1", Line: 1, Body: "old comment"},
-		},
+	if err := sess.Clear(); err != nil {
+		t.Fatalf("clearing: %v", err)
 	}
-	yamlPath := document.ReviewPath(docPath)
-	jsonPath := strings.TrimSuffix(yamlPath, ".yaml") + ".json"
-	jsonData, _ := json.MarshalIndent(state, "", "  ")
-	os.WriteFile(jsonPath, jsonData, 0644)
-
-	// Load should find JSON, migrate to YAML, delete JSON
-	loaded, err := Load(docPath)
+	if _, err := os.Stat(sess.Dir); !os.IsNotExist(err) {
+		t.Error("review folder should be removed")
+	}
+	entries, err = ListSessionEntries()
 	if err != nil {
-		t.Fatalf("loading with migration: %v", err)
+		t.Fatalf("listing sessions after clear: %v", err)
 	}
-	if len(loaded.Comments) != 1 {
-		t.Fatalf("expected 1 comment after migration, got %d", len(loaded.Comments))
-	}
-	if loaded.Comments[0].Body != "old comment" {
-		t.Errorf("comment body mismatch after migration: %s", loaded.Comments[0].Body)
-	}
-
-	// JSON file should be deleted
-	if _, err := os.Stat(jsonPath); !os.IsNotExist(err) {
-		t.Error("legacy JSON file should have been deleted after migration")
-	}
-
-	// YAML file should exist
-	if _, err := os.Stat(yamlPath); os.IsNotExist(err) {
-		t.Error("YAML file should exist after migration")
+	if len(entries) != 0 {
+		t.Errorf("expected no registry entries, got %+v", entries)
 	}
 }

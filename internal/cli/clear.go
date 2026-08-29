@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/knu/tcrit/internal/config"
 	"github.com/knu/tcrit/internal/review"
 )
 
@@ -19,6 +19,11 @@ var clearCmd = &cobra.Command{
 	Short: "Clear all comments for a document or code review session",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := config.LoadCurrent()
+		if err != nil {
+			return err
+		}
+
 		if clearAll {
 			if clearCode || len(args) > 0 {
 				return fmt.Errorf("--all cannot be combined with --code or a file argument")
@@ -27,7 +32,7 @@ var clearCmd = &cobra.Command{
 		}
 
 		if clearCode {
-			return runCodeClear()
+			return runCodeClear(cfg)
 		}
 
 		if len(args) == 0 {
@@ -36,16 +41,14 @@ var clearCmd = &cobra.Command{
 
 		filePath := args[0]
 
-		state, err := review.Load(filePath)
+		sess, err := review.OpenDocSession(cfg.Output, filePath)
 		if err != nil {
 			return fmt.Errorf("loading review state: %w", err)
 		}
 
-		count := len(state.Comments)
-		state.Comments = []review.Comment{}
-
-		if err := review.Save(state); err != nil {
-			return fmt.Errorf("saving review: %w", err)
+		count := len(sess.FileComments(filePath))
+		if err := sess.Clear(); err != nil {
+			return fmt.Errorf("clearing review: %w", err)
 		}
 
 		fmt.Printf("Cleared %d comment(s) for %s\n", count, filePath)
@@ -53,69 +56,57 @@ var clearCmd = &cobra.Command{
 	},
 }
 
-func runCodeClear() error {
-	session, err := review.LoadSession()
+func runCodeClear(cfg *config.Config) error {
+	sess, err := review.OpenCodeSession(cfg.Output)
 	if err != nil {
 		return err
 	}
 
-	total := 0
-	for _, file := range session.Files {
-		state, err := review.Load(file)
-		if err != nil {
-			continue
-		}
-		count := len(state.Comments)
-		if count == 0 {
-			continue
-		}
-		state.Comments = []review.Comment{}
-		if err := review.Save(state); err != nil {
-			return fmt.Errorf("saving review for %s: %w", file, err)
-		}
-		total += count
+	total := sess.CJ.TotalComments()
+	fileCount := len(sess.CJ.Files)
+	if err := sess.Clear(); err != nil {
+		return fmt.Errorf("clearing review: %w", err)
 	}
 
-	fmt.Printf("Cleared %d comment(s) across %d file(s)\n", total, len(session.Files))
+	fmt.Printf("Cleared %d comment(s) across %d file(s)\n", total, fileCount)
 	return nil
 }
 
-// runClearAll deletes all saved review state (per-file reviews and the code
-// review session manifest), keeping .crit/.gitignore and anything else in
-// .crit intact.  Use it when starting a fresh review task.
+// runClearAll deletes all review sessions registered for the current working
+// directory.  Use it when starting a fresh review task.
 func runClearAll() error {
-	removed := 0
-
-	reviewsDir := filepath.Join(".crit", "reviews")
-	entries, err := os.ReadDir(reviewsDir)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("reading %s: %w", reviewsDir, err)
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("resolving cwd: %w", err)
 	}
-	for _, entry := range entries {
-		name := entry.Name()
-		if !entry.Type().IsRegular() ||
-			(!strings.HasSuffix(name, ".yaml") && !strings.HasSuffix(name, ".json")) {
+
+	entries, err := review.ListSessionEntries()
+	if err != nil {
+		return err
+	}
+
+	removed := 0
+	for _, e := range entries {
+		if e.CWD != cwd {
 			continue
 		}
-		if err := os.Remove(filepath.Join(reviewsDir, name)); err != nil {
-			return fmt.Errorf("removing review state: %w", err)
+		dir := review.Dir("", e.Key)
+		if e.ReviewPath != "" {
+			dir = filepath.Dir(e.ReviewPath)
+		}
+		sess := &review.Session{Key: e.Key, Dir: dir}
+		if err := sess.Clear(); err != nil {
+			return err
 		}
 		removed++
 	}
 
-	sessionPath := filepath.Join(".crit", "code-review.yaml")
-	if err := os.Remove(sessionPath); err == nil {
-		removed++
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("removing session: %w", err)
-	}
-
-	fmt.Printf("Removed %d review state file(s)\n", removed)
+	fmt.Printf("Removed %d review session(s)\n", removed)
 	return nil
 }
 
 func init() {
 	rootCmd.AddCommand(clearCmd)
-	clearCmd.Flags().BoolVar(&clearCode, "code", false, "clear comments for all files in the code review session")
-	clearCmd.Flags().BoolVar(&clearAll, "all", false, "delete all saved review state, keeping .crit/.gitignore")
+	clearCmd.Flags().BoolVar(&clearCode, "code", false, "clear the code review session")
+	clearCmd.Flags().BoolVar(&clearAll, "all", false, "delete all review sessions for the current directory")
 }
