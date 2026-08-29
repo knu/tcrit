@@ -12,6 +12,7 @@
 - **Native tmux context discovery** — tcrit finds the invoking pane from the agent's process ancestry even when tools such as Codex do not inherit `$TMUX` or `$TMUX_PANE`.
 - **CritJSON review state and CLI** — comments use [Crit](https://crit.md/)-compatible `review.json` data, with `tcrit comment` and `tcrit comments` for automation.
 - **File-level comments** — reviewers can press `f` to comment on the active file, with file threads kept in the comment sidebar instead of attached to a line.
+- **Comment editing tools** — `ctrl+y` inserts GitHub-compatible suggestions for selected or anchored lines, including replies, while `ctrl+o` edits comment and reply bodies in `$EDITOR`.
 - **Versioned plan reviews** — `tcrit plan` saves immutable revisions and carries comment threads forward as the plan changes.
 - **Richer review lifecycle** — comment threads can be replied to, resolved, reopened, and approved together; resolved threads collapse out of the active comment view, while comments and changes can be navigated across files.
 - **Improved diffs and Git handling** — inline replacements preserve whitespace, long syntax-highlighted lines wrap instead of being truncated, comment anchors survive edited rounds, and paths with spaces or special characters work correctly.
@@ -202,6 +203,14 @@ Tcrit resolves the tmux server and pane from the invoking process tree, so this 
 | `r`                                   | Resolve / unresolve the focused comment  |
 | `?`                                   | Show all keyboard shortcuts              |
 | `q`                                   | Finish review (Approve when no unresolved comments remain) |
+
+**Comment dialogs:**
+
+| Key      | Action                                                        |
+|----------|---------------------------------------------------------------|
+| `ctrl+s` | Save the comment or reply                                     |
+| `ctrl+o` | Edit the comment or reply in `$EDITOR`                         |
+| `ctrl+y` | Insert a suggestion block for the selected or anchored lines  |
 
 **Code review only:**
 

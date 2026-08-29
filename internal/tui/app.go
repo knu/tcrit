@@ -113,7 +113,6 @@ func NewApp(filePath string, cfg AppConfig) AppModel {
 	ta := textarea.New()
 	ta.Placeholder = "Type your comment..."
 	ta.ShowLineNumbers = false
-	ta.CharLimit = 2000
 
 	tab := FileTab{
 		path:       filePath,
@@ -140,7 +139,6 @@ func NewCodeReviewApp(files []gitpkg.FileChange, ref string, cfg AppConfig) AppM
 	ta := textarea.New()
 	ta.Placeholder = "Type your comment..."
 	ta.ShowLineNumbers = false
-	ta.CharLimit = 2000
 
 	// Sort files alphabetically by path
 	sortedFiles := make([]gitpkg.FileChange, len(files))
@@ -246,6 +244,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.rebuildContent()
 		m.updateCommentSidebar()
+		return m, nil
+
+	case editorFinishedMsg:
+		m.finishExternalEdit(msg)
 		return m, nil
 
 	case errMsg:
@@ -890,6 +892,56 @@ func (m *AppModel) anchorText(t *FileTab, start, end int) string {
 	return strings.Join(lines, "\n")
 }
 
+func (m *AppModel) insertSuggestion() {
+	start, end, ok := m.suggestionRange()
+	if !ok {
+		return
+	}
+	code := m.anchorText(m.tab(), start, end)
+	if code == "" {
+		return
+	}
+	body := strings.TrimRight(m.modalTextarea.Value(), "\n")
+	if body != "" {
+		body += "\n\n"
+	}
+	m.modalTextarea.SetValue(body + "```suggestion\n" + code + "\n```")
+	m.modalFocus = 0
+	m.modalTextarea.Focus()
+}
+
+func (m *AppModel) suggestionRange() (int, int, bool) {
+	if m.modal == commentModal {
+		start, end := m.selectionRange()
+		return start, end, true
+	}
+	if m.modal != replyModal && m.modal != editModal {
+		return 0, 0, false
+	}
+	t := m.tab()
+	if t.state == nil {
+		return 0, 0, false
+	}
+	for _, c := range t.state.Comments {
+		if c.ID == m.editingID && c.Scope != "file" && c.StartLine > 0 {
+			return c.StartLine, c.EndAt(), true
+		}
+	}
+	return 0, 0, false
+}
+
+func (m *AppModel) canSuggest() bool {
+	_, _, ok := m.suggestionRange()
+	return ok
+}
+
+func (m *AppModel) modalDeleteStartFocus() int {
+	if m.canSuggest() {
+		return 4
+	}
+	return 3
+}
+
 // persist writes every tab's comments back into the session and saves it.
 func (m *AppModel) persist() {
 	if m.session == nil {
@@ -1108,6 +1160,9 @@ func (m *AppModel) syncCodeReviewTabs(files []gitpkg.FileChange) {
 
 func (m *AppModel) handleTextModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	focusCount := 3
+	if m.canSuggest() {
+		focusCount++
+	}
 	if m.modal == editModal {
 		focusCount += len(m.modalDeleteTargets())
 	}
@@ -1135,12 +1190,25 @@ func (m *AppModel) handleTextModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		} else if m.modalFocus == 2 {
 			m.closeTextModal()
 			return m, nil
-		} else if m.modalFocus >= 3 && m.modal == editModal {
-			m.modalDelete(m.modalFocus - 3)
+		} else if m.canSuggest() && m.modalFocus == 3 {
+			m.insertSuggestion()
+			return m, nil
+		} else if m.modal == editModal && m.modalFocus >= m.modalDeleteStartFocus() {
+			m.modalDelete(m.modalFocus - m.modalDeleteStartFocus())
 			return m, nil
 		}
 	case "ctrl+s":
 		m.modalSubmit()
+		return m, nil
+	case "ctrl+o":
+		if m.modalFocus == 0 {
+			return m, m.openExternalEditor()
+		}
+		return m, nil
+	case "ctrl+y":
+		if m.canSuggest() {
+			m.insertSuggestion()
+		}
 		return m, nil
 	}
 
@@ -2657,7 +2725,7 @@ func (m AppModel) renderHelp(innerWidth int) string {
 	columns := lipgloss.JoinHorizontal(lipgloss.Top, general, "  ", navigation, "  ", codeReview)
 	contexts := renderHelpGroup("Selection and dialogs", []helpItem{
 		{keys: "↑/↓,j/k · enter/v/esc", desc: "extend · comment/toggle/cancel selection"},
-		{keys: "ctrl+s · tab/shift+tab · enter/esc", desc: "save · focus · activate/close comment dialog"},
+		{keys: "ctrl+s/o/y · tab/S-tab · enter/esc", desc: "save/editor/suggest · focus · activate/close dialog"},
 		{keys: "y/n/esc · ←/→,h/l,tab/shift+tab · enter", desc: "confirm/cancel · focus · activate finish dialog"},
 		{keys: "q/ctrl+c", desc: "quit from finish dialog"},
 	}, innerWidth)
@@ -2745,7 +2813,8 @@ func (m AppModel) renderWithModal(background string) string {
 
 		saveBtn := m.renderModalButton("Save", "ctrl+s", m.modalFocus == 1)
 		cancelBtn := m.renderModalButton("Cancel", "esc", m.modalFocus == 2)
-		buttons := lipgloss.JoinHorizontal(lipgloss.Center, saveBtn, "  ", cancelBtn)
+		suggestBtn := m.renderModalButton("Suggest", "ctrl+y", m.modalFocus == 3)
+		buttons := lipgloss.JoinHorizontal(lipgloss.Center, saveBtn, "  ", cancelBtn, "  ", suggestBtn)
 
 		modalContent = modalStyle.Width(modalWidth).Render(
 			title + "\n" + contextBox + "\n\n" + m.modalTextarea.View() + "\n\n" + buttons)
@@ -2813,9 +2882,14 @@ func (m AppModel) renderWithModal(background string) string {
 		}
 		saveBtn := m.renderModalButton("Save", "ctrl+s", m.modalFocus == 1)
 		cancelBtn := m.renderModalButton("Cancel", "esc", m.modalFocus == 2)
-		buttonRows := []string{lipgloss.JoinHorizontal(lipgloss.Center, saveBtn, "  ", cancelBtn)}
+		buttons := []string{saveBtn, cancelBtn}
+		if m.canSuggest() {
+			buttons = append(buttons, m.renderModalButton("Suggest", "ctrl+y", m.modalFocus == 3))
+		}
+		buttonRows := []string{strings.Join(buttons, "  ")}
+		deleteStart := m.modalDeleteStartFocus()
 		for i, target := range m.modalDeleteTargets() {
-			buttonRows = append(buttonRows, m.renderDeleteButton(target.label, m.modalFocus == i+3))
+			buttonRows = append(buttonRows, m.renderDeleteButton(target.label, m.modalFocus == i+deleteStart))
 		}
 
 		content := title + "\n"

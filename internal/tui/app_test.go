@@ -767,6 +767,90 @@ func TestFileCommentShortcutCreatesSidebarOnlyComment(t *testing.T) {
 	}
 }
 
+func TestSuggestionButtonInsertsSelectedCodeAndPersistsComment(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\nthird\n")
+	app.tabs[0].selecting = true
+	app.tabs[0].selectAnchor = 1
+	app.tabs[0].cursorLine = 2
+	app.modal = commentModal
+	app.modalTextarea.SetValue("Use clearer names.")
+
+	updated, _ := app.Update(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
+	app = *updated.(*AppModel)
+
+	wantBody := "Use clearer names.\n\n```suggestion\nfirst\nsecond\n```"
+	if got := app.modalTextarea.Value(); got != wantBody {
+		t.Fatalf("suggestion body = %q, want %q", got, wantBody)
+	}
+	if app.modalFocus != 0 || !app.modalTextarea.Focused() {
+		t.Fatalf("suggestion left focus at %d, focused=%t; want textarea", app.modalFocus, app.modalTextarea.Focused())
+	}
+
+	app.modalSubmit()
+	comments := app.session.FileComments(app.tab().path)
+	if len(comments) != 1 {
+		t.Fatalf("persisted comments = %+v, want one", comments)
+	}
+	comment := comments[0]
+	if comment.StartLine != 1 || comment.EndLine != 2 || comment.Anchor != "first\nsecond" || comment.Body != wantBody {
+		t.Fatalf("persisted suggestion = %+v", comment)
+	}
+}
+
+func TestSuggestionButtonIsInCommentModal(t *testing.T) {
+	app := setupAppWithDoc(t, "first\n")
+	app.width = 80
+	app.height = 24
+	app.modal = commentModal
+
+	background := lipgloss.NewStyle().Width(app.width).Height(app.height).Render("")
+	rendered := app.renderWithModal(background)
+	if !strings.Contains(rendered, "Suggest") || !strings.Contains(rendered, "ctrl+y") {
+		t.Fatalf("comment modal does not contain Suggest button: %q", rendered)
+	}
+	if strings.Index(rendered, "Suggest") < strings.Index(rendered, "Cancel") {
+		t.Fatalf("Suggest button should follow Cancel: %q", rendered)
+	}
+}
+
+func TestSuggestionIsAvailableWhenReplyingToLineComment(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\nthird\n")
+	comment := review.Comment{
+		ID: "c_agent", StartLine: 1, EndLine: 2, Scope: "line",
+		Body: "agent reply", Author: "Codex", ReviewRound: 1,
+	}
+	app.tabs[0].state.Comments = []review.Comment{comment}
+	app.openCommentThread(comment.ID)
+	if app.modal != replyModal || !app.canSuggest() {
+		t.Fatalf("line reply modal = %v, canSuggest=%t", app.modal, app.canSuggest())
+	}
+
+	updated, _ := app.Update(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
+	app = *updated.(*AppModel)
+	want := "```suggestion\nfirst\nsecond\n```"
+	if got := app.modalTextarea.Value(); got != want {
+		t.Fatalf("reply suggestion = %q, want %q", got, want)
+	}
+
+	app.width = 80
+	app.height = 24
+	background := lipgloss.NewStyle().Width(app.width).Height(app.height).Render("")
+	if rendered := app.renderWithModal(background); !strings.Contains(rendered, "Suggest") {
+		t.Fatalf("reply modal does not contain Suggest button: %q", rendered)
+	}
+}
+
+func TestSuggestionIsUnavailableWhenReplyingToFileComment(t *testing.T) {
+	app := setupAppWithDoc(t, "first\n")
+	comment := review.Comment{ID: "c_file", Scope: "file", Body: "whole file", Author: "Codex"}
+	app.tabs[0].state.Comments = []review.Comment{comment}
+	app.openCommentThread(comment.ID)
+
+	if app.modal != replyModal || app.canSuggest() {
+		t.Fatalf("file reply modal = %v, canSuggest=%t", app.modal, app.canSuggest())
+	}
+}
+
 func TestCommentSidebarSortsFileCommentsBeforeLineComments(t *testing.T) {
 	line := testComment()
 	line.ID = "c_line"
@@ -836,7 +920,7 @@ func TestEditModalDeletesOwnCurrentRoundParent(t *testing.T) {
 	app, _ := newFinishTestApp(t, []review.Comment{comment}, false)
 	app.modal = editModal
 	app.editingID = comment.ID
-	app.modalFocus = 3
+	app.modalFocus = app.modalDeleteStartFocus()
 
 	app = pressKey(app, tea.KeyEnter)
 
@@ -862,7 +946,7 @@ func TestEditModalDeletesOnlyOwnCurrentRoundReply(t *testing.T) {
 	if len(targets) != 1 || targets[0].replyID != "rp_own" {
 		t.Fatalf("delete targets = %+v, want only rp_own", targets)
 	}
-	app.modalFocus = 3
+	app.modalFocus = app.modalDeleteStartFocus()
 
 	app = pressKey(app, tea.KeyEnter)
 
