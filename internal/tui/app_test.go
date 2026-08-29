@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/knu/tcrit/internal/document"
 	gitpkg "github.com/knu/tcrit/internal/git"
@@ -325,14 +326,24 @@ func newScrollTestApp(path string, lines []string, isMarkdown bool, width, heigh
 	return app
 }
 
-func TestExtraLinesPerDocLine_ChromaLinesNotWrapped(t *testing.T) {
+func TestExtraLinesPerDocLineChromaLinesWrap(t *testing.T) {
 	longLine := strings.Repeat("x", 500)
 	lines := []string{"short", longLine, "short"}
 	app := newScrollTestApp("test.go", lines, false, 80, 24)
+	app.tabs[0].chromaLines[1] = lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Render(longLine)
+	app.tabs[0].changedLines = map[int]bool{2: true}
 
 	counts := app.extraLinesPerDocLine()
-	if len(counts) != 0 {
-		t.Errorf("expected no extra lines for chroma-highlighted content, got %v", counts)
+	if counts[2] == 0 {
+		t.Error("expected extra lines for wrapped Chroma-highlighted line")
+	}
+	if counts[1] != 0 || counts[3] != 0 {
+		t.Errorf("expected no extra lines for short lines, got %v", counts)
+	}
+
+	app.rebuildContent()
+	if got := strings.Count(app.contentViewport.View(), "x"); got != len(longLine) {
+		t.Errorf("rendered %d of %d highlighted characters", got, len(longLine))
 	}
 }
 
@@ -399,9 +410,10 @@ func TestScrollToChunk_SourceWithLongLines(t *testing.T) {
 
 	app.scrollToChunk(changeChunk{startLine: 30, endLine: 30})
 
-	// Chunk start (line 30) minus chunkScrollPadding should sit at the top:
-	// rendered offset = 25 since each doc line renders as exactly one line.
-	want := 30 - chunkScrollPadding - 1
+	// Chunk start minus padding should sit at the top after accounting for
+	// every wrapped display line before it.
+	wrappedLines := strings.Count(lipgloss.Wrap(lines[0], app.contentViewport.Width()-8, ""), "\n") + 1
+	want := (30 - chunkScrollPadding - 1) * wrappedLines
 	if got := app.contentViewport.YOffset(); got != want {
 		t.Errorf("expected YOffset %d, got %d", want, got)
 	}
