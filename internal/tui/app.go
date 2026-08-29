@@ -372,6 +372,17 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if m.focused == contentPane && !t.selecting {
+		switch {
+		case key.Matches(msg, keys.NextComment):
+			m.jumpToComment(1)
+			return m, nil
+		case key.Matches(msg, keys.PrevComment):
+			m.jumpToComment(-1)
+			return m, nil
+		}
+	}
+
 	// Content pane cursor movement (annotation-aware)
 	if m.focused == contentPane && t.doc != nil {
 		moved := false
@@ -448,66 +459,6 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			t.cursorAnnoIdx = 0
 			t.cursorLine = t.doc.LineCount()
 			moved = true
-		case key.Matches(msg, keys.NextComment):
-			if t.state != nil && len(t.state.Comments) > 0 {
-				type target struct {
-					endLine int
-					idx     int
-				}
-				var best *target
-				for _, c := range t.state.Comments {
-					endAt := c.EndAt()
-					if endAt > t.cursorLine || (endAt == t.cursorLine && !t.cursorOnAnnotation) {
-						if best == nil || endAt < best.endLine {
-							best = &target{endLine: endAt, idx: 0}
-						}
-					}
-				}
-				if best == nil {
-					for _, c := range t.state.Comments {
-						endAt := c.EndAt()
-						if best == nil || endAt < best.endLine {
-							best = &target{endLine: endAt, idx: 0}
-						}
-					}
-				}
-				if best != nil {
-					t.cursorLine = best.endLine
-					t.cursorOnAnnotation = true
-					t.cursorAnnoIdx = best.idx
-					moved = true
-				}
-			}
-		case key.Matches(msg, keys.PrevComment):
-			if t.state != nil && len(t.state.Comments) > 0 {
-				type target struct {
-					endLine int
-					idx     int
-				}
-				var best *target
-				for _, c := range t.state.Comments {
-					endAt := c.EndAt()
-					if endAt < t.cursorLine || (endAt == t.cursorLine && !t.cursorOnAnnotation) {
-						if best == nil || endAt > best.endLine {
-							best = &target{endLine: endAt, idx: 0}
-						}
-					}
-				}
-				if best == nil {
-					for _, c := range t.state.Comments {
-						endAt := c.EndAt()
-						if best == nil || endAt > best.endLine {
-							best = &target{endLine: endAt, idx: 0}
-						}
-					}
-				}
-				if best != nil {
-					t.cursorLine = best.endLine
-					t.cursorOnAnnotation = true
-					t.cursorAnnoIdx = best.idx
-					moved = true
-				}
-			}
 		case key.Matches(msg, keys.NextChange):
 			if len(t.changeChunks) > 0 {
 				target := -1
@@ -1124,6 +1075,94 @@ func (m *AppModel) annotationsAfterLine(lineNum int) []annotation {
 		}
 	}
 	return anns
+}
+
+type commentTarget struct {
+	line    int
+	annoIdx int
+}
+
+func (m *AppModel) commentTargets(tabIndex int) []commentTarget {
+	t := &m.tabs[tabIndex]
+	if t.state == nil {
+		return nil
+	}
+
+	indices := make(map[int]int)
+	targets := make([]commentTarget, 0, len(t.state.Comments))
+	for _, c := range t.state.Comments {
+		line := c.EndAt()
+		targets = append(targets, commentTarget{line: line, annoIdx: indices[line]})
+		indices[line]++
+	}
+	sort.SliceStable(targets, func(i, j int) bool {
+		return targets[i].line < targets[j].line
+	})
+	return targets
+}
+
+// jumpToComment moves to the adjacent comment in tab, line, and annotation
+// order, wrapping across the entire review and skipping tabs without comments.
+func (m *AppModel) jumpToComment(step int) bool {
+	t := m.tab()
+	targets := m.commentTargets(m.activeTab)
+	current := -1
+	if t.cursorOnAnnotation {
+		for i, target := range targets {
+			if target.line == t.cursorLine && target.annoIdx == t.cursorAnnoIdx {
+				current = i
+				break
+			}
+		}
+	}
+
+	if current >= 0 {
+		adjacent := current + step
+		if adjacent >= 0 && adjacent < len(targets) {
+			m.selectComment(m.activeTab, targets[adjacent])
+			return true
+		}
+	} else if step > 0 {
+		for _, target := range targets {
+			if target.line >= t.cursorLine {
+				m.selectComment(m.activeTab, target)
+				return true
+			}
+		}
+	} else {
+		for i := len(targets) - 1; i >= 0; i-- {
+			if targets[i].line <= t.cursorLine {
+				m.selectComment(m.activeTab, targets[i])
+				return true
+			}
+		}
+	}
+
+	for offset := 1; offset <= len(m.tabs); offset++ {
+		tabIndex := (m.activeTab + step*offset + len(m.tabs)) % len(m.tabs)
+		targets = m.commentTargets(tabIndex)
+		if len(targets) == 0 {
+			continue
+		}
+		target := targets[0]
+		if step < 0 {
+			target = targets[len(targets)-1]
+		}
+		m.selectComment(tabIndex, target)
+		return true
+	}
+	return false
+}
+
+func (m *AppModel) selectComment(tabIndex int, target commentTarget) {
+	m.activeTab = tabIndex
+	t := m.tab()
+	t.cursorLine = target.line
+	t.cursorOnAnnotation = true
+	t.cursorAnnoIdx = target.annoIdx
+	m.rebuildContent()
+	m.updateCommentSidebar()
+	m.scrollToCursor()
 }
 
 // sidebarItem represents a comment in the sidebar list.

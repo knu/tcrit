@@ -122,6 +122,80 @@ func TestNewApp(t *testing.T) {
 	}
 }
 
+func newCommentNavigationTestApp() AppModel {
+	app := NewApp("first.go", AppConfig{})
+	lines := []string{"one", "two", "three", "four"}
+	tab := func(path string, comments ...review.Comment) FileTab {
+		return FileTab{
+			path:       path,
+			cursorLine: 1,
+			doc: &document.Document{
+				Path: path, Content: strings.Join(lines, "\n"), Lines: lines,
+			},
+			state: &fileReview{Comments: comments},
+		}
+	}
+	comment := func(id string, line int) review.Comment {
+		return review.Comment{ID: id, StartLine: line, EndLine: line, Body: id}
+	}
+	app.tabs = []FileTab{
+		tab("first.go", comment("first-a", 2), comment("first-b", 2), comment("first-c", 4)),
+		tab("empty.go"),
+		tab("last.go", comment("last-a", 1), comment("last-b", 3)),
+	}
+	app.multiFile = true
+	app.contentViewport.SetWidth(80)
+	app.contentViewport.SetHeight(20)
+	return app
+}
+
+func TestCommentNavigationCrossesFiles(t *testing.T) {
+	app := newCommentNavigationTestApp()
+	app.tabs[0].cursorLine = 4
+	app.tabs[0].cursorOnAnnotation = true
+
+	app = pressKey(app, ']')
+
+	if app.activeTab != 2 || app.tab().cursorLine != 1 || !app.tab().cursorOnAnnotation {
+		t.Fatalf("next comment = tab %d, line %d; want tab 2, line 1", app.activeTab, app.tab().cursorLine)
+	}
+
+	app = pressKey(app, '[')
+
+	if app.activeTab != 0 || app.tab().cursorLine != 4 || !app.tab().cursorOnAnnotation {
+		t.Fatalf("previous comment = tab %d, line %d; want tab 0, line 4", app.activeTab, app.tab().cursorLine)
+	}
+}
+
+func TestCommentNavigationWrapsReviewAndVisitsSameLineThreads(t *testing.T) {
+	app := newCommentNavigationTestApp()
+	app.tabs[0].cursorLine = 2
+
+	app = pressKey(app, ']')
+	if app.activeTab != 0 || app.tab().cursorAnnoIdx != 0 {
+		t.Fatalf("first comment = tab %d, annotation %d; want tab 0, annotation 0", app.activeTab, app.tab().cursorAnnoIdx)
+	}
+
+	app = pressKey(app, ']')
+	if app.activeTab != 0 || app.tab().cursorAnnoIdx != 1 {
+		t.Fatalf("second comment = tab %d, annotation %d; want tab 0, annotation 1", app.activeTab, app.tab().cursorAnnoIdx)
+	}
+
+	app.activeTab = 2
+	app.tabs[2].cursorLine = 3
+	app.tabs[2].cursorOnAnnotation = true
+	app.tabs[2].cursorAnnoIdx = 0
+	app = pressKey(app, ']')
+	if app.activeTab != 0 || app.tab().cursorLine != 2 || app.tab().cursorAnnoIdx != 0 {
+		t.Fatalf("wrapped next = tab %d, line %d, annotation %d", app.activeTab, app.tab().cursorLine, app.tab().cursorAnnoIdx)
+	}
+
+	app = pressKey(app, '[')
+	if app.activeTab != 2 || app.tab().cursorLine != 3 {
+		t.Fatalf("wrapped previous = tab %d, line %d; want tab 2, line 3", app.activeTab, app.tab().cursorLine)
+	}
+}
+
 func TestDocRenderedMsg_LoadsExistingComments(t *testing.T) {
 	// Create a temp directory and test file
 	tmpDir := t.TempDir()
