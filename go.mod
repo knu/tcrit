@@ -7,6 +7,7 @@ require (
 	charm.land/bubbletea/v2 v2.0.0
 	charm.land/lipgloss/v2 v2.0.0
 	github.com/alecthomas/chroma/v2 v2.23.1
+	github.com/aymanbagabas/go-udiff v0.4.0
 	github.com/bluekeyes/go-gitdiff v0.8.1
 	github.com/gofrs/flock v0.13.0
 	github.com/spf13/cobra v1.10.2

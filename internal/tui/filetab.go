@@ -18,13 +18,14 @@ type fileReview struct {
 
 // FileTab holds per-file state for a single tab in the code review TUI.
 type FileTab struct {
-	path         string
-	doc          *document.Document
-	state        *fileReview
-	changedLines map[int]bool                 // line numbers that are added/modified
-	deletedAfter map[int][]gitpkg.DeletedLine // deleted lines keyed by new-file line they appear after
-	changeChunks []changeChunk                // contiguous groups of changed lines
-	cursorLine   int                          // 1-based
+	path          string
+	doc           *document.Document
+	state         *fileReview
+	changedLines  map[int]bool // line numbers that are added/modified
+	inlineChanges map[int][]gitpkg.InlineSegment
+	deletedAfter  map[int][]gitpkg.DeletedLine // deleted lines keyed by new-file line they appear after
+	changeChunks  []changeChunk                // contiguous groups of changed lines
+	cursorLine    int                          // 1-based
 
 	// Visual selection mode
 	selecting    bool
@@ -62,6 +63,7 @@ func newFileTab(path string, diff *gitpkg.DiffInfo) FileTab {
 	}
 	if diff != nil {
 		ft.changedLines = diff.ChangedLines
+		ft.inlineChanges = diff.InlineChanges
 		ft.deletedAfter = diff.DeletedAfter
 		ft.changeChunks = computeChangeChunks(diff)
 	}

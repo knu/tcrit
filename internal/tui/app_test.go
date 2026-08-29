@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/knu/tcrit/internal/document"
+	gitpkg "github.com/knu/tcrit/internal/git"
 	"github.com/knu/tcrit/internal/review"
 )
 
@@ -210,6 +211,44 @@ func TestExtraLinesPerDocLine_MarkdownWraps(t *testing.T) {
 	}
 	if counts[1] != 0 || counts[3] != 0 {
 		t.Errorf("expected no extra lines for short lines, got %v", counts)
+	}
+}
+
+func TestDeletedMarkdownLinesWrap(t *testing.T) {
+	longLine := strings.Repeat("word ", 100)
+	app := newScrollTestApp("test.md", []string{"current"}, true, 80, 24)
+	app.tabs[0].deletedAfter = map[int][]gitpkg.DeletedLine{
+		0: {{OldLineNum: 1, Content: longLine}},
+	}
+
+	lines := deletedDisplayLines(longLine, "", nil, true, app.contentViewport.Width()-8)
+	if len(lines) < 2 {
+		t.Fatalf("expected deleted Markdown line to wrap, got %d display line", len(lines))
+	}
+	if got := app.extraLinesPerDocLine()[1]; got != len(lines) {
+		t.Errorf("expected %d extra lines for wrapped deletion, got %d", len(lines), got)
+	}
+}
+
+func TestInlineDiffDisplayLinesUseDistinctBackgrounds(t *testing.T) {
+	initAdaptiveStyles(true)
+	segments := []gitpkg.InlineSegment{
+		{Content: "common ", Changed: false},
+		{Content: "added", Changed: true},
+	}
+
+	rendered := strings.Join(inlineDiffDisplayLines(segments, true, 80, diffCommonTextBg, diffAddedTextBg), "\n")
+	commonBackground := bgToAnsi(diffCommonTextBg.GetBackground())
+	changedBackground := bgToAnsi(diffAddedTextBg.GetBackground())
+	if commonBackground == changedBackground {
+		t.Fatal("expected common and changed text to use distinct backgrounds")
+	}
+	if commonBackground == bgToAnsi(diffChangedLineBg.GetBackground()) ||
+		commonBackground == bgToAnsi(diffDeletedLineBg.GetBackground()) {
+		t.Fatal("expected replacement-line common text to use a neutral background")
+	}
+	if !strings.Contains(rendered, commonBackground) || !strings.Contains(rendered, changedBackground) {
+		t.Errorf("rendered line does not contain both backgrounds: %q", rendered)
 	}
 }
 
