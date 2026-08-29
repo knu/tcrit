@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.4.0
+
+### Changed
+
+- **Crit-compatible review workflow** — review state now uses CritJSON, review commands block until feedback is finished, and `tcrit comment` / `tcrit comments` use crit-compatible syntax for agent replies and automation
+- **Installation commands** — `tcrit install` and `tcrit check` replace the former `setup-claude` and `setup-gemini` commands
+
+### Added
+
+- **Versioned plan reviews** — `tcrit plan` stores immutable revisions and carries comments forward as plans change
+- **Thread lifecycle controls** — reviewers can resolve or reopen threads, reply from the TUI, and delete only comments or replies they authored in the current round
+- **Cross-file navigation** — `[` / `]` traverse comment threads, while `n` / `N` traverse changes without wrapping; `<` / `>` jump to the current file's first or last line
+- **Resolve-all approval** — finishing a round without new feedback can resolve every remaining thread and approve in one step
+
+### Fixed
+
+- Comments retain their intended location across edited review rounds, including drift detection when the original text disappears
+- Inline replacement diffs preserve whitespace and highlight only the words that actually changed
+
 ## 0.3.1
 
 ### Added
