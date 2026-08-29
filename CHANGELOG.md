@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.1
+
+### Added
+
+- **Suggestion blocks** — press `Ctrl-Y` to insert a GitHub-compatible `suggestion` block for the selected line or a line comment's anchor, including in replies
+- **External editor support** — press `Ctrl-O` to edit comment and reply bodies in `$EDITOR` without leaving the review session
+
+### Fixed
+
+- Changed-line backgrounds remain continuous across Markdown bold and code spans
+
 ## 0.5.0
 
 ### Added
