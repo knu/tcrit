@@ -256,8 +256,65 @@ func TestAngleBracketsMoveToFileBoundaries(t *testing.T) {
 		t.Fatalf("< moved to line %d, annotation=%t; want line 1", app.tab().cursorLine, app.tab().cursorOnAnnotation)
 	}
 
-	if !strings.Contains(app.renderFooter(), "</>") {
-		t.Errorf("footer does not advertise angle-bracket navigation: %q", app.renderFooter())
+}
+
+func TestFooterKeepsOnlyNonstandardNavigationHints(t *testing.T) {
+	app := newChangeNavigationTestApp()
+	footer := app.renderFooter()
+
+	for _, omitted := range []string{"j/k", "shift+↑↓", "</>"} {
+		if strings.Contains(footer, omitted) {
+			t.Errorf("footer contains fallback navigation hint %q: %q", omitted, footer)
+		}
+	}
+	for _, retained := range []string{"[/]", "?"} {
+		if !strings.Contains(footer, retained) {
+			t.Errorf("footer does not contain %q: %q", retained, footer)
+		}
+	}
+
+	app.tabs[0].selecting = true
+	if footer := app.renderFooter(); strings.Contains(footer, "j/k") || !strings.Contains(footer, "?") {
+		t.Errorf("selection footer = %q, want help without j/k", footer)
+	}
+}
+
+func TestHelpModalShowsAllShortcutGroupsAndCloses(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\n")
+	app.width = 80
+	app.height = 24
+
+	app = pressKey(app, '?')
+	if app.modal != helpModal {
+		t.Fatalf("? opened modal %v, want help modal", app.modal)
+	}
+
+	background := lipgloss.NewStyle().Width(app.width).Height(app.height).Render("")
+	rendered := app.renderWithModal(background)
+	for _, want := range []string{
+		"Keyboard Help", "General", "Navigation", "Code review", "Selection and dialogs",
+		"↑/↓,j/k", "PgUp/PgDn", "Home/End,g/G,</>", "tab/shift+tab", "ctrl+s", "y/n/esc", "Backspace",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("help modal does not contain %q", want)
+		}
+	}
+	if width := lipgloss.Width(rendered); width > app.width {
+		t.Errorf("help width = %d, terminal width = %d", width, app.width)
+	}
+	if height := lipgloss.Height(rendered); height > app.height {
+		t.Errorf("help height = %d, terminal height = %d", height, app.height)
+	}
+
+	app = pressKey(app, tea.KeyEscape)
+	if app.modal != noModal {
+		t.Fatalf("esc left modal %v open", app.modal)
+	}
+
+	app = pressKey(app, '?')
+	app = pressKey(app, '?')
+	if app.modal != noModal {
+		t.Fatalf("second ? left modal %v open", app.modal)
 	}
 }
 

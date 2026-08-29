@@ -35,6 +35,7 @@ const (
 	replyModal
 	editModal
 	finishModal
+	helpModal
 )
 
 // FinishEvent is emitted on the finish channel when the reviewer finishes a
@@ -276,6 +277,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.modal == helpModal {
+		if key.Matches(msg, keys.Help) || key.Matches(msg, keys.Cancel) {
+			m.modal = noModal
+		}
+		return m, nil
+	}
 	if m.modal == commentModal || m.modal == fileCommentModal || m.modal == replyModal || m.modal == editModal {
 		return m.handleTextModal(msg)
 	}
@@ -313,6 +320,10 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.rebuildContent()
 			return m, nil
 		}
+		return m, nil
+
+	case key.Matches(msg, keys.Help):
+		m.modal = helpModal
 		return m, nil
 
 	case key.Matches(msg, keys.Tab):
@@ -2553,26 +2564,23 @@ func (m AppModel) renderFooter() string {
 	var items []string
 	if t.selecting {
 		items = []string{
-			k("j/k", "extend"),
 			k("enter", "comment selection"),
 			k("esc", "cancel"),
 			k("v", "toggle select"),
+			k("?", "help"),
 		}
 	} else {
 		items = []string{
-			k("j/k", "move"),
-			k("</>", "file top/bottom"),
 			k("[/]", "prev/next comment"),
-			k("shift+↑↓", "page"),
 			k("s", "sidebar"),
-			k("v", "select"),
+			k("v", "select lines"),
 			k("enter", "comment"),
 			k("f", "file comment"),
 		}
 		if len(t.state.Comments) > 0 {
 			items = append(items, k("r", "resolve/unresolve"))
 		}
-		items = append(items, k("q", "save & quit"))
+		items = append(items, k("q", "save & quit"), k("?", "help"))
 		if m.multiFile {
 			items = append([]string{
 				k("tab/S-tab", "next/prev tab"),
@@ -2582,6 +2590,79 @@ func (m AppModel) renderFooter() string {
 	}
 
 	return footerStyle.Width(m.width).Render(strings.Join(items, "  "))
+}
+
+type helpItem struct {
+	keys string
+	desc string
+}
+
+func renderHelpGroup(title string, items []helpItem, width int) string {
+	if width < 6 {
+		width = 6
+	}
+	keyWidth := 0
+	for _, item := range items {
+		if w := lipgloss.Width(item.keys); w > keyWidth {
+			keyWidth = w
+		}
+	}
+	keyWidth++
+	if keyWidth > width-5 {
+		keyWidth = width - 5
+	}
+
+	var b strings.Builder
+	b.WriteString(footerKeyStyle.Render(title))
+	b.WriteString("\n")
+	for i, item := range items {
+		key := footerKeyStyle.Width(keyWidth).Render(item.keys)
+		b.WriteString(key + footerStyle.Render(item.desc))
+		if i < len(items)-1 {
+			b.WriteString("\n")
+		}
+	}
+	return lipgloss.NewStyle().Width(width).Render(b.String())
+}
+
+func (m AppModel) renderHelp(innerWidth int) string {
+	columnWidth := (innerWidth - 4) / 3
+	general := renderHelpGroup("General", []helpItem{
+		{keys: "enter", desc: "comment/open"},
+		{keys: "f", desc: "file comment"},
+		{keys: "v", desc: "select"},
+		{keys: "s", desc: "sidebar"},
+		{keys: "r", desc: "resolve"},
+		{keys: "q/ctrl+c", desc: "finish"},
+		{keys: "?", desc: "help"},
+	}, columnWidth)
+
+	navigation := renderHelpGroup("Navigation", []helpItem{
+		{keys: "↑/↓,j/k", desc: "move"},
+		{keys: "PgUp/PgDn", desc: "half page"},
+		{keys: "shift+↑/↓,ctrl+u/d", desc: "half page"},
+		{keys: "Home/End,g/G,</>", desc: "top/bottom"},
+		{keys: "[/]", desc: "comments"},
+	}, columnWidth)
+	codeReview := renderHelpGroup("Code review / search", []helpItem{
+		{keys: "tab/shift+tab", desc: "files"},
+		{keys: "1-9", desc: "file tab"},
+		{keys: "/", desc: "search"},
+		{keys: "n/N", desc: "changes"},
+		{keys: "type/Backspace", desc: "filter"},
+		{keys: "tab", desc: "next match"},
+		{keys: "enter/esc", desc: "open/cancel"},
+	}, columnWidth)
+
+	columns := lipgloss.JoinHorizontal(lipgloss.Top, general, "  ", navigation, "  ", codeReview)
+	contexts := renderHelpGroup("Selection and dialogs", []helpItem{
+		{keys: "↑/↓,j/k · enter/v/esc", desc: "extend · comment/toggle/cancel selection"},
+		{keys: "ctrl+s · tab/shift+tab · enter/esc", desc: "save · focus · activate/close comment dialog"},
+		{keys: "y/n/esc · ←/→,h/l,tab/shift+tab · enter", desc: "confirm/cancel · focus · activate finish dialog"},
+		{keys: "q/ctrl+c", desc: "quit from finish dialog"},
+	}, innerWidth)
+
+	return columns + "\n" + contexts
 }
 
 func (m AppModel) renderModalButton(label, hint string, focused bool) string {
@@ -2633,6 +2714,9 @@ func (m AppModel) renderContextPreview(start, end, maxWidth int) string {
 func (m AppModel) renderWithModal(background string) string {
 	var modalContent string
 	modalWidth := m.width * 2 / 3
+	if m.modal == helpModal {
+		modalWidth = m.width - 4
+	}
 	if modalWidth < 50 {
 		modalWidth = 50
 	}
@@ -2642,6 +2726,11 @@ func (m AppModel) renderWithModal(background string) string {
 	innerWidth := modalWidth - 6
 
 	switch m.modal {
+	case helpModal:
+		title := modalTitleStyle.MarginBottom(0).Render("Keyboard Help  (? / esc to close)")
+		modalContent = modalStyle.Width(modalWidth).Render(
+			title + "\n" + m.renderHelp(innerWidth))
+
 	case commentModal:
 		start, end := m.selectionRange()
 		var title string
