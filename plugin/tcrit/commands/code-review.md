@@ -23,9 +23,7 @@ When starting a new review task (not a later round of the same task), reset stat
 tcrit clear --all
 ```
 
-Check if `$TMUX` is set:
-
-If in tmux, run this command with a **timeout of 600000** (10 minutes) since it blocks until the reviewer finishes (pass `--base <ref>` to change the diff base):
+Run this command with a **timeout of 600000** (10 minutes) since it blocks until the reviewer finishes (pass `--base <ref>` to change the diff base).  Tcrit detects the invoking tmux pane even when `$TMUX` and `$TMUX_PANE` were not inherited:
 
 ```bash
 tcrit review --code
