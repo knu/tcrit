@@ -12,6 +12,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.6
 	github.com/gofrs/flock v0.13.0
 	github.com/spf13/cobra v1.10.2
+	github.com/tklauser/ps v0.0.4
 	golang.org/x/term v0.45.0
 )
 

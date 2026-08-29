@@ -26,8 +26,7 @@ func TestShellEscape(t *testing.T) {
 }
 
 func TestSplitWindowArgsTargetsInvokingPaneAndCwd(t *testing.T) {
-	t.Setenv("TMUX_PANE", "%42")
-	args := splitWindowArgs(true, "cmd")
+	args := splitWindowArgs(true, "cmd", "%42")
 
 	idx := slices.Index(args, "-t")
 	if idx < 0 || args[idx+1] != "%42" {
@@ -47,8 +46,7 @@ func TestSplitWindowArgsTargetsInvokingPaneAndCwd(t *testing.T) {
 }
 
 func TestSplitWindowArgsWithoutSize(t *testing.T) {
-	t.Setenv("TMUX_PANE", "")
-	args := splitWindowArgs(false, "cmd")
+	args := splitWindowArgs(false, "cmd", "")
 	if slices.Contains(args, "-p") {
 		t.Errorf("expected no -p in %v", args)
 	}
@@ -78,7 +76,7 @@ func TestSpawnTUIPaneCodeMode(t *testing.T) {
 	calls := captureSpawns(t)
 
 	mode := &reviewMode{ref: "HEAD"}
-	if err := spawnTUIPane(mode); err != nil {
+	if err := spawnTUIPane(mode, tmuxContext{session: "/tmp/tmux/default,100,1", pane: "%42"}); err != nil {
 		t.Fatalf("spawnTUIPane: %v", err)
 	}
 
@@ -91,13 +89,16 @@ func TestSpawnTUIPaneCodeMode(t *testing.T) {
 			t.Errorf("pane command missing %q: %s", want, cmd)
 		}
 	}
+	if !slices.Contains((*calls)[0], "%42") {
+		t.Errorf("tmux call should target the resolved pane: %v", (*calls)[0])
+	}
 }
 
 func TestSpawnTUIPaneDocMode(t *testing.T) {
 	calls := captureSpawns(t)
 
 	mode := &reviewMode{docPath: "docs/it's plan.md"}
-	if err := spawnTUIPane(mode); err != nil {
+	if err := spawnTUIPane(mode, tmuxContext{}); err != nil {
 		t.Fatalf("spawnTUIPane: %v", err)
 	}
 
@@ -126,7 +127,7 @@ func TestSpawnTUIPaneRetriesWithoutPercentage(t *testing.T) {
 		runCommand, lookPath, resolveExec = origRun, origLook, origResolve
 	})
 
-	if err := spawnTUIPane(&reviewMode{ref: "HEAD"}); err != nil {
+	if err := spawnTUIPane(&reviewMode{ref: "HEAD"}, tmuxContext{}); err != nil {
 		t.Fatalf("spawnTUIPane: %v", err)
 	}
 	if len(calls) != 2 {
@@ -137,6 +138,94 @@ func TestSpawnTUIPaneRetriesWithoutPercentage(t *testing.T) {
 	}
 	if slices.Contains(calls[1], "-p") {
 		t.Errorf("retry should omit -p: %v", calls[1])
+	}
+}
+
+func TestFindTMUXContextUsesEnvironment(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux/default,100,2")
+	t.Setenv("TMUX_PANE", "%7")
+
+	got := findTMUXContext()
+	if got.session != "/tmp/tmux/default,100,2" || got.pane != "%7" {
+		t.Errorf("findTMUXContext() = %+v", got)
+	}
+}
+
+func TestResolveTMUXContextFromAncestorPanePID(t *testing.T) {
+	origOutput, origParent, origInspect, origLook := commandOutput, parentProcessID, inspectProcess, lookPath
+	commandOutput = func(cmd *exec.Cmd) ([]byte, error) {
+		switch cmd.Args[1] {
+		case "list-panes":
+			return []byte("300\t/tmp/tmux-501/default\t100\t$2\t%7\n"), nil
+		case "list-clients":
+			return []byte("200\t/tmp/tmux-501/default\t100\t$3\n"), nil
+		default:
+			return nil, fmt.Errorf("unexpected command: %v", cmd.Args)
+		}
+	}
+	parentProcessID = func() int { return 400 }
+	inspectProcess = func(pid int) (int, error) {
+		switch pid {
+		case 400:
+			return 300, nil
+		default:
+			return 0, fmt.Errorf("unexpected PID: %d", pid)
+		}
+	}
+	lookPath = func(string) (string, error) { return "/usr/bin/tmux", nil }
+	t.Cleanup(func() {
+		commandOutput, parentProcessID, inspectProcess, lookPath = origOutput, origParent, origInspect, origLook
+	})
+
+	got := resolveTMUXContext()
+	if got.session != "/tmp/tmux-501/default,100,2" || got.pane != "%7" {
+		t.Errorf("resolveTMUXContext() = %+v", got)
+	}
+}
+
+func TestResolveTMUXContextFallsBackToClientPID(t *testing.T) {
+	origOutput, origParent, origInspect, origLook := commandOutput, parentProcessID, inspectProcess, lookPath
+	commandOutput = func(cmd *exec.Cmd) ([]byte, error) {
+		if cmd.Args[1] == "list-clients" {
+			return []byte("300\t/tmp/tmux-501/default\t100\t$3\n"), nil
+		}
+		return nil, fmt.Errorf("no panes")
+	}
+	parentProcessID = func() int { return 400 }
+	inspectProcess = func(int) (int, error) { return 300, nil }
+	lookPath = func(string) (string, error) { return "/usr/bin/tmux", nil }
+	t.Cleanup(func() {
+		commandOutput, parentProcessID, inspectProcess, lookPath = origOutput, origParent, origInspect, origLook
+	})
+
+	got := resolveTMUXContext()
+	if got.session != "/tmp/tmux-501/default,100,3" || got.pane != "" {
+		t.Errorf("resolveTMUXContext() = %+v", got)
+	}
+}
+
+func TestInspectParentProcess(t *testing.T) {
+	got, err := inspectParentProcess(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := os.Getppid(); got != want {
+		t.Errorf("inspectParentProcess(%d) = %d, want %d", os.Getpid(), got, want)
+	}
+}
+
+func TestTMUXCommandRestoresSessionEnvironment(t *testing.T) {
+	t.Setenv("TMUX", "")
+	cmd := tmuxCommand("/usr/bin/tmux", tmuxContext{session: "/tmp/tmux/default,100,2"}, "list-panes")
+
+	var values []string
+	for _, entry := range cmd.Env {
+		if strings.HasPrefix(entry, "TMUX=") {
+			values = append(values, entry)
+		}
+	}
+	if want := []string{"TMUX=/tmp/tmux/default,100,2"}; !slices.Equal(values, want) {
+		t.Errorf("TMUX environment = %v, want %v", values, want)
 	}
 }
 

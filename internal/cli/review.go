@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,6 +28,14 @@ var runCommand = func(cmd *exec.Cmd) error {
 }
 
 var lookPath = exec.LookPath
+
+var commandOutput = func(cmd *exec.Cmd) ([]byte, error) {
+	return cmd.Output()
+}
+
+var parentProcessID = os.Getppid
+
+var inspectProcess = inspectParentProcess
 
 var resolveExec = func() (string, error) {
 	return resolveExecutable()
@@ -110,8 +119,9 @@ func runReviewFlow(cfg *config.Config, sess *review.Session, mode *reviewMode) e
 		return runReviewCycle(cfg, sess, sock)
 	}
 
-	if os.Getenv("TMUX") != "" {
-		if err := spawnTUIPane(mode); err != nil {
+	tmux := findTMUXContext()
+	if tmux.active() {
+		if err := spawnTUIPane(mode, tmux); err != nil {
 			return err
 		}
 		if err := ipc.WaitAlive(sock, 15*time.Second); err != nil {
@@ -255,7 +265,7 @@ func cleanupOnApprove(cfg *config.Config, sess *review.Session) {
 }
 
 // spawnTUIPane opens the TUI in a tmux split pane running `tcrit _tui`.
-func spawnTUIPane(mode *reviewMode) error {
+func spawnTUIPane(mode *reviewMode, tmux tmuxContext) error {
 	tmuxBin, err := lookPath("tmux")
 	if err != nil {
 		return fmt.Errorf("tmux binary not found on PATH: %w", err)
@@ -291,11 +301,11 @@ func spawnTUIPane(mode *reviewMode) error {
 			envPrefix, shellEscape(tcritBin), shellEscape(absPath))
 	}
 
-	splitCmd := exec.Command(tmuxBin, splitWindowArgs(true, tuiCmd)...)
+	splitCmd := tmuxCommand(tmuxBin, tmux, splitWindowArgs(true, tuiCmd, tmux.pane)...)
 	if err := runCommand(splitCmd); err != nil {
 		// Retry without -p — percentage sizing fails when the parent pane
 		// size isn't available (e.g. invoked from an agent subprocess).
-		splitCmd = exec.Command(tmuxBin, splitWindowArgs(false, tuiCmd)...)
+		splitCmd = tmuxCommand(tmuxBin, tmux, splitWindowArgs(false, tuiCmd, tmux.pane)...)
 		if err := runCommand(splitCmd); err != nil {
 			return fmt.Errorf("failed to open tmux pane: %w", err)
 		}
@@ -340,9 +350,9 @@ func resolveExecutable() (string, error) {
 // splitWindowArgs builds the tmux split-window arguments, targeting the
 // invoking pane via TMUX_PANE and pinning the pane's working directory to
 // the caller's so both sides derive the same session key.
-func splitWindowArgs(withSize bool, tuiCmd string) []string {
+func splitWindowArgs(withSize bool, tuiCmd, pane string) []string {
 	args := []string{"split-window", "-h"}
-	if pane := os.Getenv("TMUX_PANE"); pane != "" {
+	if pane != "" {
 		args = append(args, "-t", pane)
 	}
 	if cwd, err := os.Getwd(); err == nil {
@@ -352,6 +362,103 @@ func splitWindowArgs(withSize bool, tuiCmd string) []string {
 		args = append(args, "-p", "70")
 	}
 	return append(args, tuiCmd)
+}
+
+type tmuxContext struct {
+	session string
+	pane    string
+}
+
+func (c tmuxContext) active() bool {
+	return c.session != "" || c.pane != ""
+}
+
+func findTMUXContext() tmuxContext {
+	ctx := tmuxContext{
+		session: os.Getenv("TMUX"),
+		pane:    os.Getenv("TMUX_PANE"),
+	}
+	if ctx.session != "" && ctx.pane != "" {
+		return ctx
+	}
+
+	found := resolveTMUXContext()
+	if ctx.session == "" {
+		ctx.session = found.session
+	}
+	if ctx.pane == "" {
+		ctx.pane = found.pane
+	}
+	return ctx
+}
+
+func resolveTMUXContext() tmuxContext {
+	tmuxBin, err := lookPath("tmux")
+	if err != nil {
+		return tmuxContext{}
+	}
+
+	panes := tmuxPIDContexts(tmuxBin, "list-panes", "-a", "-F", "#{pane_pid}\t#{socket_path}\t#{pid}\t#{session_id}\t#{pane_id}")
+	clients := tmuxPIDContexts(tmuxBin, "list-clients", "-F", "#{client_pid}\t#{socket_path}\t#{pid}\t#{session_id}")
+	seen := make(map[int]bool)
+	for pid := parentProcessID(); pid > 1 && !seen[pid]; {
+		seen[pid] = true
+		if ctx, ok := panes[pid]; ok {
+			return ctx
+		}
+		if ctx, ok := clients[pid]; ok {
+			return ctx
+		}
+		ppid, err := inspectProcess(pid)
+		if err != nil {
+			break
+		}
+		pid = ppid
+	}
+	return tmuxContext{}
+}
+
+func tmuxPIDContexts(tmuxBin string, args ...string) map[int]tmuxContext {
+	out, err := commandOutput(exec.Command(tmuxBin, args...))
+	if err != nil {
+		return nil
+	}
+	contexts := make(map[int]tmuxContext)
+	for line := range strings.Lines(string(out)) {
+		fields := strings.Split(strings.TrimSuffix(line, "\n"), "\t")
+		if len(fields) != 4 && len(fields) != 5 {
+			continue
+		}
+		processID, err := strconv.Atoi(fields[0])
+		if err != nil || processID < 2 {
+			continue
+		}
+		socket, serverPID, sessionID := fields[1], fields[2], strings.TrimPrefix(fields[3], "$")
+		if socket == "" || serverPID == "" || sessionID == "" {
+			continue
+		}
+		ctx := tmuxContext{session: strings.Join([]string{socket, serverPID, sessionID}, ",")}
+		if len(fields) == 5 {
+			ctx.pane = fields[4]
+		}
+		if _, exists := contexts[processID]; !exists {
+			contexts[processID] = ctx
+		}
+	}
+	return contexts
+}
+
+func tmuxCommand(tmuxBin string, tmux tmuxContext, args ...string) *exec.Cmd {
+	cmd := exec.Command(tmuxBin, args...)
+	if os.Getenv("TMUX") == "" && tmux.session != "" {
+		for _, entry := range os.Environ() {
+			if !strings.HasPrefix(entry, "TMUX=") {
+				cmd.Env = append(cmd.Env, entry)
+			}
+		}
+		cmd.Env = append(cmd.Env, "TMUX="+tmux.session)
+	}
+	return cmd
 }
 
 // shellEscape escapes a string for safe embedding in a POSIX shell command.

@@ -9,6 +9,7 @@
 ## Key changes from upstream
 
 - **[Crit](https://crit.md/)-compatible agent workflow** — review commands block until the reviewer finishes, print an agent-facing result, and support iterative rounds through `tcrit --session <id>`; each round refreshes the changed-file set so newly added files appear without restarting the TUI.
+- **Native tmux context discovery** — tcrit finds the invoking pane from the agent's process ancestry even when tools such as Codex do not inherit `$TMUX` or `$TMUX_PANE`.
 - **CritJSON review state and CLI** — comments use [Crit](https://crit.md/)-compatible `review.json` data, with `tcrit comment` and `tcrit comments` for automation.
 - **Versioned plan reviews** — `tcrit plan` saves immutable revisions and carries comment threads forward as the plan changes.
 - **Richer review lifecycle** — comment threads can be replied to, resolved, reopened, and approved together; resolved threads collapse out of the active comment view, while comments and changes can be navigated across files.
@@ -174,6 +175,8 @@ Opens a full-screen terminal UI with syntax-highlighted markdown, a comment side
 ### tmux split pane mode
 
 When `tcrit review` runs inside tmux (as the Claude Code skill does), the TUI automatically opens in a side-by-side split pane while the invoking command blocks until you finish the review — the same feedback loop as [crit](https://github.com/tomasz-tomczyk/crit), with a TUI in place of the browser.
+
+Tcrit resolves the tmux server and pane from the invoking process tree, so this mode also works with agents such as Codex that do not preserve `$TMUX` or `$TMUX_PANE` in command environments.
 
 ### How document review works
 
