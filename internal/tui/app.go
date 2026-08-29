@@ -31,6 +31,7 @@ type modalType int
 const (
 	noModal modalType = iota
 	commentModal
+	replyModal
 	editModal
 	finishModal
 )
@@ -93,9 +94,10 @@ type AppModel struct {
 	modalTextarea   textarea.Model
 
 	// Editing state
-	editingID   string // ID of the comment being edited
-	modalFocus  int    // 0=textarea, 1=save button, 2=cancel button, 3=delete button (edit modal only)
-	newFeedback bool   // true after adding or editing a comment in this round
+	editingID      string // ID of the parent comment being edited or replied to
+	editingReplyID string // ID of the reply being edited; empty when editing the parent
+	modalFocus     int    // 0=textarea, 1=save button, 2=cancel button, 3+=delete buttons
+	newFeedback    bool   // true after adding or editing a comment in this round
 
 	err error
 }
@@ -257,7 +259,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	var cmd tea.Cmd
-	if m.modal == commentModal || m.modal == editModal {
+	if m.modal == commentModal || m.modal == replyModal || m.modal == editModal {
 		m.modalTextarea, cmd = m.modalTextarea.Update(msg)
 		return m, cmd
 	}
@@ -273,7 +275,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.modal == commentModal || m.modal == editModal {
+	if m.modal == commentModal || m.modal == replyModal || m.modal == editModal {
 		return m.handleTextModal(msg)
 	}
 	if m.modal == finishModal {
@@ -477,14 +479,7 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if t.cursorOnAnnotation {
 				anns := m.annotationsAfterLine(t.cursorLine)
 				if t.cursorAnnoIdx < len(anns) {
-					ann := anns[t.cursorAnnoIdx]
-					m.editingID = ann.id
-					m.modal = editModal
-					m.modalFocus = 0
-					m.modalTextarea.Reset()
-					m.modalTextarea.SetValue(ann.body)
-					m.modalTextarea.Placeholder = "Edit comment..."
-					m.modalTextarea.Focus()
+					m.openCommentThread(anns[t.cursorAnnoIdx].id)
 					return m, nil
 				}
 			} else if t.state != nil {
@@ -543,18 +538,53 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// Enter to edit selected annotation
 		if key.Matches(msg, keys.Confirm) {
 			sel := t.sidebarItems[t.sidebarCursor]
-			m.editingID = sel.id
-			m.modal = editModal
-			m.modalFocus = 0
-			m.modalTextarea.Reset()
-			m.modalTextarea.SetValue(sel.body)
-			m.modalTextarea.Placeholder = "Edit comment..."
-			m.modalTextarea.Focus()
+			m.openCommentThread(sel.id)
 			return m, nil
 		}
 	}
 
 	return m, nil
+}
+
+func (m *AppModel) openCommentThread(id string) {
+	t := m.tab()
+	if t.state == nil {
+		return
+	}
+	for i := range t.state.Comments {
+		c := &t.state.Comments[i]
+		if c.ID != id {
+			continue
+		}
+		m.editingID = c.ID
+		m.editingReplyID = ""
+		m.modalFocus = 0
+		m.modalTextarea.Reset()
+		if reply := m.latestOwnReply(c); reply != nil {
+			m.editingReplyID = reply.ID
+			m.modal = editModal
+			m.modalTextarea.SetValue(reply.Body)
+			m.modalTextarea.Placeholder = "Edit reply..."
+		} else if len(c.Replies) > 0 || !m.authoredThisRound(c.Author, c.ReviewRound) {
+			m.modal = replyModal
+			m.modalTextarea.Placeholder = "Write a reply..."
+		} else {
+			m.modal = editModal
+			m.modalTextarea.SetValue(c.Body)
+			m.modalTextarea.Placeholder = "Edit comment..."
+		}
+		m.modalTextarea.Focus()
+		return
+	}
+}
+
+func (m *AppModel) latestOwnReply(c *review.Comment) *review.Reply {
+	for i := len(c.Replies) - 1; i >= 0; i-- {
+		if m.authoredThisRound(c.Replies[i].Author, c.Replies[i].ReviewRound) {
+			return &c.Replies[i]
+		}
+	}
+	return nil
 }
 
 func (m *AppModel) modalSubmit() {
@@ -564,16 +594,46 @@ func (m *AppModel) modalSubmit() {
 		return
 	}
 
-	if m.modal == editModal {
+	switch m.modal {
+	case editModal:
 		for i := range t.state.Comments {
-			if t.state.Comments[i].ID == m.editingID {
-				t.state.Comments[i].Body = body
-				t.state.Comments[i].UpdatedAt = review.Now()
-				break
+			c := &t.state.Comments[i]
+			if c.ID != m.editingID {
+				continue
 			}
+			if m.editingReplyID == "" {
+				c.Body = body
+			} else {
+				for j := range c.Replies {
+					if c.Replies[j].ID == m.editingReplyID {
+						c.Replies[j].Body = body
+						break
+					}
+				}
+			}
+			c.UpdatedAt = review.Now()
+			break
 		}
-		m.editingID = ""
-	} else {
+	case replyModal:
+		now := review.Now()
+		for i := range t.state.Comments {
+			c := &t.state.Comments[i]
+			if c.ID != m.editingID {
+				continue
+			}
+			c.Replies = append(c.Replies, review.Reply{
+				ID:          review.RandomReplyID(),
+				Body:        body,
+				Author:      m.author,
+				CreatedAt:   now,
+				ReviewRound: m.reviewRound(),
+			})
+			c.UpdatedAt = now
+			c.Resolved = false
+			c.ResolvedRound = 0
+			break
+		}
+	case commentModal:
 		startLine, endLine := m.selectionRange()
 		now := review.Now()
 		c := review.Comment{
@@ -593,6 +653,8 @@ func (m *AppModel) modalSubmit() {
 		t.state.Comments = append(t.state.Comments, c)
 	}
 	m.newFeedback = true
+	m.editingID = ""
+	m.editingReplyID = ""
 
 	m.persist()
 	m.modal = noModal
@@ -602,18 +664,80 @@ func (m *AppModel) modalSubmit() {
 	m.updateCommentSidebar()
 }
 
-func (m *AppModel) modalDelete() {
+type modalDeleteTarget struct {
+	replyID string
+	label   string
+}
+
+func (m *AppModel) reviewRound() int {
+	if m.session == nil {
+		return 0
+	}
+	return m.session.CJ.ReviewRound
+}
+
+func (m *AppModel) authoredThisRound(author string, round int) bool {
+	return author == m.author && round == m.reviewRound()
+}
+
+func (m *AppModel) modalDeleteTargets() []modalDeleteTarget {
+	t := m.tab()
+	if t.state == nil || m.editingID == "" {
+		return nil
+	}
+	for _, c := range t.state.Comments {
+		if c.ID != m.editingID {
+			continue
+		}
+		if m.editingReplyID == "" {
+			if len(c.Replies) == 0 && m.authoredThisRound(c.Author, c.ReviewRound) {
+				return []modalDeleteTarget{{label: "Delete comment"}}
+			}
+			return nil
+		}
+		for i := range c.Replies {
+			reply := &c.Replies[i]
+			if reply.ID == m.editingReplyID && m.authoredThisRound(reply.Author, reply.ReviewRound) {
+				return []modalDeleteTarget{{
+					replyID: reply.ID,
+					label:   fmt.Sprintf("Delete reply %d", i+1),
+				}}
+			}
+		}
+		return nil
+	}
+	return nil
+}
+
+func (m *AppModel) modalDelete(targetIndex int) {
 	t := m.tab()
 	if t.state == nil || m.editingID == "" {
 		return
 	}
+	targets := m.modalDeleteTargets()
+	if targetIndex < 0 || targetIndex >= len(targets) {
+		return
+	}
+	target := targets[targetIndex]
 	for i, c := range t.state.Comments {
-		if c.ID == m.editingID {
-			t.state.Comments = append(t.state.Comments[:i], t.state.Comments[i+1:]...)
-			break
+		if c.ID != m.editingID {
+			continue
 		}
+		if target.replyID == "" {
+			t.state.Comments = append(t.state.Comments[:i], t.state.Comments[i+1:]...)
+		} else {
+			for j, reply := range c.Replies {
+				if reply.ID == target.replyID {
+					t.state.Comments[i].Replies = append(c.Replies[:j], c.Replies[j+1:]...)
+					t.state.Comments[i].UpdatedAt = review.Now()
+					break
+				}
+			}
+		}
+		break
 	}
 	m.editingID = ""
+	m.editingReplyID = ""
 	m.persist()
 	m.modal = noModal
 	m.modalTextarea.Blur()
@@ -882,16 +1006,14 @@ func (m *AppModel) startNextRound() {
 }
 
 func (m *AppModel) handleTextModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	// Number of focusable elements: edit modal has 4 (textarea, save, cancel, delete), comment modal has 3
 	focusCount := 3
 	if m.modal == editModal {
-		focusCount = 4
+		focusCount += len(m.modalDeleteTargets())
 	}
 
 	switch msg.String() {
 	case "esc":
-		m.modal = noModal
-		m.modalTextarea.Blur()
+		m.closeTextModal()
 		return m, nil
 	case "tab", "shift+tab":
 		if msg.String() == "shift+tab" {
@@ -910,11 +1032,10 @@ func (m *AppModel) handleTextModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.modalSubmit()
 			return m, nil
 		} else if m.modalFocus == 2 {
-			m.modal = noModal
-			m.modalTextarea.Blur()
+			m.closeTextModal()
 			return m, nil
-		} else if m.modalFocus == 3 && m.modal == editModal {
-			m.modalDelete()
+		} else if m.modalFocus >= 3 && m.modal == editModal {
+			m.modalDelete(m.modalFocus - 3)
 			return m, nil
 		}
 	case "ctrl+s":
@@ -928,6 +1049,13 @@ func (m *AppModel) handleTextModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	return m, nil
+}
+
+func (m *AppModel) closeTextModal() {
+	m.modal = noModal
+	m.editingID = ""
+	m.editingReplyID = ""
+	m.modalTextarea.Blur()
 }
 
 func (m *AppModel) handleTabSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -2407,9 +2535,15 @@ func (m AppModel) renderWithModal(background string) string {
 		modalContent = modalStyle.Width(modalWidth).Render(
 			title + "\n" + contextBox + "\n\n" + m.modalTextarea.View() + "\n\n" + buttons)
 
-	case editModal:
-		title := modalTitleStyle.Render("Edit Comment")
-		var contextSection string
+	case replyModal, editModal:
+		titleText := "Edit Comment"
+		if m.modal == replyModal {
+			titleText = "Add Reply"
+		} else if m.editingReplyID != "" {
+			titleText = "Edit Reply"
+		}
+		title := modalTitleStyle.Render(titleText)
+		var contextSection, threadSection string
 		for _, c := range m.tabs[m.activeTab].state.Comments {
 			if c.ID == m.editingID {
 				start := c.StartLine
@@ -2417,19 +2551,52 @@ func (m AppModel) renderWithModal(background string) string {
 				contextSection = contextBoxStyle.
 					Width(innerWidth - 2).
 					Render(m.renderContextPreview(start, end, innerWidth-4))
+				if m.modal == replyModal || m.editingReplyID != "" {
+					var thread strings.Builder
+					author := c.Author
+					if author == "" {
+						author = "comment"
+					}
+					thread.WriteString(commentLineStyle.Render("Comment — "+author) + "\n")
+					thread.WriteString(clampLines(c.Body, 3))
+					for i, reply := range c.Replies {
+						body := reply.Body
+						if newline := strings.IndexByte(body, '\n'); newline >= 0 {
+							body = body[:newline] + "…"
+						}
+						replyAuthor := reply.Author
+						if replyAuthor == "" {
+							replyAuthor = "reply"
+						}
+						prefix := "  "
+						if reply.ID == m.editingReplyID {
+							prefix = "> "
+						}
+						thread.WriteString("\n" + replyStyle.Render(
+							fmt.Sprintf("%s%d. %s: %s", prefix, i+1, replyAuthor, body)))
+					}
+					threadSection = contextBoxStyle.
+						Width(innerWidth - 2).
+						Render(thread.String())
+				}
 				break
 			}
 		}
 		saveBtn := m.renderModalButton("Save", "ctrl+s", m.modalFocus == 1)
 		cancelBtn := m.renderModalButton("Cancel", "esc", m.modalFocus == 2)
-		deleteBtn := m.renderDeleteButton("Delete", m.modalFocus == 3)
-		buttons := lipgloss.JoinHorizontal(lipgloss.Center, saveBtn, "  ", cancelBtn, "  ", deleteBtn)
+		buttonRows := []string{lipgloss.JoinHorizontal(lipgloss.Center, saveBtn, "  ", cancelBtn)}
+		for i, target := range m.modalDeleteTargets() {
+			buttonRows = append(buttonRows, m.renderDeleteButton(target.label, m.modalFocus == i+3))
+		}
 
 		content := title + "\n"
 		if contextSection != "" {
 			content += contextSection + "\n\n"
 		}
-		content += m.modalTextarea.View() + "\n\n" + buttons
+		if threadSection != "" {
+			content += threadSection + "\n\n"
+		}
+		content += m.modalTextarea.View() + "\n\n" + strings.Join(buttonRows, "\n")
 		modalContent = modalStyle.Width(modalWidth).Render(content)
 
 	case finishModal:

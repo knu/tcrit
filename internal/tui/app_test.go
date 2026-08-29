@@ -608,6 +608,151 @@ func TestResolveKey_TogglesSelectedComment(t *testing.T) {
 	}
 }
 
+func TestEditModalDeletesOwnCurrentRoundParent(t *testing.T) {
+	comment := testComment()
+	comment.Author = "Tester"
+	comment.ReviewRound = 1
+	app, _ := newFinishTestApp(t, []review.Comment{comment}, false)
+	app.modal = editModal
+	app.editingID = comment.ID
+	app.modalFocus = 3
+
+	app = pressKey(app, tea.KeyEnter)
+
+	if len(app.tabs[0].state.Comments) != 0 {
+		t.Fatalf("expected parent comment deleted, got %+v", app.tabs[0].state.Comments)
+	}
+}
+
+func TestEditModalDeletesOnlyOwnCurrentRoundReply(t *testing.T) {
+	comment := testComment()
+	comment.Author = "Tester"
+	comment.ReviewRound = 1
+	comment.Replies = []review.Reply{
+		{ID: "rp_own", Author: "Tester", Body: "mine", ReviewRound: 1},
+		{ID: "rp_old", Author: "Tester", Body: "old", ReviewRound: 0},
+		{ID: "rp_other", Author: "AI", Body: "other", ReviewRound: 1},
+	}
+	app, _ := newFinishTestApp(t, []review.Comment{comment}, false)
+	app.modal = editModal
+	app.editingID = comment.ID
+	app.editingReplyID = "rp_own"
+	targets := app.modalDeleteTargets()
+	if len(targets) != 1 || targets[0].replyID != "rp_own" {
+		t.Fatalf("delete targets = %+v, want only rp_own", targets)
+	}
+	app.modalFocus = 3
+
+	app = pressKey(app, tea.KeyEnter)
+
+	comments := app.tabs[0].state.Comments
+	if len(comments) != 1 {
+		t.Fatalf("expected parent preserved, got %+v", comments)
+	}
+	if len(comments[0].Replies) != 2 || comments[0].Replies[0].ID != "rp_old" || comments[0].Replies[1].ID != "rp_other" {
+		t.Fatalf("remaining replies = %+v, want old and other", comments[0].Replies)
+	}
+}
+
+func TestEnterAddsThenEditsOwnCurrentRoundReply(t *testing.T) {
+	comment := testComment()
+	comment.Author = "Tester"
+	comment.ReviewRound = 1
+	comment.Resolved = true
+	comment.ResolvedRound = 1
+	comment.Replies = []review.Reply{{
+		ID: "rp_ai", Author: "AI", Body: "addressed", ReviewRound: 1,
+	}}
+	app, _ := newFinishTestApp(t, []review.Comment{comment}, false)
+	app.focused = commentPane
+	app.updateCommentSidebar()
+
+	app = pressKey(app, tea.KeyEnter)
+	if app.modal != replyModal || app.editingID != comment.ID {
+		t.Fatalf("enter opened modal %v for %q; want reply modal for %q", app.modal, app.editingID, comment.ID)
+	}
+
+	app.modalTextarea.SetValue("follow-up")
+	app.modalSubmit()
+	replies := app.tabs[0].state.Comments[0].Replies
+	if len(replies) != 2 {
+		t.Fatalf("replies = %+v, want added follow-up", replies)
+	}
+	added := replies[1]
+	if added.Author != "Tester" || added.ReviewRound != 1 || added.Body != "follow-up" {
+		t.Fatalf("added reply = %+v", added)
+	}
+	if app.tabs[0].state.Comments[0].Resolved || app.tabs[0].state.Comments[0].ResolvedRound != 0 {
+		t.Error("adding a reply should reopen the thread")
+	}
+
+	app = pressKey(app, tea.KeyEnter)
+	if app.modal != editModal || app.editingReplyID != added.ID {
+		t.Fatalf("enter opened modal %v for reply %q; want edit modal for %q", app.modal, app.editingReplyID, added.ID)
+	}
+	if got := app.modalTextarea.Value(); got != "follow-up" {
+		t.Errorf("edit reply body = %q, want follow-up", got)
+	}
+	if targets := app.modalDeleteTargets(); len(targets) != 1 || targets[0].replyID != added.ID {
+		t.Fatalf("delete targets = %+v, want added reply", targets)
+	}
+}
+
+func TestEnterEditsOnlyOwnUnrepliedCurrentRoundParent(t *testing.T) {
+	tests := []struct {
+		name      string
+		author    string
+		round     int
+		wantModal modalType
+	}{
+		{name: "own current", author: "Tester", round: 1, wantModal: editModal},
+		{name: "another author", author: "AI", round: 1, wantModal: replyModal},
+		{name: "previous round", author: "Tester", round: 0, wantModal: replyModal},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			comment := testComment()
+			comment.Author = tt.author
+			comment.ReviewRound = tt.round
+			app, _ := newFinishTestApp(t, []review.Comment{comment}, false)
+
+			app.openCommentThread(comment.ID)
+
+			if app.modal != tt.wantModal {
+				t.Errorf("modal = %v, want %v", app.modal, tt.wantModal)
+			}
+		})
+	}
+}
+
+func TestEditModalHidesDeleteForIneligibleParent(t *testing.T) {
+	tests := []struct {
+		name    string
+		author  string
+		round   int
+		replies []review.Reply
+	}{
+		{name: "another author", author: "AI", round: 1},
+		{name: "previous round", author: "Tester", round: 0},
+		{name: "thread with reply", author: "Tester", round: 1, replies: []review.Reply{{ID: "rp_1", Author: "AI"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			comment := testComment()
+			comment.Author = tt.author
+			comment.ReviewRound = tt.round
+			comment.Replies = tt.replies
+			app, _ := newFinishTestApp(t, []review.Comment{comment}, false)
+			app.modal = editModal
+			app.editingID = comment.ID
+
+			if targets := app.modalDeleteTargets(); len(targets) != 0 {
+				t.Fatalf("delete targets = %+v, want none", targets)
+			}
+		})
+	}
+}
+
 func TestFinishModal_QuitWithoutFinishing(t *testing.T) {
 	app, ch := newFinishTestApp(t, []review.Comment{testComment()}, true)
 	app, _ = pressKeyCmd(app, 'q')
