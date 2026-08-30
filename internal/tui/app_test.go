@@ -100,6 +100,17 @@ func moveMouse(app AppModel, x, y int) AppModel {
 	panic("unexpected model type")
 }
 
+func hoverMouse(app AppModel, x, y int) AppModel {
+	updated, _ := app.Update(tea.MouseMotionMsg{X: x, Y: y, Button: tea.MouseNone})
+	switch v := updated.(type) {
+	case AppModel:
+		return v
+	case *AppModel:
+		return *v
+	}
+	panic("unexpected model type")
+}
+
 func releaseMouse(app AppModel, x, y int) AppModel {
 	updated, _ := app.Update(tea.MouseReleaseMsg{X: x, Y: y, Button: tea.MouseLeft})
 	switch v := updated.(type) {
@@ -353,6 +364,40 @@ func TestMouseClickCodeGutterOpensLineComment(t *testing.T) {
 	if app.modal != commentModal || app.tab().cursorLine != 2 || app.tab().selecting {
 		t.Fatalf("modal = %v, line = %d, selecting = %t; want comment for line 2",
 			app.modal, app.tab().cursorLine, app.tab().selecting)
+	}
+}
+
+func TestMouseHoverCodeGutterShowsCommentMarker(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\nthird\n")
+	app.width = 100
+	app.contentViewport.SetWidth(75)
+	app.tabs[0].changedLines = map[int]bool{2: true}
+	app.rebuildContent()
+
+	x, y := contentScreenPoint(app, 0, 1)
+	app = hoverMouse(app, x, y)
+
+	lines := strings.Split(app.contentViewport.View(), "\n")
+	if app.hoveredGutterLine != 2 || !strings.HasPrefix(lines[1], commentGutterMarker.Render(">")) {
+		t.Fatalf("hovered line = %d, rendered line = %q; want comment marker on line 2",
+			app.hoveredGutterLine, ansi.Strip(lines[1]))
+	}
+
+	app = hoverMouse(app, x+gutterWidth, y)
+	lines = strings.Split(app.contentViewport.View(), "\n")
+	if app.hoveredGutterLine != 0 || !strings.HasPrefix(lines[1], diffAddedGutter.Render("+")) {
+		t.Fatalf("hovered line = %d, rendered line = %q; want diff marker restored",
+			app.hoveredGutterLine, ansi.Strip(lines[1]))
+	}
+}
+
+func TestViewEnablesMouseHoverReporting(t *testing.T) {
+	app := setupAppWithDoc(t, "line\n")
+	app.width = 80
+	app.height = 20
+
+	if got := app.View().MouseMode; got != tea.MouseModeAllMotion {
+		t.Fatalf("mouse mode = %v, want all-motion reporting", got)
 	}
 }
 

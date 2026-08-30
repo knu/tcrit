@@ -96,12 +96,13 @@ type AppModel struct {
 
 	detached bool
 
-	contentViewport viewport.Model
-	commentViewport viewport.Model
-	modalTextarea   textarea.Model
-	mouseSelecting  bool
-	contentLayout   renderedContentLayout
-	sidebarTargets  []int
+	contentViewport   viewport.Model
+	commentViewport   viewport.Model
+	modalTextarea     textarea.Model
+	mouseSelecting    bool
+	hoveredGutterLine int
+	contentLayout     renderedContentLayout
+	sidebarTargets    []int
 
 	// Editing state
 	editingID      string // ID of the parent comment being edited or replied to
@@ -353,6 +354,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.hoveredGutterLine != 0 {
+		m.hoveredGutterLine = 0
+		m.rebuildContent()
+	}
 	if m.modal == helpModal {
 		if key.Matches(msg, keys.Help) || key.Matches(msg, keys.Cancel) {
 			m.modal = noModal
@@ -1819,7 +1824,9 @@ func (m *AppModel) rebuildContent() {
 
 		// Marker column
 		var marker string
-		if isCursor && !t.cursorOnAnnotation {
+		if lineNum == m.hoveredGutterLine {
+			marker = commentGutterMarker.Render(">")
+		} else if isCursor && !t.cursorOnAnnotation {
 			marker = cursorMarker.Render(">")
 		} else if isSelected {
 			marker = selectedMarker.Render("|")
@@ -2520,7 +2527,7 @@ func (m AppModel) View() tea.View {
 
 	v := tea.NewView(full)
 	v.AltScreen = true
-	v.MouseMode = tea.MouseModeCellMotion
+	v.MouseMode = tea.MouseModeAllMotion
 	return v
 }
 
@@ -2717,6 +2724,7 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 	if mouse.Button != tea.MouseLeft || m.waiting {
 		return m, nil
 	}
+	m.hoveredGutterLine = 0
 	if m.isTextModal() {
 		return m.handleTextModalMouse(mouse)
 	}
@@ -2782,6 +2790,7 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 				start, end := m.selectionRange()
 				if start < end && target.line == end {
 					m.openLineComment()
+					m.rebuildContent()
 					return m, nil
 				}
 			}
@@ -2928,11 +2937,32 @@ func (m *AppModel) handleDeleteConfirmModalMouse(mouse tea.Mouse) (tea.Model, te
 }
 
 func (m *AppModel) handleMouseMotion(msg tea.MouseMotionMsg) (tea.Model, tea.Cmd) {
-	if !m.mouseSelecting || msg.Mouse().Button != tea.MouseLeft {
+	if !m.mouseSelecting {
+		m.updateGutterHover(msg.Mouse())
+		return m, nil
+	}
+	if msg.Mouse().Button != tea.MouseLeft {
 		return m, nil
 	}
 	m.updateMouseSelection(msg.Mouse(), true)
 	return m, nil
+}
+
+func (m *AppModel) updateGutterHover(mouse tea.Mouse) {
+	line := 0
+	if m.modal == noModal && !m.waiting && len(m.tabs) > 0 && m.tab().state != nil {
+		left, top, _, bottom := m.contentBounds()
+		if mouse.X == left && mouse.Y >= top && mouse.Y < bottom {
+			if target, ok := m.contentMouseTarget(mouse.Y - top + m.contentViewport.YOffset()); ok && !target.annotation {
+				line = target.line
+			}
+		}
+	}
+	if m.hoveredGutterLine == line {
+		return
+	}
+	m.hoveredGutterLine = line
+	m.rebuildContent()
 }
 
 func (m *AppModel) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) {
@@ -3084,6 +3114,7 @@ func (m *AppModel) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) 
 	case tea.MouseWheelDown:
 		m.contentViewport.ScrollDown(m.contentViewport.MouseWheelDelta)
 	}
+	m.updateGutterHover(mouse)
 	return m, nil
 }
 

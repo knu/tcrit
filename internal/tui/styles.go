@@ -94,6 +94,10 @@ var (
 			Foreground(warning).
 			Bold(true)
 
+	commentGutterMarker = lipgloss.NewStyle().
+				Foreground(warning).
+				Bold(true)
+
 	selectedMarker = lipgloss.NewStyle().
 			Foreground(lipgloss.BrightMagenta).
 			Bold(true)
