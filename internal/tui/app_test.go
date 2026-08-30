@@ -67,6 +67,17 @@ func clickMouse(app AppModel, x, y int) AppModel {
 	panic("unexpected model type")
 }
 
+func clickMouseCmd(app AppModel, x, y int) (AppModel, tea.Cmd) {
+	updated, cmd := app.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
+	switch v := updated.(type) {
+	case AppModel:
+		return v, cmd
+	case *AppModel:
+		return *v, cmd
+	}
+	panic("unexpected model type")
+}
+
 func pressMouse(app AppModel, x, y int) AppModel {
 	updated, _ := app.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
 	switch v := updated.(type) {
@@ -98,6 +109,54 @@ func releaseMouse(app AppModel, x, y int) AppModel {
 		return *v
 	}
 	panic("unexpected model type")
+}
+
+func clickModalAction(t *testing.T, app AppModel, needle string) AppModel {
+	t.Helper()
+	focus := -1
+	switch {
+	case strings.HasPrefix(needle, "Discard"):
+		focus = 0
+	case strings.HasPrefix(needle, "Delete") && app.modal == deleteConfirmModal:
+		focus = 0
+	case strings.HasPrefix(needle, "Keep Editing"):
+		focus = 1
+	case strings.HasPrefix(needle, "Keep"):
+		focus = 1
+	case strings.HasPrefix(needle, "Save"):
+		focus = 1
+	case strings.HasPrefix(needle, "Suggest"):
+		focus = 3
+	case strings.HasPrefix(needle, "Close") && app.modal == finishModal:
+		focus = 1
+	case strings.HasPrefix(needle, "Close"):
+		focus = 2
+	case strings.HasPrefix(needle, "Delete"):
+		focus = app.modalDeleteStartFocus()
+	}
+	for _, region := range app.modalMouseRegions() {
+		if region.action.focus == focus {
+			return clickMouse(app, region.rect.left, region.rect.top)
+		}
+	}
+	t.Fatalf("modal action %q not found", needle)
+	return app
+}
+
+func assertRegionContainsRenderedText(t *testing.T, app AppModel, rect mouseRect, text string) {
+	t.Helper()
+	lines := strings.Split(ansi.Strip(app.View().Content), "\n")
+	if rect.top < 0 || rect.top >= len(lines) {
+		t.Fatalf("region row %d is outside %d rendered rows", rect.top, len(lines))
+	}
+	byteIndex := strings.Index(lines[rect.top], text)
+	if byteIndex < 0 {
+		t.Fatalf("rendered row %d does not contain %q: %q", rect.top, text, lines[rect.top])
+	}
+	x := lipgloss.Width(lines[rect.top][:byteIndex])
+	if x < rect.left || x >= rect.right {
+		t.Fatalf("rendered %q starts at x=%d outside region [%d,%d)", text, x, rect.left, rect.right)
+	}
 }
 
 func renderedLineY(t *testing.T, app AppModel, needle string) int {
@@ -495,13 +554,216 @@ func TestMouseDragCodeGutterScrollsAtBottomEdge(t *testing.T) {
 	app.contentViewport.SetHeight(3)
 	app.contentViewport.SetYOffset(1)
 
-	startX, startY := contentScreenPoint(app, 0, 1)
+	x, y := contentScreenPoint(app, 0, 1)
 	_, _, _, bottom := app.contentBounds()
-	app = pressMouse(app, startX, startY)
-	app = moveMouse(app, startX, bottom-1)
+	app = pressMouse(app, x, y)
+	app = moveMouse(app, x, bottom-1)
 
 	if got := app.contentViewport.YOffset(); got != 2 {
 		t.Fatalf("viewport offset = %d, want 2", got)
+	}
+}
+
+func TestMouseClickCommentModalSave(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\n")
+	app.width = 100
+	app.contentViewport.SetWidth(75)
+	app.openLineComment()
+	app.modalTextarea.SetValue("mouse comment")
+	for _, region := range app.modalMouseRegions() {
+		if region.action.focus == 1 {
+			assertRegionContainsRenderedText(t, app, region.rect, "Save ctrl+s")
+			break
+		}
+	}
+
+	app = clickModalAction(t, app, "Save ctrl+s")
+
+	if app.modal != noModal || len(app.tab().state.Comments) != 1 || app.tab().state.Comments[0].Body != "mouse comment" {
+		t.Fatalf("modal = %v, comments = %+v; want saved mouse comment", app.modal, app.tab().state.Comments)
+	}
+}
+
+func TestMouseClickCommentModalSuggest(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\n")
+	app.width = 100
+	app.contentViewport.SetWidth(75)
+	app.tabs[0].cursorLine = 1
+	app.openLineComment()
+
+	app = clickModalAction(t, app, "Suggest ctrl+y")
+
+	if got := app.modalTextarea.Value(); !strings.Contains(got, "```suggestion\nfirst\n```") {
+		t.Fatalf("textarea = %q, want suggestion block", got)
+	}
+}
+
+func TestMouseClickCommentModalClose(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\n")
+	app.width = 100
+	app.contentViewport.SetWidth(75)
+	app.openLineComment()
+
+	app = clickModalAction(t, app, "Close ×")
+
+	if app.modal != noModal {
+		t.Fatalf("modal = %v, want closed", app.modal)
+	}
+}
+
+func TestMouseClickDirtyCommentModalCloseConfirmsDiscard(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\n")
+	app.width = 100
+	app.height = 24
+	app.recalculateLayout()
+	app.openLineComment()
+	app.modalTextarea.SetValue("unsaved comment")
+
+	app = clickModalAction(t, app, "Close ×")
+
+	if app.modal != discardChangesModal || app.discardReturn != commentModal {
+		t.Fatalf("modal = %v, return = %v; want discard confirmation for comment", app.modal, app.discardReturn)
+	}
+	if got := app.modalTextarea.Value(); got != "unsaved comment" {
+		t.Fatalf("textarea = %q, want unsaved comment preserved", got)
+	}
+	for _, region := range app.modalMouseRegions() {
+		switch region.action.focus {
+		case 0:
+			assertRegionContainsRenderedText(t, app, region.rect, "Discard y")
+		case 1:
+			assertRegionContainsRenderedText(t, app, region.rect, "Keep Editing n / esc")
+		}
+	}
+
+	app = clickModalAction(t, app, "Keep Editing n / esc")
+	if app.modal != commentModal || app.modalTextarea.Value() != "unsaved comment" || !app.modalTextarea.Focused() {
+		t.Fatalf("modal = %v, textarea = %q, focused = %t; want resumed editing",
+			app.modal, app.modalTextarea.Value(), app.modalTextarea.Focused())
+	}
+
+	app = clickModalAction(t, app, "Close ×")
+	app = clickModalAction(t, app, "Discard y")
+	if app.modal != noModal || app.modalTextarea.Value() != "" {
+		t.Fatalf("modal = %v, textarea = %q; want discarded and closed", app.modal, app.modalTextarea.Value())
+	}
+}
+
+func TestDirtyCommentModalEscapeReturnsToEditing(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\n")
+	app.openLineComment()
+	app.modalTextarea.SetValue("unsaved comment")
+
+	app = pressKey(app, tea.KeyEscape)
+	if app.modal != discardChangesModal {
+		t.Fatalf("modal = %v, want discard confirmation", app.modal)
+	}
+
+	app = pressKey(app, tea.KeyEscape)
+	if app.modal != commentModal || !app.modalTextarea.Focused() {
+		t.Fatalf("modal = %v, focused = %t; want resumed comment editing",
+			app.modal, app.modalTextarea.Focused())
+	}
+}
+
+func TestMouseClickDirtyEditModalCloseConfirmsDiscard(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\n")
+	app.width = 100
+	app.height = 24
+	app.recalculateLayout()
+	comment := review.Comment{
+		ID: "c_edit", StartLine: 1, EndLine: 1, Body: "original",
+		Author: app.author, ReviewRound: app.reviewRound(),
+	}
+	app.tabs[0].state.Comments = []review.Comment{comment}
+	app.openCommentThread(comment.ID)
+	app.modalTextarea.SetValue("changed")
+
+	app = clickModalAction(t, app, "Close ×")
+	if app.modal != discardChangesModal || app.discardReturn != editModal {
+		t.Fatalf("modal = %v, return = %v; want discard confirmation for edit", app.modal, app.discardReturn)
+	}
+
+	app = clickModalAction(t, app, "Discard y")
+	if got := app.tab().state.Comments[0].Body; got != "original" {
+		t.Fatalf("comment body = %q, want original", got)
+	}
+}
+
+func TestMouseClickUnchangedEditModalCloseDoesNotConfirm(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\n")
+	app.width = 100
+	app.height = 24
+	app.recalculateLayout()
+	comment := review.Comment{
+		ID: "c_edit", StartLine: 1, EndLine: 1, Body: "original",
+		Author: app.author, ReviewRound: app.reviewRound(),
+	}
+	app.tabs[0].state.Comments = []review.Comment{comment}
+	app.openCommentThread(comment.ID)
+
+	app = clickModalAction(t, app, "Close ×")
+
+	if app.modal != noModal {
+		t.Fatalf("modal = %v, want unchanged edit to close directly", app.modal)
+	}
+}
+
+func TestMouseClickCommentModalDelete(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\n")
+	app.width = 100
+	app.contentViewport.SetWidth(75)
+	comment := review.Comment{
+		ID: "c_delete", StartLine: 1, EndLine: 1, Body: "delete me",
+		Author: app.author, ReviewRound: app.reviewRound(),
+	}
+	app.tabs[0].state.Comments = []review.Comment{comment}
+	app.openCommentThread(comment.ID)
+
+	app = clickModalAction(t, app, "Delete comment")
+	if app.modal != deleteConfirmModal || len(app.tab().state.Comments) != 1 {
+		t.Fatalf("modal = %v, comments = %+v; want delete confirmation", app.modal, app.tab().state.Comments)
+	}
+	for _, region := range app.modalMouseRegions() {
+		switch region.action.focus {
+		case 0:
+			assertRegionContainsRenderedText(t, app, region.rect, "Delete")
+		case 1:
+			assertRegionContainsRenderedText(t, app, region.rect, "Keep n / esc")
+		}
+	}
+
+	app = clickModalAction(t, app, "Keep n / esc")
+	if app.modal != editModal || len(app.tab().state.Comments) != 1 {
+		t.Fatalf("modal = %v, comments = %+v; want edit resumed", app.modal, app.tab().state.Comments)
+	}
+
+	app = clickModalAction(t, app, "Delete comment")
+	app = clickModalAction(t, app, "Delete")
+
+	if app.modal != noModal || len(app.tab().state.Comments) != 0 {
+		t.Fatalf("modal = %v, comments = %+v; want deleted", app.modal, app.tab().state.Comments)
+	}
+}
+
+func TestMouseClickFooterFinishButtonOpensModal(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\n")
+	app.width = 100
+	app.height = 24
+	app.recalculateLayout()
+	rect, ok := app.footerFinishRect()
+	if !ok {
+		t.Fatal("footer Approve button not found")
+	}
+	if actualY := renderedLineY(t, app, "Approve q"); actualY != rect.top {
+		t.Fatalf("footer region row = %d, rendered button row = %d", rect.top, actualY)
+	}
+	assertRegionContainsRenderedText(t, app, rect, "Approve q")
+
+	app = clickMouse(app, rect.left, rect.top)
+
+	if app.modal != finishModal {
+		t.Fatalf("modal = %v, want finish modal", app.modal)
 	}
 }
 
@@ -512,7 +774,7 @@ func TestMouseClickFocusesScrolledCodeLine(t *testing.T) {
 	app.contentViewport.SetHeight(2)
 	app.contentViewport.SetYOffset(1)
 
-	x, y := contentScreenPoint(app, 10, 1)
+	x, y := contentScreenPoint(app, 10, app.contentViewport.YOffset())
 	app = clickMouse(app, x, y)
 
 	if app.tab().cursorLine != 2 {
@@ -548,8 +810,7 @@ func TestMouseClickFocusesInlineComment(t *testing.T) {
 	app.updateCommentSidebar()
 	app.rebuildContent()
 
-	target := app.contentLayout.lineRanges[1]
-	x, y := contentScreenPoint(app, 10, target.start+1)
+	x, y := contentScreenPoint(app, 10, 1)
 	app = clickMouse(app, x, y)
 
 	if app.focused != contentPane || !app.tab().cursorOnAnnotation || app.tab().cursorAnnoIdx != 0 {
@@ -587,7 +848,7 @@ func TestMouseClickFocusesSidebar(t *testing.T) {
 	app.contentViewport.SetWidth(75)
 
 	left, top, _, _ := app.commentBounds()
-	app = clickMouse(app, left+1, top+1)
+	app = clickMouse(app, left+1, top)
 
 	if app.focused != commentPane {
 		t.Fatalf("focus = %v, want comment pane", app.focused)
@@ -633,6 +894,37 @@ func TestMouseClickOpensFocusedSidebarComment(t *testing.T) {
 
 	if app.modal != replyModal || app.editingID != "c_sidebar" {
 		t.Fatalf("second click opened modal %v for %q, want reply modal for c_sidebar", app.modal, app.editingID)
+	}
+}
+
+func TestMouseClickSelectsWrappedSidebarCommentFromRenderedRows(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\nthird\n")
+	app.width = 60
+	app.height = 24
+	app.tabs[0].state.Comments = []review.Comment{
+		{ID: "c_first", StartLine: 1, EndLine: 1, Body: strings.Repeat("wrapped sidebar text ", 8)},
+		{ID: "c_second", StartLine: 3, EndLine: 3, Body: "second comment"},
+	}
+	app.recalculateLayout()
+	app.updateCommentSidebar()
+	app.rebuildContent()
+	firstSecondRow := -1
+	for y, target := range app.sidebarTargets {
+		if target == 1 {
+			firstSecondRow = y
+			break
+		}
+	}
+	if firstSecondRow < 4 {
+		t.Fatalf("second sidebar item starts at row %d, want first item to wrap", firstSecondRow)
+	}
+	left, top, _, _ := app.commentBounds()
+
+	app = clickMouse(app, left+1, top+1+firstSecondRow)
+
+	if app.tab().sidebarCursor != 1 || app.tab().cursorLine != 3 {
+		t.Fatalf("sidebar = %d, line = %d; want wrapped-row map to select second comment",
+			app.tab().sidebarCursor, app.tab().cursorLine)
 	}
 }
 
@@ -1249,6 +1541,87 @@ func TestFinishModal_EscReturnsToReview(t *testing.T) {
 	}
 }
 
+func TestMouseClickFinishModalCloseReturnsToReview(t *testing.T) {
+	app, ch := newFinishTestApp(t, nil, false)
+	app.width = 80
+	app.height = 24
+	app.recalculateLayout()
+	app, _ = pressKeyCmd(app, 'q')
+	for _, region := range app.modalMouseRegions() {
+		if region.action.focus == 1 {
+			assertRegionContainsRenderedText(t, app, region.rect, "Close n / ×")
+			break
+		}
+	}
+
+	app = clickModalAction(t, app, "Close n / ×")
+
+	if app.modal != noModal {
+		t.Fatalf("modal = %v, want no modal", app.modal)
+	}
+	select {
+	case <-ch:
+		t.Error("close emitted a finish event")
+	default:
+	}
+}
+
+func TestMouseClickFinishModalConfirmActions(t *testing.T) {
+	tests := []struct {
+		name        string
+		comments    []review.Comment
+		newFeedback bool
+		label       string
+		approved    bool
+	}{
+		{name: "approve", label: "Approve", approved: true},
+		{
+			name: "resolve all and approve", comments: []review.Comment{testComment()},
+			label: "Resolve All & Approve", approved: true,
+		},
+		{
+			name: "finish review", comments: []review.Comment{testComment()}, newFeedback: true,
+			label: "Finish Review", approved: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app, ch := newFinishTestApp(t, tt.comments, false)
+			app.newFeedback = tt.newFeedback
+			app.width = 80
+			app.height = 24
+			app.recalculateLayout()
+			app, _ = pressKeyCmd(app, 'q')
+			var actionRect mouseRect
+			found := false
+			for _, region := range app.modalMouseRegions() {
+				if region.action.focus == 0 {
+					actionRect = region.rect
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("finish action %q not found", tt.label)
+			}
+			assertRegionContainsRenderedText(t, app, actionRect, tt.label+" y")
+
+			app, cmd := clickMouseCmd(app, actionRect.left, actionRect.top)
+
+			if !isQuit(cmd) {
+				t.Error("finish action did not quit inline review")
+			}
+			if app.modal != noModal {
+				t.Fatalf("modal = %v, want no modal", app.modal)
+			}
+			if event := takeEvent(t, ch); event.Approved != tt.approved {
+				t.Errorf("approved = %t, want %t", event.Approved, tt.approved)
+			}
+		})
+	}
+}
+
 func TestFinishModal_NoNewFeedbackResolvesAllAndApproves(t *testing.T) {
 	comment := testComment()
 	app, ch := newFinishTestApp(t, []review.Comment{comment}, true)
@@ -1536,6 +1909,10 @@ func TestEditModalDeletesOwnCurrentRoundParent(t *testing.T) {
 	app.modalFocus = app.modalDeleteStartFocus()
 
 	app = pressKey(app, tea.KeyEnter)
+	if app.modal != deleteConfirmModal || len(app.tabs[0].state.Comments) != 1 {
+		t.Fatalf("modal = %v, comments = %+v; want delete confirmation", app.modal, app.tabs[0].state.Comments)
+	}
+	app = pressKey(app, 'y')
 
 	if len(app.tabs[0].state.Comments) != 0 {
 		t.Fatalf("expected parent comment deleted, got %+v", app.tabs[0].state.Comments)
@@ -1562,6 +1939,10 @@ func TestEditModalDeletesOnlyOwnCurrentRoundReply(t *testing.T) {
 	app.modalFocus = app.modalDeleteStartFocus()
 
 	app = pressKey(app, tea.KeyEnter)
+	if app.modal != deleteConfirmModal || len(app.tabs[0].state.Comments[0].Replies) != 3 {
+		t.Fatalf("modal = %v, replies = %+v; want delete confirmation", app.modal, app.tabs[0].state.Comments[0].Replies)
+	}
+	app = pressKey(app, 'y')
 
 	comments := app.tabs[0].state.Comments
 	if len(comments) != 1 {

@@ -13,6 +13,7 @@
 - **CritJSON review state and CLI** — comments use [Crit](https://crit.md/)-compatible `review.json` data, with `tcrit comment` and `tcrit comments` for automation.
 - **File-level comments** — reviewers can press `f` to comment on the active file, with file threads kept in the comment sidebar instead of attached to a line.
 - **Comment editing tools** — `ctrl+y` inserts GitHub-compatible suggestions for selected or anchored lines, including replies, while `ctrl+o` edits comment and reply bodies in `$EDITOR`.
+- **Mouse-first TUI controls** — click file tabs, code lines, comment threads, sidebar items, dialog actions, and the review-finish button; use the wheel to scroll code and drag the gutter to select line ranges.
 - **Versioned plan reviews** — `tcrit plan` saves immutable revisions and carries comment threads forward as the plan changes.
 - **Richer review lifecycle** — comment threads can be replied to, resolved, reopened, and approved together; resolved threads collapse out of the active comment view, while comments and changes can be navigated across files.
 - **Improved diffs and Git handling** — inline replacements preserve whitespace, long syntax-highlighted lines wrap instead of being truncated, comment anchors survive edited rounds, and paths with spaces or special characters work correctly.
@@ -152,7 +153,7 @@ tcrit comments --json
 
 1. An agent (or you) runs `tcrit review --code` — inside tmux the TUI opens in a split pane and the command blocks
 2. Navigate between files and leave inline comments on the changes
-3. Press `q` — with unresolved comments the button is **Finish Review**, without any it is **Approve**
+3. Press `q` or click the footer button — with unresolved comments the button is **Finish Review**, without any it is **Approve**
 4. On finish, the blocked command prints the unresolved comments and instructions on stdout and `approved: true|false` on stderr
 5. The agent edits the files, replies with `tcrit comment --reply-to`, and runs the printed `tcrit --session <id>` to start the next round; the waiting TUI reloads with the fixes and replies
 6. Resolve comments with `r` and approve to end the loop
@@ -219,6 +220,13 @@ Tcrit resolves the tmux server and pane from the invoking process tree, so this 
 | `tab` / `shift+tab` | Next / previous file tab       |
 | `n` / `N`           | Jump to next / previous change |
 | `/`                 | Search file tabs               |
+
+## Mouse controls
+
+- Click a file tab, code line, inline comment, sidebar, or sidebar comment to focus it.
+- Scroll code with the mouse wheel.
+- Click the `+`/`-` gutter to comment on a line, or drag it to select multiple lines.  Dragging to the top or bottom edge scrolls one line at a time.
+- Click actions in comment and finish dialogs, including **Close**.  The footer **Approve** / **Finish Review** button opens the finish dialog.
 
 ## Scriptable CLI
 

@@ -35,6 +35,8 @@ const (
 	fileCommentModal
 	replyModal
 	editModal
+	discardChangesModal
+	deleteConfirmModal
 	finishModal
 	helpModal
 )
@@ -63,6 +65,7 @@ type AppConfig struct {
 
 // gutterWidth is the total width of the left gutter: line number (5) + marker (1) + space (1).
 const gutterWidth = 7
+
 const displayTabWidth = 4
 
 type AppModel struct {
@@ -98,12 +101,17 @@ type AppModel struct {
 	modalTextarea   textarea.Model
 	mouseSelecting  bool
 	contentLayout   renderedContentLayout
+	sidebarTargets  []int
 
 	// Editing state
 	editingID      string // ID of the parent comment being edited or replied to
 	editingReplyID string // ID of the reply being edited; empty when editing the parent
-	modalFocus     int    // 0=textarea, 1=save button, 2=cancel button, 3+=delete buttons
-	newFeedback    bool   // true after adding or editing a comment in this round
+	modalInitial   string // textarea value when the current text modal opened
+	discardReturn  modalType
+	deleteReturn   modalType
+	pendingDelete  int
+	modalFocus     int  // focus index within the active modal
+	newFeedback    bool // true after adding or editing a comment in this round
 
 	err error
 }
@@ -113,9 +121,26 @@ type renderedRange struct {
 	end   int
 }
 
+type mouseRect struct {
+	left   int
+	top    int
+	right  int
+	bottom int
+}
+
+func (r mouseRect) contains(mouse tea.Mouse) bool {
+	return mouse.X >= r.left && mouse.X < r.right && mouse.Y >= r.top && mouse.Y < r.bottom
+}
+
 type renderedContentLayout struct {
 	rows       []contentMouseTarget
 	lineRanges map[int]renderedRange
+}
+
+type renderedScreenLayout struct {
+	footerFinish    mouseRect
+	hasFooterFinish bool
+	modalRegions    []modalMouseRegion
 }
 
 func newRenderedContentLayout() renderedContentLayout {
@@ -254,6 +279,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		initAdaptiveStyles(msg.IsDark())
 		if len(m.tabs) > 0 && m.tab().state != nil {
 			m.rebuildContent()
+			m.updateCommentSidebar()
 		}
 		return m, nil
 
@@ -263,6 +289,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recalculateLayout()
 		if len(m.tabs) > 0 && m.tab().state != nil {
 			m.rebuildContent()
+			m.updateCommentSidebar()
 		}
 		return m, nil
 
@@ -332,6 +359,12 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if m.modal == discardChangesModal {
+		return m.handleDiscardChangesModal(msg)
+	}
+	if m.modal == deleteConfirmModal {
+		return m.handleDeleteConfirmModal(msg)
+	}
 	if m.modal == commentModal || m.modal == fileCommentModal || m.modal == replyModal || m.modal == editModal {
 		return m.handleTextModal(msg)
 	}
@@ -357,9 +390,7 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Quit):
 		// Finishing is an explicit act: q opens the Approve/Finish modal.
-		m.persist()
-		m.modal = finishModal
-		m.modalFocus = 0
+		m.openFinishModal()
 		return m, nil
 
 	case key.Matches(msg, keys.Cancel):
@@ -405,6 +436,7 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.modalFocus = 0
 			m.modalTextarea.Placeholder = "Type your file comment..."
 			m.modalTextarea.Reset()
+			m.modalInitial = ""
 			m.modalTextarea.Focus()
 		}
 		return m, nil
@@ -642,6 +674,7 @@ func (m *AppModel) openCommentThread(id string) {
 			m.modalTextarea.SetValue(c.Body)
 			m.modalTextarea.Placeholder = "Edit comment..."
 		}
+		m.modalInitial = m.modalTextarea.Value()
 		m.modalTextarea.Focus()
 		return
 	}
@@ -655,6 +688,7 @@ func (m *AppModel) openLineComment() {
 	m.modalFocus = 0
 	m.modalTextarea.Placeholder = "Type your comment..."
 	m.modalTextarea.Reset()
+	m.modalInitial = ""
 	m.modalTextarea.Focus()
 }
 
@@ -749,6 +783,9 @@ func (m *AppModel) modalSubmit() {
 	m.newFeedback = true
 	m.editingID = ""
 	m.editingReplyID = ""
+	m.modalInitial = ""
+	m.discardReturn = noModal
+	m.deleteReturn = noModal
 
 	m.persist()
 	m.modal = noModal
@@ -832,6 +869,9 @@ func (m *AppModel) modalDelete(targetIndex int) {
 	}
 	m.editingID = ""
 	m.editingReplyID = ""
+	m.modalInitial = ""
+	m.discardReturn = noModal
+	m.deleteReturn = noModal
 	m.persist()
 	m.modal = noModal
 	m.modalTextarea.Blur()
@@ -1042,6 +1082,24 @@ func (m *AppModel) handleFinishModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *AppModel) openFinishModal() {
+	m.persist()
+	m.modal = finishModal
+	m.modalFocus = 0
+}
+
+func (m *AppModel) finishActionLabel() string {
+	unresolved := m.unresolvedTotal()
+	switch {
+	case unresolved == 0:
+		return "Approve"
+	case !m.newFeedback:
+		return "Resolve All & Approve"
+	default:
+		return "Finish Review"
+	}
+}
+
 // unresolvedTotal counts unresolved comments across tabs and the session's
 // review-level comments.
 func (m *AppModel) unresolvedTotal() int {
@@ -1248,7 +1306,7 @@ func (m *AppModel) handleTextModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.insertSuggestion()
 			return m, nil
 		} else if m.modal == editModal && m.modalFocus >= m.modalDeleteStartFocus() {
-			m.modalDelete(m.modalFocus - m.modalDeleteStartFocus())
+			m.openDeleteConfirmation(m.modalFocus - m.modalDeleteStartFocus())
 			return m, nil
 		}
 	case "ctrl+s":
@@ -1275,10 +1333,91 @@ func (m *AppModel) handleTextModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *AppModel) closeTextModal() {
+	if m.modalTextarea.Value() != m.modalInitial {
+		m.discardReturn = m.modal
+		m.modal = discardChangesModal
+		m.modalFocus = 1
+		m.modalTextarea.Blur()
+		return
+	}
+	m.discardTextModal()
+}
+
+func (m *AppModel) discardTextModal() {
 	m.modal = noModal
+	m.discardReturn = noModal
+	m.deleteReturn = noModal
 	m.editingID = ""
 	m.editingReplyID = ""
+	m.modalInitial = ""
 	m.modalTextarea.Blur()
+	m.modalTextarea.Reset()
+}
+
+func (m *AppModel) resumeTextModal() {
+	m.modal = m.discardReturn
+	m.discardReturn = noModal
+	m.modalFocus = 0
+	m.modalTextarea.Focus()
+}
+
+func (m *AppModel) handleDiscardChangesModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y":
+		m.discardTextModal()
+	case "n", "N", "esc":
+		m.resumeTextModal()
+	case "left", "right", "h", "l", "tab", "shift+tab":
+		m.modalFocus = 1 - m.modalFocus
+	case "enter":
+		if m.modalFocus == 0 {
+			m.discardTextModal()
+		} else {
+			m.resumeTextModal()
+		}
+	}
+	return m, nil
+}
+
+func (m *AppModel) openDeleteConfirmation(targetIndex int) {
+	if targetIndex < 0 || targetIndex >= len(m.modalDeleteTargets()) {
+		return
+	}
+	m.deleteReturn = m.modal
+	m.pendingDelete = targetIndex
+	m.modal = deleteConfirmModal
+	m.modalFocus = 1
+	m.modalTextarea.Blur()
+}
+
+func (m *AppModel) cancelDeleteConfirmation() {
+	m.modal = m.deleteReturn
+	m.deleteReturn = noModal
+	m.modalFocus = m.modalDeleteStartFocus() + m.pendingDelete
+}
+
+func (m *AppModel) confirmDelete() {
+	target := m.pendingDelete
+	m.deleteReturn = noModal
+	m.modalDelete(target)
+}
+
+func (m *AppModel) handleDeleteConfirmModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y":
+		m.confirmDelete()
+	case "n", "N", "esc":
+		m.cancelDeleteConfirmation()
+	case "left", "right", "h", "l", "tab", "shift+tab":
+		m.modalFocus = 1 - m.modalFocus
+	case "enter":
+		if m.modalFocus == 0 {
+			m.confirmDelete()
+		} else {
+			m.cancelDeleteConfirmation()
+		}
+	}
+	return m, nil
 }
 
 func (m *AppModel) handleTabSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -2162,6 +2301,7 @@ func (m *AppModel) scrollToChunk(chunk changeChunk) {
 	if !ok {
 		return
 	}
+
 	m.contentViewport.SetYOffset(r.start)
 }
 
@@ -2206,6 +2346,7 @@ func (m *AppModel) updateCommentSidebar() {
 	if t.state == nil {
 		return
 	}
+	m.sidebarTargets = nil
 
 	t.sidebarItems = nil
 	for _, c := range t.state.Comments {
@@ -2248,6 +2389,7 @@ func (m *AppModel) updateCommentSidebar() {
 
 	for idx, it := range t.sidebarItems {
 		isSelected := m.focused == commentPane && idx == t.sidebarCursor
+		var item strings.Builder
 
 		var lineInfo string
 		if it.scope == "file" {
@@ -2267,7 +2409,7 @@ func (m *AppModel) updateCommentSidebar() {
 			prefix = cursorCol.Render(cursorMarker.Render(">"))
 		}
 
-		b.WriteString(fmt.Sprintf("%s%s\n", prefix, lineInfo))
+		fmt.Fprintf(&item, "%s%s\n", prefix, lineInfo)
 
 		clamped := clampLines(it.body, 3)
 		bodyLines := strings.Split(clamped, "\n")
@@ -2278,9 +2420,9 @@ func (m *AppModel) updateCommentSidebar() {
 			} else {
 				styled = commentStyle.Render(bl)
 			}
-			b.WriteString(" " + styled)
+			item.WriteString(" " + styled)
 			if i < len(bodyLines)-1 {
-				b.WriteString("\n")
+				item.WriteString("\n")
 			}
 		}
 		for _, r := range it.replies {
@@ -2292,9 +2434,17 @@ func (m *AppModel) updateCommentSidebar() {
 			if who == "" {
 				who = "reply"
 			}
-			b.WriteString("\n " + replyStyle.Render(fmt.Sprintf("↳ %s: %s", who, reply)))
+			item.WriteString("\n " + replyStyle.Render(fmt.Sprintf("↳ %s: %s", who, reply)))
 		}
-		b.WriteString("\n\n")
+
+		wrapped := lipgloss.Wrap(expandDisplayTabs(item.String()), max(m.commentViewport.Width(), 1), "")
+		for _, row := range strings.Split(wrapped, "\n") {
+			b.WriteString(row)
+			b.WriteByte('\n')
+			m.sidebarTargets = append(m.sidebarTargets, idx)
+		}
+		b.WriteByte('\n')
+		m.sidebarTargets = append(m.sidebarTargets, idx)
 	}
 
 	m.commentViewport.SetContent(b.String())
@@ -2366,7 +2516,15 @@ func (m AppModel) View() tea.View {
 		v.AltScreen = true
 		return v
 	}
+	full, _ := m.renderReviewScreen()
 
+	v := tea.NewView(full)
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	return v
+}
+
+func (m AppModel) renderReviewScreen() (string, renderedScreenLayout) {
 	t := m.tab()
 
 	commentCount := unresolvedCommentCount(t.state.Comments)
@@ -2432,18 +2590,36 @@ func (m AppModel) View() tea.View {
 	if tabBar != "" {
 		sections = append(sections, tabBar)
 	}
-	sections = append(sections, mainRow, footer)
+	sections = append(sections, mainRow)
+	footerTop := lipgloss.Height(lipgloss.JoinVertical(lipgloss.Left, sections...))
+	sections = append(sections, footer)
+	layout := renderedScreenLayout{}
+	if !t.selecting {
+		button := m.renderModalButton(m.finishActionLabel(), "q", true)
+		layout.footerFinish = mouseRect{right: lipgloss.Width(button), top: footerTop, bottom: footerTop + 1}
+		layout.hasFooterFinish = true
+	}
 
 	full := lipgloss.JoinVertical(lipgloss.Left, sections...)
 
 	if m.modal != noModal {
-		full = m.renderWithModal(full)
+		underlyingModal := noModal
+		switch m.modal {
+		case discardChangesModal:
+			underlyingModal = m.discardReturn
+		case deleteConfirmModal:
+			underlyingModal = m.deleteReturn
+		}
+		if underlyingModal != noModal {
+			underlying := m
+			underlying.modal = underlyingModal
+			underlying.modalFocus = 0
+			full = underlying.renderWithModal(full)
+		}
+		full, layout.modalRegions = m.renderWithModalLayout(full)
 	}
 
-	v := tea.NewView(full)
-	v.AltScreen = true
-	v.MouseMode = tea.MouseModeCellMotion
-	return v
+	return full, layout
 }
 
 type tabLabel struct {
@@ -2538,7 +2714,26 @@ func (m *AppModel) visibleTabWindow(labels []tabLabel) (int, int) {
 
 func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	mouse := msg.Mouse()
-	if mouse.Button != tea.MouseLeft || m.modal != noModal || m.waiting {
+	if mouse.Button != tea.MouseLeft || m.waiting {
+		return m, nil
+	}
+	if m.isTextModal() {
+		return m.handleTextModalMouse(mouse)
+	}
+	if m.modal == discardChangesModal {
+		return m.handleDiscardChangesModalMouse(mouse)
+	}
+	if m.modal == deleteConfirmModal {
+		return m.handleDeleteConfirmModalMouse(mouse)
+	}
+	if m.modal == finishModal {
+		return m.handleFinishModalMouse(mouse)
+	}
+	if m.modal != noModal {
+		return m, nil
+	}
+	if rect, ok := m.footerFinishRect(); ok && rect.contains(mouse) {
+		m.openFinishModal()
 		return m, nil
 	}
 
@@ -2636,6 +2831,95 @@ func (m *AppModel) selectTab(index int) {
 	m.updateCommentSidebar()
 }
 
+type modalMouseAction struct {
+	focus       int
+	deleteIndex int
+}
+
+type modalMouseRegion struct {
+	rect   mouseRect
+	action modalMouseAction
+}
+
+type modalButtonSpec struct {
+	rendered string
+	action   modalMouseAction
+}
+
+func (m *AppModel) isTextModal() bool {
+	return m.modal == commentModal || m.modal == fileCommentModal ||
+		m.modal == replyModal || m.modal == editModal
+}
+
+func (m *AppModel) handleTextModalMouse(mouse tea.Mouse) (tea.Model, tea.Cmd) {
+	for _, region := range m.modalMouseRegions() {
+		if !region.rect.contains(mouse) {
+			continue
+		}
+		action := region.action
+		m.modalFocus = action.focus
+		switch {
+		case action.focus == 1:
+			m.modalSubmit()
+		case action.focus == 2:
+			m.closeTextModal()
+		case m.canSuggest() && action.focus == 3:
+			m.insertSuggestion()
+		case m.modal == editModal && action.focus >= m.modalDeleteStartFocus():
+			m.openDeleteConfirmation(action.deleteIndex)
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m *AppModel) handleFinishModalMouse(mouse tea.Mouse) (tea.Model, tea.Cmd) {
+	for _, region := range m.modalMouseRegions() {
+		if !region.rect.contains(mouse) {
+			continue
+		}
+		m.modalFocus = region.action.focus
+		if region.action.focus == 0 {
+			return m.doFinish()
+		}
+		m.modal = noModal
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m *AppModel) handleDiscardChangesModalMouse(mouse tea.Mouse) (tea.Model, tea.Cmd) {
+	for _, region := range m.modalMouseRegions() {
+		if !region.rect.contains(mouse) {
+			continue
+		}
+		m.modalFocus = region.action.focus
+		if region.action.focus == 0 {
+			m.discardTextModal()
+		} else {
+			m.resumeTextModal()
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m *AppModel) handleDeleteConfirmModalMouse(mouse tea.Mouse) (tea.Model, tea.Cmd) {
+	for _, region := range m.modalMouseRegions() {
+		if !region.rect.contains(mouse) {
+			continue
+		}
+		m.modalFocus = region.action.focus
+		if region.action.focus == 0 {
+			m.confirmDelete()
+		} else {
+			m.cancelDeleteConfirmation()
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
 func (m *AppModel) handleMouseMotion(msg tea.MouseMotionMsg) (tea.Model, tea.Cmd) {
 	if !m.mouseSelecting || msg.Mouse().Button != tea.MouseLeft {
 		return m, nil
@@ -2722,19 +3006,14 @@ func (m *AppModel) commentBounds() (left, top, right, bottom int) {
 }
 
 func (m *AppModel) sidebarMouseTarget(y int) (int, bool) {
-	t := m.tab()
-	if y < 0 {
+	if y < 0 || y >= len(m.sidebarTargets) {
 		return 0, false
 	}
-	renderedY := 0
-	for i, item := range t.sidebarItems {
-		height := 1 + strings.Count(clampLines(item.body, 3), "\n") + 1 + len(item.replies) + 1
-		if y >= renderedY && y < renderedY+height {
-			return i, true
-		}
-		renderedY += height
+	i := m.sidebarTargets[y]
+	if i < 0 || i >= len(m.tab().sidebarItems) {
+		return 0, false
 	}
-	return 0, false
+	return i, true
 }
 
 func (m *AppModel) selectSidebarItem(i int) {
@@ -2772,6 +3051,14 @@ func (m *AppModel) contentBounds() (left, top, right, bottom int) {
 	right = left + m.contentViewport.Width()
 	bottom = top + m.contentViewport.Height()
 	return left, top, right, bottom
+}
+
+func (m *AppModel) footerFinishRect() (mouseRect, bool) {
+	if len(m.tabs) == 0 || m.tab().state == nil || m.tab().selecting {
+		return mouseRect{}, false
+	}
+	_, layout := m.renderReviewScreen()
+	return layout.footerFinish, layout.hasFooterFinish
 }
 
 func (m *AppModel) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
@@ -2882,13 +3169,14 @@ func (m AppModel) renderFooter() string {
 		if len(t.state.Comments) > 0 {
 			items = append(items, k("r", "resolve/unresolve"))
 		}
-		items = append(items, k("q", "save & quit"), k("?", "help"))
+		items = append(items, k("?", "help"))
 		if m.multiFile {
 			items = append([]string{
 				k("tab/S-tab", "next/prev tab"),
 				k("n/N", "next/prev change"),
 			}, items...)
 		}
+		items = append([]string{m.renderModalButton(m.finishActionLabel(), "q", true)}, items...)
 	}
 
 	return footerStyle.Width(m.width).Render(strings.Join(items, "  "))
@@ -2968,13 +3256,51 @@ func (m AppModel) renderHelp(innerWidth int) string {
 }
 
 func (m AppModel) renderModalButton(label, hint string, focused bool) string {
+	if focused {
+		return modalBtnFocused.Render(label + " " + hint)
+	}
 	btn := modalBtnLabel.Render(label)
 	h := modalBtnHint.Render(hint)
 	content := btn + " " + h
-	if focused {
-		return modalBtnFocused.Render(content)
-	}
 	return modalBtnNormal.Render(content)
+}
+
+func layoutModalButtonRow(specs []modalButtonSpec, width, top int) (string, []modalMouseRegion) {
+	var row strings.Builder
+	regions := make([]modalMouseRegion, 0, len(specs))
+	x, y := 0, top
+	for _, spec := range specs {
+		buttonWidth := lipgloss.Width(spec.rendered)
+		gap := 0
+		if x > 0 {
+			gap = 2
+		}
+		if x > 0 && x+gap+buttonWidth > width {
+			row.WriteByte('\n')
+			x = 0
+			y++
+			gap = 0
+		}
+		if gap > 0 {
+			row.WriteString("  ")
+			x += gap
+		}
+		row.WriteString(spec.rendered)
+		regions = append(regions, modalMouseRegion{
+			rect: mouseRect{
+				left: x, top: y,
+				right: x + buttonWidth, bottom: y + lipgloss.Height(spec.rendered),
+			},
+			action: spec.action,
+		})
+		x += buttonWidth
+	}
+	return row.String(), regions
+}
+
+func (m AppModel) modalMouseRegions() []modalMouseRegion {
+	_, layout := m.renderReviewScreen()
+	return layout.modalRegions
 }
 
 func (m AppModel) renderDeleteButton(label string, focused bool) string {
@@ -3014,7 +3340,13 @@ func (m AppModel) renderContextPreview(start, end, maxWidth int) string {
 }
 
 func (m AppModel) renderWithModal(background string) string {
+	rendered, _ := m.renderWithModalLayout(background)
+	return rendered
+}
+
+func (m AppModel) renderWithModalLayout(background string) (string, []modalMouseRegion) {
 	var modalContent string
+	var regions []modalMouseRegion
 	modalWidth := m.width * 2 / 3
 	if m.modal == helpModal {
 		modalWidth = m.width - 4
@@ -3045,23 +3377,27 @@ func (m AppModel) renderWithModal(background string) string {
 			Width(innerWidth - 2).
 			Render(m.renderContextPreview(start, end, innerWidth-4))
 
-		saveBtn := m.renderModalButton("Save", "ctrl+s", m.modalFocus == 1)
-		cancelBtn := m.renderModalButton("Cancel", "esc", m.modalFocus == 2)
-		suggestBtn := m.renderModalButton("Suggest", "ctrl+y", m.modalFocus == 3)
-		buttons := lipgloss.JoinHorizontal(lipgloss.Center, saveBtn, "  ", cancelBtn, "  ", suggestBtn)
-
-		modalContent = modalStyle.Width(modalWidth).Render(
-			title + "\n" + contextBox + "\n\n" + m.modalTextarea.View() + "\n\n" + buttons)
+		prefix := title + "\n" + contextBox + "\n\n" + m.modalTextarea.View() + "\n\n"
+		prefix = lipgloss.Wrap(prefix, innerWidth, "")
+		buttons, buttonRegions := layoutModalButtonRow([]modalButtonSpec{
+			{rendered: m.renderModalButton("Save", "ctrl+s", m.modalFocus == 1), action: modalMouseAction{focus: 1}},
+			{rendered: m.renderModalButton("Close", "×", m.modalFocus == 2), action: modalMouseAction{focus: 2}},
+			{rendered: m.renderModalButton("Suggest", "ctrl+y", m.modalFocus == 3), action: modalMouseAction{focus: 3}},
+		}, innerWidth, strings.Count(prefix, "\n"))
+		regions = append(regions, buttonRegions...)
+		modalContent = modalStyle.Width(modalWidth).Render(prefix + buttons)
 
 	case fileCommentModal:
 		title := modalTitleStyle.Render("Add File Comment")
 		path := contextBoxStyle.Width(innerWidth - 2).Render(m.tab().path)
-		saveBtn := m.renderModalButton("Save", "ctrl+s", m.modalFocus == 1)
-		cancelBtn := m.renderModalButton("Cancel", "esc", m.modalFocus == 2)
-		buttons := lipgloss.JoinHorizontal(lipgloss.Center, saveBtn, "  ", cancelBtn)
-
-		modalContent = modalStyle.Width(modalWidth).Render(
-			title + "\n" + path + "\n\n" + m.modalTextarea.View() + "\n\n" + buttons)
+		prefix := title + "\n" + path + "\n\n" + m.modalTextarea.View() + "\n\n"
+		prefix = lipgloss.Wrap(prefix, innerWidth, "")
+		buttons, buttonRegions := layoutModalButtonRow([]modalButtonSpec{
+			{rendered: m.renderModalButton("Save", "ctrl+s", m.modalFocus == 1), action: modalMouseAction{focus: 1}},
+			{rendered: m.renderModalButton("Close", "×", m.modalFocus == 2), action: modalMouseAction{focus: 2}},
+		}, innerWidth, strings.Count(prefix, "\n"))
+		regions = append(regions, buttonRegions...)
+		modalContent = modalStyle.Width(modalWidth).Render(prefix + buttons)
 
 	case replyModal, editModal:
 		titleText := "Edit Comment"
@@ -3114,16 +3450,15 @@ func (m AppModel) renderWithModal(background string) string {
 				break
 			}
 		}
-		saveBtn := m.renderModalButton("Save", "ctrl+s", m.modalFocus == 1)
-		cancelBtn := m.renderModalButton("Cancel", "esc", m.modalFocus == 2)
-		buttons := []string{saveBtn, cancelBtn}
-		if m.canSuggest() {
-			buttons = append(buttons, m.renderModalButton("Suggest", "ctrl+y", m.modalFocus == 3))
+		buttonSpecs := []modalButtonSpec{
+			{rendered: m.renderModalButton("Save", "ctrl+s", m.modalFocus == 1), action: modalMouseAction{focus: 1}},
+			{rendered: m.renderModalButton("Close", "×", m.modalFocus == 2), action: modalMouseAction{focus: 2}},
 		}
-		buttonRows := []string{strings.Join(buttons, "  ")}
-		deleteStart := m.modalDeleteStartFocus()
-		for i, target := range m.modalDeleteTargets() {
-			buttonRows = append(buttonRows, m.renderDeleteButton(target.label, m.modalFocus == i+deleteStart))
+		if m.canSuggest() {
+			buttonSpecs = append(buttonSpecs, modalButtonSpec{
+				rendered: m.renderModalButton("Suggest", "ctrl+y", m.modalFocus == 3),
+				action:   modalMouseAction{focus: 3},
+			})
 		}
 
 		content := title + "\n"
@@ -3133,33 +3468,76 @@ func (m AppModel) renderWithModal(background string) string {
 		if threadSection != "" {
 			content += threadSection + "\n\n"
 		}
-		content += m.modalTextarea.View() + "\n\n" + strings.Join(buttonRows, "\n")
+		content += m.modalTextarea.View() + "\n\n"
+		content = lipgloss.Wrap(content, innerWidth, "")
+		buttonY := strings.Count(content, "\n")
+		buttonRow, buttonRegions := layoutModalButtonRow(buttonSpecs, innerWidth, buttonY)
+		content += buttonRow
+		regions = append(regions, buttonRegions...)
+		buttonY += lipgloss.Height(buttonRow)
+		deleteStart := m.modalDeleteStartFocus()
+		for i, target := range m.modalDeleteTargets() {
+			content += "\n"
+			deleteRow, deleteRegions := layoutModalButtonRow([]modalButtonSpec{{
+				rendered: m.renderDeleteButton(target.label, m.modalFocus == i+deleteStart),
+				action:   modalMouseAction{focus: i + deleteStart, deleteIndex: i},
+			}}, innerWidth, buttonY)
+			content += deleteRow
+			regions = append(regions, deleteRegions...)
+			buttonY += lipgloss.Height(deleteRow)
+		}
 		modalContent = modalStyle.Width(modalWidth).Render(content)
+
+	case discardChangesModal:
+		title := modalTitleStyle.Render("Discard changes?")
+		info := "Your unsaved comment changes will be lost."
+		prefix := lipgloss.Wrap(title+"\n"+info+"\n\n", innerWidth, "")
+		buttons, buttonRegions := layoutModalButtonRow([]modalButtonSpec{
+			{rendered: m.renderModalButton("Discard", "y", m.modalFocus == 0), action: modalMouseAction{focus: 0}},
+			{rendered: m.renderModalButton("Keep Editing", "n / esc", m.modalFocus == 1), action: modalMouseAction{focus: 1}},
+		}, innerWidth, strings.Count(prefix, "\n"))
+		regions = append(regions, buttonRegions...)
+		modalContent = modalStyle.Width(modalWidth).Render(prefix + buttons)
+
+	case deleteConfirmModal:
+		titleText := "Delete comment?"
+		if targets := m.modalDeleteTargets(); m.pendingDelete >= 0 && m.pendingDelete < len(targets) && targets[m.pendingDelete].replyID != "" {
+			titleText = "Delete reply?"
+		}
+		title := modalTitleStyle.Render(titleText)
+		info := "This cannot be undone."
+		prefix := lipgloss.Wrap(title+"\n"+info+"\n\n", innerWidth, "")
+		buttons, buttonRegions := layoutModalButtonRow([]modalButtonSpec{
+			{rendered: m.renderDeleteButton("Delete", m.modalFocus == 0), action: modalMouseAction{focus: 0}},
+			{rendered: m.renderModalButton("Keep", "n / esc", m.modalFocus == 1), action: modalMouseAction{focus: 1}},
+		}, innerWidth, strings.Count(prefix, "\n"))
+		regions = append(regions, buttonRegions...)
+		modalContent = modalStyle.Width(modalWidth).Render(prefix + buttons)
 
 	case finishModal:
 		unresolved := m.unresolvedTotal()
-		var title, info, confirmLabel string
+		var title, info string
 		if unresolved == 0 {
 			title = modalTitleStyle.Render("Approve review?")
 			info = "No unresolved comments — approving ends the review."
-			confirmLabel = "Approve"
 		} else if !m.newFeedback {
 			title = modalTitleStyle.Render("Resolve all & Approve?")
 			info = fmt.Sprintf("%d unresolved comment(s) will be resolved.", unresolved)
-			confirmLabel = "Resolve All & Approve"
 		} else {
 			title = modalTitleStyle.Render("Finish review?")
 			info = fmt.Sprintf("%d unresolved comment(s) will be sent to the agent.", unresolved)
-			confirmLabel = "Finish Review"
 		}
 
-		confirmBtn := m.renderModalButton(confirmLabel, "y", m.modalFocus == 0)
-		cancelBtn := m.renderModalButton("Keep reviewing", "n", m.modalFocus == 1)
-		buttons := lipgloss.JoinHorizontal(lipgloss.Center, confirmBtn, "  ", cancelBtn)
+		prefix := title + "\n" + info + "\n\n"
+		prefix = lipgloss.Wrap(prefix, innerWidth, "")
+		buttons, buttonRegions := layoutModalButtonRow([]modalButtonSpec{
+			{rendered: m.renderModalButton(m.finishActionLabel(), "y", m.modalFocus == 0), action: modalMouseAction{focus: 0}},
+			{rendered: m.renderModalButton("Close", "n / ×", m.modalFocus == 1), action: modalMouseAction{focus: 1}},
+		}, innerWidth, strings.Count(prefix, "\n"))
+		regions = append(regions, buttonRegions...)
 		hint := footerStyle.Render("esc: back to review · q: quit without finishing")
 
-		modalContent = modalStyle.Width(modalWidth).Render(
-			title + "\n" + info + "\n\n" + buttons + "\n" + hint)
+		modalContent = modalStyle.Width(modalWidth).Render(prefix + buttons + "\n" + hint)
 	}
 
 	bgW := lipgloss.Width(background)
@@ -3176,6 +3554,14 @@ func (m AppModel) renderWithModal(background string) string {
 	if my < 0 {
 		my = 0
 	}
+	contentX := mx + modalStyle.GetBorderLeftSize() + modalStyle.GetPaddingLeft()
+	contentY := my + modalStyle.GetBorderTopSize() + modalStyle.GetPaddingTop()
+	for i := range regions {
+		regions[i].rect.left += contentX
+		regions[i].rect.right += contentX
+		regions[i].rect.top += contentY
+		regions[i].rect.bottom += contentY
+	}
 
 	background = dimRendered(background, bgW, bgH)
 
@@ -3183,7 +3569,7 @@ func (m AppModel) renderWithModal(background string) string {
 	modalLayer := lipgloss.NewLayer(modalContent).X(mx).Y(my).Z(1)
 
 	comp := lipgloss.NewCompositor(bgLayer, modalLayer)
-	return comp.Render()
+	return comp.Render(), regions
 }
 
 func dimRendered(s string, w, h int) string {
