@@ -7,9 +7,14 @@
     ":semanticCommits",
   ],
   labels: ["dependencies"],
+  forkProcessing: "enabled",
   timezone: "Asia/Tokyo",
   schedule: ["after 9am on friday", "before 6pm on friday"],
   postUpdateOptions: ["gomodTidy"],
+  lockFileMaintenance: {
+    enabled: true,
+    schedule: ["after 9am on friday", "before 6pm on friday"],
+  },
   vulnerabilityAlerts: {
     enabled: true,
     labels: ["dependencies", "security"],
