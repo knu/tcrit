@@ -63,6 +63,7 @@ type AppConfig struct {
 
 // gutterWidth is the total width of the left gutter: line number (5) + marker (1) + space (1).
 const gutterWidth = 7
+const displayTabWidth = 4
 
 type AppModel struct {
 	width, height int
@@ -95,6 +96,8 @@ type AppModel struct {
 	contentViewport viewport.Model
 	commentViewport viewport.Model
 	modalTextarea   textarea.Model
+	mouseSelecting  bool
+	contentLayout   renderedContentLayout
 
 	// Editing state
 	editingID      string // ID of the parent comment being edited or replied to
@@ -103,6 +106,39 @@ type AppModel struct {
 	newFeedback    bool   // true after adding or editing a comment in this round
 
 	err error
+}
+
+type renderedRange struct {
+	start int
+	end   int
+}
+
+type renderedContentLayout struct {
+	rows       []contentMouseTarget
+	lineRanges map[int]renderedRange
+}
+
+func newRenderedContentLayout() renderedContentLayout {
+	return renderedContentLayout{lineRanges: make(map[int]renderedRange)}
+}
+
+func (l *renderedContentLayout) appendBlock(b *strings.Builder, block string, target contentMouseTarget) {
+	block = strings.TrimSuffix(block, "\n")
+	start := len(l.rows)
+	for _, row := range strings.Split(block, "\n") {
+		b.WriteString(row)
+		b.WriteByte('\n')
+		l.rows = append(l.rows, target)
+	}
+	if target.line <= 0 {
+		return
+	}
+	r, ok := l.lineRanges[target.line]
+	if !ok {
+		r.start = start
+	}
+	r.end = len(l.rows)
+	l.lineRanges[target.line] = r
 }
 
 // tab returns the active FileTab. Panics if no tabs exist.
@@ -243,6 +279,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			t.ensureHighlightCache()
 		}
 
+		m.recalculateLayout()
 		m.rebuildContent()
 		m.updateCommentSidebar()
 		return m, nil
@@ -261,6 +298,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseClickMsg:
 		return m.handleMouseClick(msg)
+	case tea.MouseMotionMsg:
+		return m.handleMouseMotion(msg)
+	case tea.MouseReleaseMsg:
+		return m.handleMouseRelease(msg)
 	case tea.MouseWheelMsg:
 		return m.handleMouseWheel(msg)
 
@@ -513,11 +554,7 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 			} else if t.state != nil {
-				m.modal = commentModal
-				m.modalFocus = 0
-				m.modalTextarea.Placeholder = "Type your comment..."
-				m.modalTextarea.Reset()
-				m.modalTextarea.Focus()
+				m.openLineComment()
 				return m, nil
 			}
 		}
@@ -608,6 +645,17 @@ func (m *AppModel) openCommentThread(id string) {
 		m.modalTextarea.Focus()
 		return
 	}
+}
+
+func (m *AppModel) openLineComment() {
+	if m.tab().state == nil {
+		return
+	}
+	m.modal = commentModal
+	m.modalFocus = 0
+	m.modalTextarea.Placeholder = "Type your comment..."
+	m.modalTextarea.Reset()
+	m.modalTextarea.Focus()
 }
 
 func (m *AppModel) latestOwnReply(c *review.Comment) *review.Reply {
@@ -1287,15 +1335,12 @@ func (m *AppModel) updateTabSearchMatches() {
 }
 
 func (m *AppModel) recalculateLayout() {
-	headerHeight := 1
-	if m.detached {
-		headerHeight = 2
-	}
-	tabBarHeight := 0
-	if m.multiFile {
-		tabBarHeight = 3 // bordered tabs: top border + content + bottom border
-	}
+	headerHeight := m.headerHeight()
+	tabBarHeight := m.tabBarHeight()
 	footerHeight := 1
+	if len(m.tabs) > 0 && m.tab().state != nil {
+		footerHeight = lipgloss.Height(m.renderFooter())
+	}
 	tmuxPadding := 0
 	if os.Getenv("TMUX") != "" {
 		tmuxPadding = 1
@@ -1306,7 +1351,7 @@ func (m *AppModel) recalculateLayout() {
 		frameBorderHeight = 1 // bottom border
 		frameBorderWidth = 2  // left + right borders
 	}
-	mainHeight := m.height - headerHeight - tabBarHeight - footerHeight - frameBorderHeight - tmuxPadding
+	mainHeight := max(0, m.height-headerHeight-tabBarHeight-footerHeight-frameBorderHeight-tmuxPadding)
 
 	commentWidth := m.width / 4
 	if commentWidth < 20 {
@@ -1316,8 +1361,8 @@ func (m *AppModel) recalculateLayout() {
 
 	m.contentViewport.SetWidth(contentWidth)
 	m.contentViewport.SetHeight(mainHeight)
-	m.commentViewport.SetWidth(commentWidth - 3) // -3 for left border + padding + margin
-	m.commentViewport.SetHeight(mainHeight - 1)  // -1 for the "Comments (N)" header line
+	m.commentViewport.SetWidth(commentWidth - 3)      // -3 for left border + padding + margin
+	m.commentViewport.SetHeight(max(0, mainHeight-1)) // -1 for the "Comments (N)" header line
 
 	modalWidth := m.width * 2 / 3
 	if modalWidth < 50 {
@@ -1516,10 +1561,22 @@ func newAnnotation(c review.Comment) annotation {
 	}
 }
 
+func expandDisplayTabs(s string) string {
+	return strings.ReplaceAll(s, "\t", strings.Repeat(" ", displayTabWidth))
+}
+
+func documentDisplayLine(t *FileTab, index int, fallback string) string {
+	if !t.isMarkdown && t.chromaLines != nil && index < len(t.chromaLines) {
+		return expandDisplayTabs(t.chromaLines[index])
+	}
+	return expandDisplayTabs(fallback)
+}
+
 // rebuildContent renders the document line-by-line with cursor, selection,
 // line numbers, and bordered inline annotations.
 func (m *AppModel) rebuildContent() {
 	t := m.tab()
+	m.contentLayout = newRenderedContentLayout()
 
 	// Handle placeholder tabs
 	if t.isBinary {
@@ -1566,20 +1623,18 @@ func (m *AppModel) rebuildContent() {
 	sidebarHighlightStart, sidebarHighlightEnd := m.highlightedCommentLines()
 
 	contentWidth := m.contentViewport.Width()
-	boxWidth := contentWidth - 7
+	boxWidth := contentWidth - gutterWidth
 	if boxWidth < 20 {
 		boxWidth = 20
 	}
 
-	textWidth := contentWidth - 8
+	textWidth := contentWidth - gutterWidth - 1
 	if textWidth < 10 {
 		textWidth = 10
 	}
 
 	// Use cached syntax highlighting
 	isMarkdown := t.isMarkdown
-	chromaLines := t.chromaLines
-
 	// Detect table blocks so we can align columns across rows
 	tableBlocks := detectTableBlocks(t.doc.Lines)
 	tableBlockMap := make(map[int]*tableBlock)
@@ -1592,8 +1647,10 @@ func (m *AppModel) rebuildContent() {
 
 	var b strings.Builder
 	b.Grow(len(t.doc.Lines) * 200) // pre-allocate to reduce allocations
+	layout := newRenderedContentLayout()
 	for i, line := range t.doc.Lines {
 		lineNum := i + 1
+		lineTarget := contentMouseTarget{line: lineNum}
 
 		// Render deleted lines that appear before this line
 		if dels, ok := t.deletedAfter[lineNum-1]; ok {
@@ -1607,9 +1664,9 @@ func (m *AppModel) rebuildContent() {
 					if wi == 0 {
 						delMarker := diffDeletedGutter.Render("-")
 						delNum := diffDeletedLineNum.Render(fmt.Sprintf("%d", del.OldLineNum))
-						fmt.Fprintf(&b, "%s%s %s\n", delMarker, delNum, delContent)
+						layout.appendBlock(&b, fmt.Sprintf("%s%s %s", delMarker, delNum, delContent), lineTarget)
 					} else {
-						fmt.Fprintf(&b, " %s %s\n", continuationGutter, delContent)
+						layout.appendBlock(&b, fmt.Sprintf(" %s %s", continuationGutter, delContent), lineTarget)
 					}
 				}
 			}
@@ -1655,9 +1712,9 @@ func (m *AppModel) rebuildContent() {
 		if len(inlineChanges) > 0 && !isSelected && !isSidebarHighlight {
 			for wi, styledLine := range inlineDiffDisplayLines(inlineChanges, isMarkdown, textWidth, diffCommonTextBg, diffAddedTextBg) {
 				if wi == 0 {
-					fmt.Fprintf(&b, "%s%s %s\n", marker, numStr, styledLine)
+					layout.appendBlock(&b, fmt.Sprintf("%s%s %s", marker, numStr, styledLine), lineTarget)
 				} else {
-					fmt.Fprintf(&b, " %s %s\n", continuationGutter, styledLine)
+					layout.appendBlock(&b, fmt.Sprintf(" %s %s", continuationGutter, styledLine), lineTarget)
 				}
 			}
 		} else if tb, inTable := tableBlockMap[lineNum]; inTable {
@@ -1677,13 +1734,17 @@ func (m *AppModel) rebuildContent() {
 				styledLine = inlineBackground(diffChangedLineBg, styledLine)
 			}
 
-			b.WriteString(fmt.Sprintf("%s%s %s\n", marker, numStr, styledLine))
+			wrappedLines := strings.Split(lipgloss.Wrap(expandDisplayTabs(styledLine), textWidth, ""), "\n")
+			for wi, wrappedLine := range wrappedLines {
+				if wi == 0 {
+					layout.appendBlock(&b, fmt.Sprintf("%s%s %s", marker, numStr, wrappedLine), lineTarget)
+				} else {
+					layout.appendBlock(&b, fmt.Sprintf(" %s %s", continuationGutter, wrappedLine), lineTarget)
+				}
+			}
 		} else {
 			// Get the display content: Chroma-highlighted or raw
-			displayLine := line
-			if !isMarkdown && chromaLines != nil && i < len(chromaLines) {
-				displayLine = chromaLines[i]
-			}
+			displayLine := documentDisplayLine(t, i, line)
 
 			styleFunc := func(s string) string { return s }
 			if isMarkdown {
@@ -1702,9 +1763,9 @@ func (m *AppModel) rebuildContent() {
 			wrappedLines := strings.Split(wrapped, "\n")
 			for wi, wl := range wrappedLines {
 				if wi == 0 {
-					b.WriteString(fmt.Sprintf("%s%s %s\n", marker, numStr, styleFunc(wl)))
+					layout.appendBlock(&b, fmt.Sprintf("%s%s %s", marker, numStr, styleFunc(wl)), lineTarget)
 				} else {
-					b.WriteString(fmt.Sprintf(" %s %s\n", continuationGutter, styleFunc(wl)))
+					layout.appendBlock(&b, fmt.Sprintf(" %s %s", continuationGutter, styleFunc(wl)), lineTarget)
 				}
 			}
 		}
@@ -1713,22 +1774,15 @@ func (m *AppModel) rebuildContent() {
 		if anns, ok := annosByEndLine[lineNum]; ok {
 			for idx, ann := range anns {
 				focused := m.focused == contentPane && t.cursorOnAnnotation && t.cursorLine == lineNum && t.cursorAnnoIdx == idx
-				b.WriteString(m.renderAnnotationBox(ann, boxWidth, focused))
+				layout.appendBlock(&b, m.renderAnnotationBox(ann, boxWidth, focused), contentMouseTarget{
+					line: lineNum, annotation: true, annotationIndex: idx,
+				})
 			}
 		}
 	}
 
+	m.contentLayout = layout
 	m.contentViewport.SetContent(b.String())
-}
-
-// annotationExtraLines counts the lines an annotation box renders beyond the
-// classic "body + label + borders" baseline, keeping scroll math in sync with
-// renderAnnotationBox.
-func annotationExtraLines(ann annotation) int {
-	if ann.resolved {
-		return 0
-	}
-	return len(ann.replies)
 }
 
 // renderAnnotationBox renders a bordered annotation box indented under the gutter.
@@ -1916,23 +1970,23 @@ func inlineDiffDisplayLines(segments []gitpkg.InlineSegment, isMarkdown bool, wi
 		}
 		b.WriteString(inlineBackground(style, content))
 	}
-	return strings.Split(lipgloss.Wrap(b.String(), width, ""), "\n")
+	return strings.Split(lipgloss.Wrap(expandDisplayTabs(b.String()), width, ""), "\n")
 }
 
 func deletedDisplayLines(content, cached string, inline []gitpkg.InlineSegment, isMarkdown bool, width int) []string {
 	if len(inline) > 0 {
 		return inlineDiffDisplayLines(inline, isMarkdown, width, diffCommonTextBg, diffDeletedTextBg)
 	}
+	display := content
 	if cached != "" {
-		return []string{inlineBackground(diffDeletedLineBg, cached)}
+		display = cached
 	}
-	if !isMarkdown {
-		return []string{inlineBackground(diffDeletedLineBg, content)}
-	}
-
-	lines := strings.Split(lipgloss.Wrap(content, width, ""), "\n")
+	lines := strings.Split(lipgloss.Wrap(expandDisplayTabs(display), width, ""), "\n")
 	for i := range lines {
-		lines[i] = inlineBackground(diffDeletedLineBg, highlightMarkdown(lines[i]))
+		if isMarkdown {
+			lines[i] = highlightMarkdown(lines[i])
+		}
+		lines[i] = inlineBackground(diffDeletedLineBg, lines[i])
 	}
 	return lines
 }
@@ -2070,24 +2124,19 @@ func (m *AppModel) scrollToCursor() {
 	if t.doc == nil {
 		return
 	}
-
-	renderedLine := 0
-	extraCounts := m.extraLinesPerDocLine()
-	for i := 1; i < t.cursorLine; i++ {
-		renderedLine++
-		renderedLine += extraCounts[i]
+	r, ok := m.contentLayout.lineRanges[t.cursorLine]
+	if !ok {
+		return
 	}
-
-	cursorBottom := renderedLine + 1 + extraCounts[t.cursorLine]
 
 	vpHeight := m.contentViewport.Height()
 	currentTop := m.contentViewport.YOffset()
 
-	if renderedLine < currentTop {
-		m.contentViewport.SetYOffset(renderedLine)
+	if r.start < currentTop {
+		m.contentViewport.SetYOffset(r.start)
 	}
-	if cursorBottom > currentTop+vpHeight {
-		m.contentViewport.SetYOffset(cursorBottom - vpHeight)
+	if r.end > currentTop+vpHeight {
+		m.contentViewport.SetYOffset(r.end - vpHeight)
 	}
 }
 
@@ -2101,39 +2150,19 @@ func (m *AppModel) scrollToChunk(chunk changeChunk) {
 		return
 	}
 
-	extraCounts := m.extraLinesPerDocLine()
-
-	// Compute rendered line for chunk start - padding
 	startLine := chunk.startLine - chunkScrollPadding
 	if startLine < 1 {
 		startLine = 1
 	}
-	startRendered := 0
-	for i := 1; i < startLine; i++ {
-		startRendered++
-		startRendered += extraCounts[i]
-	}
-
-	// Compute rendered line for chunk end + padding
 	endLine := chunk.endLine + chunkScrollPadding
 	if endLine > t.doc.LineCount() {
 		endLine = t.doc.LineCount()
 	}
-	endRendered := 0
-	for i := 1; i <= endLine; i++ {
-		endRendered++
-		endRendered += extraCounts[i]
+	r, ok := m.contentRenderedRange(startLine, endLine)
+	if !ok {
+		return
 	}
-
-	vpHeight := m.contentViewport.Height()
-
-	// If the whole chunk+padding fits, position start at top
-	if endRendered-startRendered <= vpHeight {
-		m.contentViewport.SetYOffset(startRendered)
-	} else {
-		// Chunk is taller than viewport — just put cursor near top with padding
-		m.contentViewport.SetYOffset(startRendered)
-	}
+	m.contentViewport.SetYOffset(r.start)
 }
 
 func (m *AppModel) scrollToAnnotation(startLine, endLine int) {
@@ -2145,97 +2174,31 @@ func (m *AppModel) scrollToAnnotation(startLine, endLine int) {
 		endLine = startLine
 	}
 
-	extraCounts := m.extraLinesPerDocLine()
-
-	startRendered := 0
-	for i := 1; i < startLine; i++ {
-		startRendered++
-		startRendered += extraCounts[i]
-	}
-
-	endRendered := 0
-	for i := 1; i <= endLine; i++ {
-		endRendered++
-		endRendered += extraCounts[i]
+	r, ok := m.contentRenderedRange(startLine, endLine)
+	if !ok {
+		return
 	}
 
 	vpHeight := m.contentViewport.Height()
 
-	offset := endRendered - vpHeight
+	offset := r.end - vpHeight
 	if offset < 0 {
 		offset = 0
 	}
-	if offset > startRendered {
-		offset = startRendered
+	if offset > r.start {
+		offset = r.start
 	}
 
 	m.contentViewport.SetYOffset(offset)
 }
 
-func (m *AppModel) extraLinesPerDocLine() map[int]int {
-	t := m.tab()
-	counts := make(map[int]int)
-	if t.doc == nil {
-		return counts
+func (m *AppModel) contentRenderedRange(startLine, endLine int) (renderedRange, bool) {
+	start, startOK := m.contentLayout.lineRanges[startLine]
+	end, endOK := m.contentLayout.lineRanges[endLine]
+	if !startOK || !endOK {
+		return renderedRange{}, false
 	}
-
-	contentWidth := m.contentViewport.Width()
-	textWidth := contentWidth - 8
-	if textWidth < 10 {
-		textWidth = 10
-	}
-
-	// Mirror rebuildContent: table rows are rendered as a single line; all
-	// other content wraps to the available text width.
-	inTable := make(map[int]bool)
-	for _, tb := range detectTableBlocks(t.doc.Lines) {
-		for l := tb.startLine; l <= tb.endLine; l++ {
-			inTable[l] = true
-		}
-	}
-	for i, line := range t.doc.Lines {
-		lineNum := i + 1
-		if inTable[lineNum] {
-			continue
-		}
-		displayLine := line
-		if !t.isMarkdown && t.chromaLines != nil && i < len(t.chromaLines) {
-			displayLine = t.chromaLines[i]
-		}
-		wrapped := lipgloss.Wrap(displayLine, textWidth, "")
-		wrapCount := strings.Count(wrapped, "\n")
-		if wrapCount > 0 {
-			counts[lineNum] += wrapCount
-		}
-	}
-
-	if t.state != nil {
-		for _, c := range t.state.Comments {
-			if c.Scope == "file" {
-				continue
-			}
-			bodyLines := 0
-			if !c.Resolved {
-				bodyLines = strings.Count(c.Body, "\n") + 1
-			}
-			counts[c.EndAt()] += bodyLines + 3 + annotationExtraLines(newAnnotation(c))
-		}
-	}
-
-	// Account for deleted lines rendered before each doc line.
-	if t.deletedAfter != nil {
-		for afterLine, dels := range t.deletedAfter {
-			targetLine := afterLine + 1
-			if targetLine < 1 {
-				targetLine = 1
-			}
-			for _, del := range dels {
-				counts[targetLine] += len(deletedDisplayLines(del.Content, "", del.Inline, t.isMarkdown, textWidth))
-			}
-		}
-	}
-
-	return counts
+	return renderedRange{start: start.start, end: end.end}, true
 }
 
 func (m *AppModel) updateCommentSidebar() {
@@ -2347,6 +2310,35 @@ func unresolvedCommentCount(comments []review.Comment) int {
 	return count
 }
 
+func (m AppModel) renderHeader() string {
+	t := m.tab()
+	commentCount := 0
+	if t.state != nil {
+		commentCount = unresolvedCommentCount(t.state.Comments)
+	}
+	displayPath := t.path
+	if m.filePath != "" {
+		displayPath = m.filePath
+	}
+
+	var headerContent string
+	if t.selecting {
+		start, end := m.selectionRange()
+		selLabel := visualModeIndicator.Render("VISUAL")
+		headerContent = fmt.Sprintf(" Crit: %s  %s L%d-%d", displayPath, selLabel, start, end)
+	} else if t.doc != nil {
+		headerContent = fmt.Sprintf(" Crit: %s  %d comments  L%d/%d", displayPath, commentCount, t.cursorLine, t.doc.LineCount())
+	} else {
+		headerContent = fmt.Sprintf(" Crit: %s  %d comments", displayPath, commentCount)
+	}
+	if !m.detached {
+		return headerStyle.Width(m.width).Render(headerContent)
+	}
+	pausedBanner := pausedStatusBar.Width(m.width).Render(
+		" AI agent is paused — review the document, then press q to submit")
+	return pausedBanner + "\n" + headerStyle.Width(m.width).Render(headerContent)
+}
+
 func (m AppModel) View() tea.View {
 	if m.err != nil {
 		v := tea.NewView(fmt.Sprintf("Error: %v\n\nPress q to quit.", m.err))
@@ -2377,29 +2369,8 @@ func (m AppModel) View() tea.View {
 
 	t := m.tab()
 
-	// Header
 	commentCount := unresolvedCommentCount(t.state.Comments)
-	displayPath := t.path
-	if m.filePath != "" {
-		displayPath = m.filePath
-	}
-	var headerContent string
-	if t.selecting {
-		start, end := m.selectionRange()
-		selLabel := visualModeIndicator.Render("VISUAL")
-		headerContent = fmt.Sprintf(" Crit: %s  %s L%d-%d", displayPath, selLabel, start, end)
-	} else if t.doc != nil {
-		headerContent = fmt.Sprintf(" Crit: %s  %d comments  L%d/%d", displayPath, commentCount, t.cursorLine, t.doc.LineCount())
-	} else {
-		headerContent = fmt.Sprintf(" Crit: %s  %d comments", displayPath, commentCount)
-	}
-	var header string
-	if m.detached {
-		pausedBanner := pausedStatusBar.Width(m.width).Render(" AI agent is paused — review the document, then press q to submit")
-		header = pausedBanner + "\n" + headerStyle.Width(m.width).Render(headerContent)
-	} else {
-		header = headerStyle.Width(m.width).Render(headerContent)
-	}
+	header := m.renderHeader()
 
 	// Tab bar (multi-file mode)
 	var tabBar string
@@ -2572,7 +2543,7 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 	}
 
 	headerHeight := m.headerHeight()
-	if m.multiFile && !m.tabSearching && mouse.Y >= headerHeight && mouse.Y < headerHeight+3 {
+	if m.multiFile && !m.tabSearching && mouse.Y >= headerHeight && mouse.Y < headerHeight+m.tabBarHeight() {
 		labels := m.tabLabels()
 		for i := range labels {
 			labels[i].rendered = m.renderTab(labels, i, i == 0)
@@ -2624,6 +2595,11 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 					return m, nil
 				}
 			}
+			if mouse.X == left && !target.annotation {
+				t.selecting = true
+				t.selectAnchor = target.line
+				m.mouseSelecting = true
+			}
 		}
 		m.updateCommentSidebar()
 		m.rebuildContent()
@@ -2660,6 +2636,50 @@ func (m *AppModel) selectTab(index int) {
 	m.updateCommentSidebar()
 }
 
+func (m *AppModel) handleMouseMotion(msg tea.MouseMotionMsg) (tea.Model, tea.Cmd) {
+	if !m.mouseSelecting || msg.Mouse().Button != tea.MouseLeft {
+		return m, nil
+	}
+	m.updateMouseSelection(msg.Mouse(), true)
+	return m, nil
+}
+
+func (m *AppModel) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) {
+	if !m.mouseSelecting || msg.Mouse().Button != tea.MouseLeft {
+		return m, nil
+	}
+	m.updateMouseSelection(msg.Mouse(), false)
+	m.mouseSelecting = false
+	t := m.tab()
+	t.selecting = t.cursorLine != t.selectAnchor
+	m.openLineComment()
+	m.rebuildContent()
+	return m, nil
+}
+
+func (m *AppModel) updateMouseSelection(mouse tea.Mouse, autoScroll bool) {
+	_, top, _, bottom := m.contentBounds()
+	viewportY := mouse.Y - top + m.contentViewport.YOffset()
+	if autoScroll && mouse.Y <= top {
+		m.contentViewport.ScrollUp(1)
+		viewportY = m.contentViewport.YOffset()
+	} else if autoScroll && mouse.Y >= bottom-1 {
+		m.contentViewport.ScrollDown(1)
+		viewportY = m.contentViewport.YOffset() + m.contentViewport.Height() - 1
+	} else if mouse.Y < top || mouse.Y >= bottom {
+		return
+	}
+
+	if target, ok := m.contentMouseTarget(viewportY); ok {
+		t := m.tab()
+		t.cursorLine = target.line
+		t.cursorOnAnnotation = false
+		t.cursorAnnoIdx = 0
+		t.selecting = true
+		m.rebuildContent()
+	}
+}
+
 type contentMouseTarget struct {
 	line            int
 	annotation      bool
@@ -2667,65 +2687,10 @@ type contentMouseTarget struct {
 }
 
 func (m *AppModel) contentMouseTarget(y int) (contentMouseTarget, bool) {
-	t := m.tab()
-	if t.doc == nil || y < 0 {
+	if y < 0 || y >= len(m.contentLayout.rows) {
 		return contentMouseTarget{}, false
 	}
-
-	contentWidth := m.contentViewport.Width()
-	boxWidth := max(contentWidth-gutterWidth, 20)
-	textWidth := max(contentWidth-gutterWidth-1, 10)
-	tableLines := make(map[int]bool)
-	for _, block := range detectTableBlocks(t.doc.Lines) {
-		for line := block.startLine; line <= block.endLine; line++ {
-			tableLines[line] = true
-		}
-	}
-
-	selStart, selEnd := m.selectionRange()
-	highlightStart, highlightEnd := m.highlightedCommentLines()
-	renderedY := 0
-	for i, line := range t.doc.Lines {
-		lineNum := i + 1
-		deletedHeight := 0
-		for _, deleted := range t.deletedAfter[lineNum-1] {
-			deletedHeight += len(deletedDisplayLines(deleted.Content, "", deleted.Inline, t.isMarkdown, textWidth))
-		}
-		if y >= renderedY && y < renderedY+deletedHeight {
-			return contentMouseTarget{line: lineNum}, true
-		}
-		renderedY += deletedHeight
-
-		lineHeight := 1
-		isSelected := t.selecting && lineNum >= selStart && lineNum <= selEnd
-		isHighlighted := highlightStart > 0 && lineNum >= highlightStart && lineNum <= highlightEnd
-		if changes := t.inlineChanges[lineNum]; len(changes) > 0 && !isSelected && !isHighlighted {
-			lineHeight = len(inlineDiffDisplayLines(changes, t.isMarkdown, textWidth, diffCommonTextBg, diffAddedTextBg))
-		} else if !tableLines[lineNum] {
-			displayLine := line
-			if !t.isMarkdown && t.chromaLines != nil && i < len(t.chromaLines) {
-				displayLine = t.chromaLines[i]
-			}
-			lineHeight = strings.Count(lipgloss.Wrap(displayLine, textWidth, ""), "\n") + 1
-		}
-		if y >= renderedY && y < renderedY+lineHeight {
-			return contentMouseTarget{line: lineNum}, true
-		}
-		renderedY += lineHeight
-
-		for annotationIndex, ann := range m.annotationsAfterLine(lineNum) {
-			focused := m.focused == contentPane && t.cursorOnAnnotation &&
-				t.cursorLine == lineNum && t.cursorAnnoIdx == annotationIndex
-			boxHeight := lipgloss.Height(m.renderAnnotationBox(ann, boxWidth, focused))
-			if y >= renderedY && y < renderedY+boxHeight {
-				return contentMouseTarget{
-					line: lineNum, annotation: true, annotationIndex: annotationIndex,
-				}, true
-			}
-			renderedY += boxHeight
-		}
-	}
-	return contentMouseTarget{}, false
+	return m.contentLayout.rows[y], true
 }
 
 func (m *AppModel) highlightedCommentLines() (int, int) {
@@ -2750,10 +2715,7 @@ func (m *AppModel) commentBounds() (left, top, right, bottom int) {
 	if m.multiFile {
 		left++
 	}
-	top = m.headerHeight()
-	if m.multiFile {
-		top += 3
-	}
+	top = m.headerHeight() + m.tabBarHeight()
 	right = left + commentWidth
 	bottom = top + m.contentViewport.Height()
 	return left, top, right, bottom
@@ -2788,18 +2750,24 @@ func (m *AppModel) selectSidebarItem(i int) {
 }
 
 func (m *AppModel) headerHeight() int {
-	if m.detached {
-		return 2
+	if m.width > 0 && len(m.tabs) > 0 {
+		return lipgloss.Height(m.renderHeader())
 	}
 	return 1
 }
 
+func (m *AppModel) tabBarHeight() int {
+	if !m.multiFile {
+		return 0
+	}
+	return lipgloss.Height(m.renderTabBar())
+}
+
 func (m *AppModel) contentBounds() (left, top, right, bottom int) {
 	left = 0
-	top = m.headerHeight()
+	top = m.headerHeight() + m.tabBarHeight()
 	if m.multiFile {
 		left = 1
-		top += 3
 	}
 	right = left + m.contentViewport.Width()
 	bottom = top + m.contentViewport.Height()
