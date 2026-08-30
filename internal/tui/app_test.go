@@ -356,6 +356,37 @@ func TestMouseClickCodeGutterOpensLineComment(t *testing.T) {
 	}
 }
 
+func TestMouseClickSelectionEndGutterPreservesRangeAndOpensComment(t *testing.T) {
+	tests := []struct {
+		name   string
+		anchor int
+		cursor int
+	}{
+		{name: "selected downward", anchor: 2, cursor: 4},
+		{name: "selected upward", anchor: 4, cursor: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := setupAppWithDoc(t, "first\nsecond\nthird\nfourth\nfifth\n")
+			app.width = 100
+			app.contentViewport.SetWidth(75)
+			app.tabs[0].selecting = true
+			app.tabs[0].selectAnchor = tt.anchor
+			app.tabs[0].cursorLine = tt.cursor
+			app.rebuildContent()
+
+			x, y := contentScreenPoint(app, 0, 3)
+			app = clickMouse(app, x, y)
+
+			start, end := app.selectionRange()
+			if app.modal != commentModal || !app.tab().selecting || start != 2 || end != 4 {
+				t.Fatalf("modal = %v, selecting = %t, range = %d-%d; want selection comment for 2-4",
+					app.modal, app.tab().selecting, start, end)
+			}
+		})
+	}
+}
+
 func TestMouseClickRenderedCodeLineUsesItsDisplayedPosition(t *testing.T) {
 	app := setupAppWithDoc(t, "first unique\nsecond unique\nthird unique\n")
 	app.multiFile = true

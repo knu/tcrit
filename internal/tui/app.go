@@ -2778,6 +2778,13 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 		m.focused = contentPane
 		if target, ok := m.contentMouseTarget(mouse.Y - top + m.contentViewport.YOffset()); ok {
 			t := m.tab()
+			if mouse.X == left && !target.annotation && t.selecting {
+				start, end := m.selectionRange()
+				if start < end && target.line == end {
+					m.openLineComment()
+					return m, nil
+				}
+			}
 			openThread := wasFocused && target.annotation && t.cursorOnAnnotation &&
 				t.cursorLine == target.line && t.cursorAnnoIdx == target.annotationIndex
 			t.cursorLine = target.line
