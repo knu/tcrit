@@ -226,6 +226,7 @@ Tcrit resolves the tmux server and pane from the invoking process tree, so this 
 - Click a file tab, code line, inline comment, sidebar, or sidebar comment to focus it.
 - Scroll code with the mouse wheel.
 - Hover over the `+`/`-` gutter to reveal a yellow `>` comment marker, then click to comment on that line or drag to select multiple lines.  Dragging to the top or bottom edge scrolls one line at a time.
+- Click inside a comment text box to focus it and position the cursor, or use the mouse wheel to move through longer comments.
 - Click actions in comment and finish dialogs, including **Close**.  The footer **Approve** / **Finish Review** button opens the finish dialog.
 
 ## Scriptable CLI

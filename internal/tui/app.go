@@ -2850,6 +2850,7 @@ func (m *AppModel) selectTab(index int) {
 type modalMouseAction struct {
 	focus       int
 	deleteIndex int
+	textarea    bool
 }
 
 type modalMouseRegion struct {
@@ -2873,6 +2874,10 @@ func (m *AppModel) handleTextModalMouse(mouse tea.Mouse) (tea.Model, tea.Cmd) {
 			continue
 		}
 		action := region.action
+		if action.textarea {
+			m.focusTextareaAt(mouse, region.rect)
+			return m, nil
+		}
 		m.modalFocus = action.focus
 		switch {
 		case action.focus == 1:
@@ -2887,6 +2892,31 @@ func (m *AppModel) handleTextModalMouse(mouse tea.Mouse) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
+}
+
+func (m *AppModel) focusTextareaAt(mouse tea.Mouse, rect mouseRect) {
+	targetRow := m.modalTextarea.ScrollYOffset() + mouse.Y - rect.top
+	m.modalTextarea.MoveToBegin()
+	for range targetRow {
+		line, column := m.modalTextarea.Line(), m.modalTextarea.Column()
+		m.modalTextarea.CursorDown()
+		if m.modalTextarea.Line() == line && m.modalTextarea.Column() == column {
+			break
+		}
+	}
+
+	lineInfo := m.modalTextarea.LineInfo()
+	textX := max(0, mouse.X-rect.left-lipgloss.Width(m.modalTextarea.Prompt))
+	lines := strings.Split(m.modalTextarea.Value(), "\n")
+	line := []rune(lines[m.modalTextarea.Line()])
+	column := lineInfo.StartColumn
+	end := min(len(line), lineInfo.StartColumn+lineInfo.Width)
+	for column < end && ansi.StringWidth(string(line[lineInfo.StartColumn:column+1])) <= textX {
+		column++
+	}
+	m.modalTextarea.SetCursorColumn(column)
+	m.modalFocus = 0
+	m.modalTextarea.Focus()
 }
 
 func (m *AppModel) handleFinishModalMouse(mouse tea.Mouse) (tea.Model, tea.Cmd) {
@@ -3099,6 +3129,9 @@ func (m *AppModel) footerFinishRect() (mouseRect, bool) {
 }
 
 func (m *AppModel) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
+	if m.isTextModal() {
+		return m.handleTextModalWheel(msg.Mouse())
+	}
 	if m.modal != noModal || m.waiting {
 		return m, nil
 	}
@@ -3115,6 +3148,26 @@ func (m *AppModel) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) 
 		m.contentViewport.ScrollDown(m.contentViewport.MouseWheelDelta)
 	}
 	m.updateGutterHover(mouse)
+	return m, nil
+}
+
+func (m *AppModel) handleTextModalWheel(mouse tea.Mouse) (tea.Model, tea.Cmd) {
+	for _, region := range m.modalMouseRegions() {
+		if !region.action.textarea || !region.rect.contains(mouse) {
+			continue
+		}
+		m.modalFocus = 0
+		m.modalTextarea.Focus()
+		for range 3 {
+			switch mouse.Button {
+			case tea.MouseWheelUp:
+				m.modalTextarea.CursorUp()
+			case tea.MouseWheelDown:
+				m.modalTextarea.CursorDown()
+			}
+		}
+		return m, nil
+	}
 	return m, nil
 }
 
@@ -3336,6 +3389,18 @@ func layoutModalButtonRow(specs []modalButtonSpec, width, top int) (string, []mo
 	return row.String(), regions
 }
 
+func layoutModalTextarea(before, textareaView string, width int) (string, modalMouseRegion) {
+	before = lipgloss.Wrap(before, width, "")
+	top := strings.Count(before, "\n")
+	return before + textareaView + "\n\n", modalMouseRegion{
+		rect: mouseRect{
+			left: 0, top: top,
+			right: min(width, lipgloss.Width(textareaView)), bottom: top + lipgloss.Height(textareaView),
+		},
+		action: modalMouseAction{textarea: true},
+	}
+}
+
 func (m AppModel) modalMouseRegions() []modalMouseRegion {
 	_, layout := m.renderReviewScreen()
 	return layout.modalRegions
@@ -3415,8 +3480,9 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 			Width(innerWidth - 2).
 			Render(m.renderContextPreview(start, end, innerWidth-4))
 
-		prefix := title + "\n" + contextBox + "\n\n" + m.modalTextarea.View() + "\n\n"
-		prefix = lipgloss.Wrap(prefix, innerWidth, "")
+		prefix, textareaRegion := layoutModalTextarea(
+			title+"\n"+contextBox+"\n\n", m.modalTextarea.View(), innerWidth)
+		regions = append(regions, textareaRegion)
 		buttons, buttonRegions := layoutModalButtonRow([]modalButtonSpec{
 			{rendered: m.renderModalButton("Save", "ctrl+s", m.modalFocus == 1), action: modalMouseAction{focus: 1}},
 			{rendered: m.renderModalButton("Close", "×", m.modalFocus == 2), action: modalMouseAction{focus: 2}},
@@ -3428,8 +3494,9 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 	case fileCommentModal:
 		title := modalTitleStyle.Render("Add File Comment")
 		path := contextBoxStyle.Width(innerWidth - 2).Render(m.tab().path)
-		prefix := title + "\n" + path + "\n\n" + m.modalTextarea.View() + "\n\n"
-		prefix = lipgloss.Wrap(prefix, innerWidth, "")
+		prefix, textareaRegion := layoutModalTextarea(
+			title+"\n"+path+"\n\n", m.modalTextarea.View(), innerWidth)
+		regions = append(regions, textareaRegion)
 		buttons, buttonRegions := layoutModalButtonRow([]modalButtonSpec{
 			{rendered: m.renderModalButton("Save", "ctrl+s", m.modalFocus == 1), action: modalMouseAction{focus: 1}},
 			{rendered: m.renderModalButton("Close", "×", m.modalFocus == 2), action: modalMouseAction{focus: 2}},
@@ -3506,8 +3573,9 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		if threadSection != "" {
 			content += threadSection + "\n\n"
 		}
-		content += m.modalTextarea.View() + "\n\n"
-		content = lipgloss.Wrap(content, innerWidth, "")
+		var textareaRegion modalMouseRegion
+		content, textareaRegion = layoutModalTextarea(content, m.modalTextarea.View(), innerWidth)
+		regions = append(regions, textareaRegion)
 		buttonY := strings.Count(content, "\n")
 		buttonRow, buttonRegions := layoutModalButtonRow(buttonSpecs, innerWidth, buttonY)
 		content += buttonRow

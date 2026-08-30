@@ -154,6 +154,17 @@ func clickModalAction(t *testing.T, app AppModel, needle string) AppModel {
 	return app
 }
 
+func modalTextareaRect(t *testing.T, app AppModel) mouseRect {
+	t.Helper()
+	for _, region := range app.modalMouseRegions() {
+		if region.action.textarea {
+			return region.rect
+		}
+	}
+	t.Fatal("modal textarea region not found")
+	return mouseRect{}
+}
+
 func assertRegionContainsRenderedText(t *testing.T, app AppModel, rect mouseRect, text string) {
 	t.Helper()
 	lines := strings.Split(ansi.Strip(app.View().Content), "\n")
@@ -657,6 +668,48 @@ func TestMouseClickCommentModalSave(t *testing.T) {
 
 	if app.modal != noModal || len(app.tab().state.Comments) != 1 || app.tab().state.Comments[0].Body != "mouse comment" {
 		t.Fatalf("modal = %v, comments = %+v; want saved mouse comment", app.modal, app.tab().state.Comments)
+	}
+}
+
+func TestMouseClickCommentTextareaFocusesAndMovesCursor(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\n")
+	app.width = 100
+	app.height = 24
+	app.recalculateLayout()
+	app.openLineComment()
+	app.modalTextarea.SetValue("first line\nsecond line\nthird line")
+	app.modalTextarea.Blur()
+	app.modalFocus = 1
+	rect := modalTextareaRect(t, app)
+	assertRegionContainsRenderedText(t, app, rect, "first line")
+
+	x := rect.left + lipgloss.Width(app.modalTextarea.Prompt) + 2
+	app = clickMouse(app, x, rect.top+1)
+
+	if !app.modalTextarea.Focused() || app.modalFocus != 0 ||
+		app.modalTextarea.Line() != 1 || app.modalTextarea.Column() != 2 {
+		t.Fatalf("focused = %t, modal focus = %d, cursor = %d:%d; want textarea at 1:2",
+			app.modalTextarea.Focused(), app.modalFocus,
+			app.modalTextarea.Line(), app.modalTextarea.Column())
+	}
+}
+
+func TestMouseWheelScrollsCommentTextarea(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\n")
+	app.width = 100
+	app.height = 24
+	app.recalculateLayout()
+	app.openLineComment()
+	app.modalTextarea.SetValue(strings.Repeat("line\n", 11) + "line")
+	app.modalTextarea.MoveToBegin()
+	rect := modalTextareaRect(t, app)
+
+	app = wheelMouse(app, rect.left+1, rect.top+1, tea.MouseWheelDown)
+	app = wheelMouse(app, rect.left+1, rect.top+1, tea.MouseWheelDown)
+
+	if app.modalTextarea.Line() != 6 || app.modalTextarea.ScrollYOffset() == 0 {
+		t.Fatalf("cursor line = %d, scroll offset = %d; want line 6 scrolled into view",
+			app.modalTextarea.Line(), app.modalTextarea.ScrollYOffset())
 	}
 }
 
