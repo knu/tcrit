@@ -1562,26 +1562,8 @@ func (m *AppModel) rebuildContent() {
 
 	selStart, selEnd := m.selectionRange()
 
-	// Determine which lines to highlight from selected annotation
-	var sidebarHighlightStart, sidebarHighlightEnd int
-	if m.focused == commentPane && len(t.sidebarItems) > 0 && t.sidebarCursor < len(t.sidebarItems) {
-		sel := t.sidebarItems[t.sidebarCursor]
-		sidebarHighlightStart = sel.line
-		sidebarHighlightEnd = sel.line
-		if sel.endLine > 0 {
-			sidebarHighlightEnd = sel.endLine
-		}
-	} else if m.focused == contentPane && t.cursorOnAnnotation {
-		anns := m.annotationsAfterLine(t.cursorLine)
-		if t.cursorAnnoIdx < len(anns) {
-			ann := anns[t.cursorAnnoIdx]
-			sidebarHighlightStart = ann.line
-			sidebarHighlightEnd = ann.line
-			if ann.endLine > 0 {
-				sidebarHighlightEnd = ann.endLine
-			}
-		}
-	}
+	// Determine which lines to highlight from the selected annotation.
+	sidebarHighlightStart, sidebarHighlightEnd := m.highlightedCommentLines()
 
 	contentWidth := m.contentViewport.Width()
 	boxWidth := contentWidth - 7
@@ -2585,44 +2567,86 @@ func (m *AppModel) visibleTabWindow(labels []tabLabel) (int, int) {
 
 func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	mouse := msg.Mouse()
-	if mouse.Button != tea.MouseLeft || !m.multiFile || m.tabSearching || m.modal != noModal || m.waiting {
+	if mouse.Button != tea.MouseLeft || m.modal != noModal || m.waiting {
 		return m, nil
 	}
 
 	headerHeight := m.headerHeight()
-	if mouse.Y < headerHeight || mouse.Y >= headerHeight+3 {
+	if m.multiFile && !m.tabSearching && mouse.Y >= headerHeight && mouse.Y < headerHeight+3 {
+		labels := m.tabLabels()
+		for i := range labels {
+			labels[i].rendered = m.renderTab(labels, i, i == 0)
+			labels[i].width = lipgloss.Width(labels[i].rendered)
+		}
+		start, end := m.visibleTabWindow(labels)
+		x := 0
+		if start > 0 {
+			indicator := m.renderTabOverflowIndicator(fmt.Sprintf("↤ %d more", start), true)
+			width := lipgloss.Width(indicator)
+			if mouse.X >= x && mouse.X < x+width {
+				m.selectTab(start - 1)
+				return m, nil
+			}
+			x += width
+		}
+		for i := start; i < end; i++ {
+			if mouse.X >= x && mouse.X < x+labels[i].width {
+				m.selectTab(i)
+				return m, nil
+			}
+			x += labels[i].width
+		}
+		if end < len(labels) {
+			indicator := m.renderTabOverflowIndicator(fmt.Sprintf("%d more ↦", len(labels)-end), false)
+			if mouse.X >= x && mouse.X < x+lipgloss.Width(indicator) {
+				m.selectTab(end)
+				return m, nil
+			}
+		}
 		return m, nil
 	}
 
-	labels := m.tabLabels()
-	for i := range labels {
-		labels[i].rendered = m.renderTab(labels, i, i == 0)
-		labels[i].width = lipgloss.Width(labels[i].rendered)
-	}
-	start, end := m.visibleTabWindow(labels)
-	x := 0
-	if start > 0 {
-		indicator := m.renderTabOverflowIndicator(fmt.Sprintf("↤ %d more", start), true)
-		width := lipgloss.Width(indicator)
-		if mouse.X >= x && mouse.X < x+width {
-			m.selectTab(start - 1)
-			return m, nil
+	left, top, right, bottom := m.contentBounds()
+	if mouse.X >= left && mouse.X < right && mouse.Y >= top && mouse.Y < bottom {
+		wasFocused := m.focused == contentPane
+		m.focused = contentPane
+		if target, ok := m.contentMouseTarget(mouse.Y - top + m.contentViewport.YOffset()); ok {
+			t := m.tab()
+			openThread := wasFocused && target.annotation && t.cursorOnAnnotation &&
+				t.cursorLine == target.line && t.cursorAnnoIdx == target.annotationIndex
+			t.cursorLine = target.line
+			t.cursorOnAnnotation = target.annotation
+			t.cursorAnnoIdx = target.annotationIndex
+			if openThread {
+				annotations := m.annotationsAfterLine(target.line)
+				if target.annotationIndex < len(annotations) {
+					m.openCommentThread(annotations[target.annotationIndex].id)
+					return m, nil
+				}
+			}
 		}
-		x += width
+		m.updateCommentSidebar()
+		m.rebuildContent()
+		return m, nil
 	}
-	for i := start; i < end; i++ {
-		if mouse.X >= x && mouse.X < x+labels[i].width {
-			m.selectTab(i)
-			return m, nil
+
+	left, top, right, bottom = m.commentBounds()
+	if mouse.X >= left && mouse.X < right && mouse.Y >= top && mouse.Y < bottom {
+		wasFocused := m.focused == commentPane
+		m.focused = commentPane
+		if mouse.Y > top {
+			if i, ok := m.sidebarMouseTarget(mouse.Y - top - 1 + m.commentViewport.YOffset()); ok {
+				t := m.tab()
+				openThread := wasFocused && t.sidebarCursor == i
+				m.selectSidebarItem(i)
+				if openThread {
+					m.openCommentThread(t.sidebarItems[i].id)
+					return m, nil
+				}
+			}
 		}
-		x += labels[i].width
-	}
-	if end < len(labels) {
-		indicator := m.renderTabOverflowIndicator(fmt.Sprintf("%d more ↦", len(labels)-end), false)
-		if mouse.X >= x && mouse.X < x+lipgloss.Width(indicator) {
-			m.selectTab(end)
-			return m, nil
-		}
+		m.updateCommentSidebar()
+		m.rebuildContent()
 	}
 	return m, nil
 }
@@ -2634,6 +2658,133 @@ func (m *AppModel) selectTab(index int) {
 	m.activeTab = index
 	m.rebuildContent()
 	m.updateCommentSidebar()
+}
+
+type contentMouseTarget struct {
+	line            int
+	annotation      bool
+	annotationIndex int
+}
+
+func (m *AppModel) contentMouseTarget(y int) (contentMouseTarget, bool) {
+	t := m.tab()
+	if t.doc == nil || y < 0 {
+		return contentMouseTarget{}, false
+	}
+
+	contentWidth := m.contentViewport.Width()
+	boxWidth := max(contentWidth-gutterWidth, 20)
+	textWidth := max(contentWidth-gutterWidth-1, 10)
+	tableLines := make(map[int]bool)
+	for _, block := range detectTableBlocks(t.doc.Lines) {
+		for line := block.startLine; line <= block.endLine; line++ {
+			tableLines[line] = true
+		}
+	}
+
+	selStart, selEnd := m.selectionRange()
+	highlightStart, highlightEnd := m.highlightedCommentLines()
+	renderedY := 0
+	for i, line := range t.doc.Lines {
+		lineNum := i + 1
+		deletedHeight := 0
+		for _, deleted := range t.deletedAfter[lineNum-1] {
+			deletedHeight += len(deletedDisplayLines(deleted.Content, "", deleted.Inline, t.isMarkdown, textWidth))
+		}
+		if y >= renderedY && y < renderedY+deletedHeight {
+			return contentMouseTarget{line: lineNum}, true
+		}
+		renderedY += deletedHeight
+
+		lineHeight := 1
+		isSelected := t.selecting && lineNum >= selStart && lineNum <= selEnd
+		isHighlighted := highlightStart > 0 && lineNum >= highlightStart && lineNum <= highlightEnd
+		if changes := t.inlineChanges[lineNum]; len(changes) > 0 && !isSelected && !isHighlighted {
+			lineHeight = len(inlineDiffDisplayLines(changes, t.isMarkdown, textWidth, diffCommonTextBg, diffAddedTextBg))
+		} else if !tableLines[lineNum] {
+			displayLine := line
+			if !t.isMarkdown && t.chromaLines != nil && i < len(t.chromaLines) {
+				displayLine = t.chromaLines[i]
+			}
+			lineHeight = strings.Count(lipgloss.Wrap(displayLine, textWidth, ""), "\n") + 1
+		}
+		if y >= renderedY && y < renderedY+lineHeight {
+			return contentMouseTarget{line: lineNum}, true
+		}
+		renderedY += lineHeight
+
+		for annotationIndex, ann := range m.annotationsAfterLine(lineNum) {
+			focused := m.focused == contentPane && t.cursorOnAnnotation &&
+				t.cursorLine == lineNum && t.cursorAnnoIdx == annotationIndex
+			boxHeight := lipgloss.Height(m.renderAnnotationBox(ann, boxWidth, focused))
+			if y >= renderedY && y < renderedY+boxHeight {
+				return contentMouseTarget{
+					line: lineNum, annotation: true, annotationIndex: annotationIndex,
+				}, true
+			}
+			renderedY += boxHeight
+		}
+	}
+	return contentMouseTarget{}, false
+}
+
+func (m *AppModel) highlightedCommentLines() (int, int) {
+	t := m.tab()
+	if m.focused == commentPane && len(t.sidebarItems) > 0 && t.sidebarCursor < len(t.sidebarItems) {
+		item := t.sidebarItems[t.sidebarCursor]
+		return item.line, max(item.line, item.endLine)
+	}
+	if m.focused == contentPane && t.cursorOnAnnotation {
+		annotations := m.annotationsAfterLine(t.cursorLine)
+		if t.cursorAnnoIdx < len(annotations) {
+			ann := annotations[t.cursorAnnoIdx]
+			return ann.line, max(ann.line, ann.endLine)
+		}
+	}
+	return 0, 0
+}
+
+func (m *AppModel) commentBounds() (left, top, right, bottom int) {
+	commentWidth := max(m.width/4, 20)
+	left = m.width - commentWidth
+	if m.multiFile {
+		left++
+	}
+	top = m.headerHeight()
+	if m.multiFile {
+		top += 3
+	}
+	right = left + commentWidth
+	bottom = top + m.contentViewport.Height()
+	return left, top, right, bottom
+}
+
+func (m *AppModel) sidebarMouseTarget(y int) (int, bool) {
+	t := m.tab()
+	if y < 0 {
+		return 0, false
+	}
+	renderedY := 0
+	for i, item := range t.sidebarItems {
+		height := 1 + strings.Count(clampLines(item.body, 3), "\n") + 1 + len(item.replies) + 1
+		if y >= renderedY && y < renderedY+height {
+			return i, true
+		}
+		renderedY += height
+	}
+	return 0, false
+}
+
+func (m *AppModel) selectSidebarItem(i int) {
+	t := m.tab()
+	item := t.sidebarItems[i]
+	t.sidebarCursor = i
+	if item.scope != "file" {
+		t.cursorLine = item.line
+		t.cursorOnAnnotation = false
+		t.cursorAnnoIdx = 0
+		m.scrollToAnnotation(item.line, item.endLine)
+	}
 }
 
 func (m *AppModel) headerHeight() int {

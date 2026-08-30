@@ -216,6 +216,142 @@ func TestMouseWheelOutsideCodePaneDoesNotScroll(t *testing.T) {
 	}
 }
 
+func TestMouseClickFocusesCodeLine(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\nthird\n")
+	app.width = 100
+	app.contentViewport.SetWidth(75)
+	app.tabs[0].cursorLine = 1
+
+	app = clickMouse(app, 10, 2)
+
+	if app.focused != contentPane || app.tab().cursorLine != 2 || app.tab().cursorOnAnnotation {
+		t.Fatalf("focus = %v, line = %d, annotation = %t; want content line 2",
+			app.focused, app.tab().cursorLine, app.tab().cursorOnAnnotation)
+	}
+}
+
+func TestMouseClickFocusesScrolledCodeLine(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\nthird\nfourth\n")
+	app.width = 100
+	app.contentViewport.SetWidth(75)
+	app.contentViewport.SetHeight(2)
+	app.contentViewport.SetYOffset(1)
+
+	app = clickMouse(app, 10, 1)
+
+	if app.tab().cursorLine != 2 {
+		t.Fatalf("line = %d, want first visible line 2", app.tab().cursorLine)
+	}
+}
+
+func TestMouseClickDeletedLineFocusesFollowingCodeLine(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\nthird\n")
+	app.width = 100
+	app.contentViewport.SetWidth(75)
+	app.tabs[0].deletedAfter = map[int][]gitpkg.DeletedLine{
+		1: {{OldLineNum: 2, Content: "deleted"}},
+	}
+	app.rebuildContent()
+
+	app = clickMouse(app, 10, 2)
+
+	if app.tab().cursorLine != 2 || app.tab().cursorOnAnnotation {
+		t.Fatalf("line = %d, annotation = %t; want following line 2",
+			app.tab().cursorLine, app.tab().cursorOnAnnotation)
+	}
+}
+
+func TestMouseClickFocusesInlineComment(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\n")
+	app.width = 100
+	app.contentViewport.SetWidth(75)
+	app.tabs[0].state.Comments = []review.Comment{{
+		ID: "c_inline", StartLine: 1, EndLine: 1, Body: "comment",
+	}}
+	app.updateCommentSidebar()
+	app.rebuildContent()
+
+	app = clickMouse(app, 10, 2)
+
+	if app.focused != contentPane || !app.tab().cursorOnAnnotation || app.tab().cursorAnnoIdx != 0 {
+		t.Fatalf("focus = %v, annotation = %t/%d; want first inline comment",
+			app.focused, app.tab().cursorOnAnnotation, app.tab().cursorAnnoIdx)
+	}
+}
+
+func TestMouseClickOpensFocusedInlineComment(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\n")
+	app.width = 100
+	app.contentViewport.SetWidth(75)
+	app.tabs[0].state.Comments = []review.Comment{{
+		ID: "c_inline", StartLine: 1, EndLine: 1, Body: "comment",
+	}}
+	app.updateCommentSidebar()
+	app.rebuildContent()
+
+	app = clickMouse(app, 10, 2)
+	if app.modal != noModal {
+		t.Fatalf("first click opened modal %v, want focus only", app.modal)
+	}
+	app = clickMouse(app, 10, 2)
+
+	if app.modal != replyModal || app.editingID != "c_inline" {
+		t.Fatalf("second click opened modal %v for %q, want reply modal for c_inline", app.modal, app.editingID)
+	}
+}
+
+func TestMouseClickFocusesSidebar(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\n")
+	app.width = 100
+	app.contentViewport.SetWidth(75)
+
+	app = clickMouse(app, 81, 1)
+
+	if app.focused != commentPane {
+		t.Fatalf("focus = %v, want comment pane", app.focused)
+	}
+}
+
+func TestMouseClickSelectsSidebarComment(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\nthird\n")
+	app.width = 100
+	app.contentViewport.SetWidth(75)
+	app.tabs[0].state.Comments = []review.Comment{
+		{ID: "c_first", StartLine: 1, EndLine: 1, Body: "first comment"},
+		{ID: "c_second", StartLine: 3, EndLine: 3, Body: "second comment"},
+	}
+	app.updateCommentSidebar()
+	app.rebuildContent()
+
+	app = clickMouse(app, 81, 5)
+
+	if app.focused != commentPane || app.tab().sidebarCursor != 1 || app.tab().cursorLine != 3 {
+		t.Fatalf("focus = %v, sidebar = %d, line = %d; want second comment at line 3",
+			app.focused, app.tab().sidebarCursor, app.tab().cursorLine)
+	}
+}
+
+func TestMouseClickOpensFocusedSidebarComment(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\n")
+	app.width = 100
+	app.contentViewport.SetWidth(75)
+	app.tabs[0].state.Comments = []review.Comment{{
+		ID: "c_sidebar", StartLine: 1, EndLine: 1, Body: "comment",
+	}}
+	app.updateCommentSidebar()
+	app.rebuildContent()
+
+	left, top, _, _ := app.commentBounds()
+	app = clickMouse(app, left+1, top+1)
+	if app.modal != noModal {
+		t.Fatalf("first click opened modal %v, want focus only", app.modal)
+	}
+	app = clickMouse(app, left+1, top+1)
+
+	if app.modal != replyModal || app.editingID != "c_sidebar" {
+		t.Fatalf("second click opened modal %v for %q, want reply modal for c_sidebar", app.modal, app.editingID)
+	}
+}
 func TestNavigationHome(t *testing.T) {
 	lines := "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\n"
 	app := setupAppWithDoc(t, lines)
