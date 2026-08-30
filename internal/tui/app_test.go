@@ -73,6 +73,41 @@ func TestRenderHeaderUsesTCritBrand(t *testing.T) {
 	}
 }
 
+func TestRenderHeaderStaysOnOneLineWithLongPath(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*AppModel)
+		want  string
+	}{
+		{name: "document", want: "0 comments  L0/3"},
+		{name: "selection", setup: func(app *AppModel) { app.tabs[0].selecting = true }, want: "VISUAL  L0-0"},
+		{name: "loading", setup: func(app *AppModel) { app.tabs[0].doc = nil }, want: "0 comments"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := setupAppWithDoc(t, "first\nsecond\n")
+			app.width = 40
+			app.filePath = strings.Repeat("long/", 20) + "file.md"
+			if tt.setup != nil {
+				tt.setup(&app)
+			}
+
+			header := app.renderHeader()
+			plainHeader := ansi.Strip(header)
+			if got := lipgloss.Height(header); got != 1 {
+				t.Errorf("header height = %d, want 1: %q", got, plainHeader)
+			}
+			if !strings.Contains(plainHeader, "…") {
+				t.Errorf("header = %q, want truncated path", plainHeader)
+			}
+			if !strings.Contains(plainHeader, tt.want) {
+				t.Errorf("header = %q, want status %q", plainHeader, tt.want)
+			}
+		})
+	}
+}
+
 func pressKey(app AppModel, code rune) AppModel {
 	updated, _ := app.Update(tea.KeyPressMsg{Code: code})
 	switch v := updated.(type) {
@@ -645,6 +680,7 @@ func TestMouseClickCodeTextDoesNotOpenLineComment(t *testing.T) {
 func TestMouseDragCodeGutterSelectsLinesAndOpensComment(t *testing.T) {
 	app := setupAppWithDoc(t, "first\nsecond\nthird\nfourth\nfifth\n")
 	app.width = 100
+	app.filePath = strings.Repeat("x", 76)
 	app.contentViewport.SetWidth(75)
 
 	startX, startY := contentScreenPoint(app, 0, 1)

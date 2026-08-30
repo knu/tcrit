@@ -2467,6 +2467,22 @@ func unresolvedCommentCount(comments []review.Comment) int {
 	return count
 }
 
+func truncateLeftToWidth(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	stringWidth := ansi.StringWidth(s)
+	if stringWidth <= width {
+		return s
+	}
+	const prefix = "…"
+	prefixWidth := ansi.StringWidth(prefix)
+	if width <= prefixWidth {
+		return ansi.Truncate(prefix, width, "")
+	}
+	return prefix + ansi.Cut(s, stringWidth-width+prefixWidth, stringWidth)
+}
+
 func (m AppModel) renderHeader() string {
 	t := m.tab()
 	commentCount := 0
@@ -2478,15 +2494,25 @@ func (m AppModel) renderHeader() string {
 		displayPath = m.filePath
 	}
 
-	var headerContent string
+	prefix := " TCrit: "
+	var suffix string
 	if t.selecting {
 		start, end := m.selectionRange()
 		selLabel := visualModeIndicator.Render("VISUAL")
-		headerContent = fmt.Sprintf(" TCrit: %s  %s L%d-%d", displayPath, selLabel, start, end)
+		suffix = fmt.Sprintf("  %s L%d-%d", selLabel, start, end)
 	} else if t.doc != nil {
-		headerContent = fmt.Sprintf(" TCrit: %s  %d comments  L%d/%d", displayPath, commentCount, t.cursorLine, t.doc.LineCount())
+		suffix = fmt.Sprintf("  %d comments  L%d/%d", commentCount, t.cursorLine, t.doc.LineCount())
 	} else {
-		headerContent = fmt.Sprintf(" TCrit: %s  %d comments", displayPath, commentCount)
+		suffix = fmt.Sprintf("  %d comments", commentCount)
+	}
+	headerWidth := max(0, m.width-headerStyle.GetHorizontalFrameSize())
+	if m.width > 0 {
+		pathWidth := max(0, headerWidth-ansi.StringWidth(prefix)-ansi.StringWidth(suffix))
+		displayPath = truncateLeftToWidth(displayPath, pathWidth)
+	}
+	headerContent := prefix + displayPath + suffix
+	if m.width > 0 {
+		headerContent = ansi.Truncate(headerContent, headerWidth, "")
 	}
 	if !m.detached {
 		return headerStyle.Width(m.width).Render(headerContent)
