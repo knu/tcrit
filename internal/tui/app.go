@@ -2482,11 +2482,11 @@ func (m AppModel) renderHeader() string {
 	if t.selecting {
 		start, end := m.selectionRange()
 		selLabel := visualModeIndicator.Render("VISUAL")
-		headerContent = fmt.Sprintf(" Crit: %s  %s L%d-%d", displayPath, selLabel, start, end)
+		headerContent = fmt.Sprintf(" TCrit: %s  %s L%d-%d", displayPath, selLabel, start, end)
 	} else if t.doc != nil {
-		headerContent = fmt.Sprintf(" Crit: %s  %d comments  L%d/%d", displayPath, commentCount, t.cursorLine, t.doc.LineCount())
+		headerContent = fmt.Sprintf(" TCrit: %s  %d comments  L%d/%d", displayPath, commentCount, t.cursorLine, t.doc.LineCount())
 	} else {
-		headerContent = fmt.Sprintf(" Crit: %s  %d comments", displayPath, commentCount)
+		headerContent = fmt.Sprintf(" TCrit: %s  %d comments", displayPath, commentCount)
 	}
 	if !m.detached {
 		return headerStyle.Width(m.width).Render(headerContent)

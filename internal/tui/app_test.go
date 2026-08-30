@@ -44,6 +44,35 @@ func setupAppWithDoc(t *testing.T, content string) AppModel {
 	return a
 }
 
+func TestRenderHeaderUsesTCritBrand(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*AppModel)
+	}{
+		{name: "document"},
+		{name: "selection", setup: func(app *AppModel) { app.tabs[0].selecting = true }},
+		{name: "loading", setup: func(app *AppModel) { app.tabs[0].doc = nil }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := setupAppWithDoc(t, "first\nsecond\n")
+			app.width = 120
+			if tt.setup != nil {
+				tt.setup(&app)
+			}
+
+			header := ansi.Strip(app.renderHeader())
+			if !strings.Contains(header, " TCrit:") {
+				t.Errorf("header = %q, want TCrit branding", header)
+			}
+			if strings.Contains(header, " Crit:") {
+				t.Errorf("header = %q, contains legacy Crit branding", header)
+			}
+		})
+	}
+}
+
 func pressKey(app AppModel, code rune) AppModel {
 	updated, _ := app.Update(tea.KeyPressMsg{Code: code})
 	switch v := updated.(type) {
