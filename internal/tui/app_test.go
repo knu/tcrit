@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -52,6 +53,132 @@ func pressKey(app AppModel, code rune) AppModel {
 		return *v
 	}
 	panic("unexpected model type")
+}
+
+func clickMouse(app AppModel, x, y int) AppModel {
+	updated, _ := app.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
+	switch v := updated.(type) {
+	case AppModel:
+		return v
+	case *AppModel:
+		return *v
+	}
+	panic("unexpected model type")
+}
+
+func TestMouseClickSelectsFileTab(t *testing.T) {
+	app := newCommentNavigationTestApp()
+	app.width = 120
+
+	labels := app.tabLabels()
+	firstWidth := lipgloss.Width(app.renderTab(labels, 0, true))
+	app = clickMouse(app, firstWidth+1, 1)
+
+	if app.activeTab != 1 {
+		t.Fatalf("active tab = %d, want 1", app.activeTab)
+	}
+}
+
+func TestMouseClickOutsideTabBarDoesNotSelectFileTab(t *testing.T) {
+	app := newCommentNavigationTestApp()
+	app.width = 120
+
+	app = clickMouse(app, 20, 4)
+
+	if app.activeTab != 0 {
+		t.Fatalf("active tab = %d, want 0", app.activeTab)
+	}
+}
+
+func TestMouseClickSelectsVisibleOverflowTab(t *testing.T) {
+	app := newCommentNavigationTestApp()
+	fourth := app.tabs[1]
+	fourth.path = "fourth.go"
+	fifth := app.tabs[1]
+	fifth.path = "fifth.go"
+	app.tabs = append(app.tabs, fourth, fifth)
+	app.width = 50
+	app.activeTab = 2
+
+	labels := app.tabLabels()
+	for i := range labels {
+		labels[i].width = lipgloss.Width(app.renderTab(labels, i, i == 0))
+	}
+	start, end := app.visibleTabWindow(labels)
+	target := start
+	if target == app.activeTab {
+		target = end - 1
+	}
+	if target == app.activeTab {
+		t.Fatal("test setup did not expose another tab")
+	}
+	x := 0
+	if start > 0 {
+		x = lipgloss.Width(inactiveTabStyle.Render("↤ 1 more"))
+	}
+	for i := start; i < target; i++ {
+		x += labels[i].width
+	}
+
+	app = clickMouse(app, x+1, 1)
+
+	if app.activeTab != target {
+		t.Fatalf("active tab = %d, want %d", app.activeTab, target)
+	}
+}
+
+func TestMouseClickSelectsTabBehindOverflowIndicator(t *testing.T) {
+	newApp := func() AppModel {
+		app := newCommentNavigationTestApp()
+		template := app.tabs[1]
+		paths := []string{"a.go", "b.go", "c.go", "d.go", "e.go", "f.go", "g.go", "h.go"}
+		app.tabs = make([]FileTab, len(paths))
+		for i, path := range paths {
+			app.tabs[i] = template
+			app.tabs[i].path = path
+		}
+		app.width = 44
+		app.activeTab = 4
+		return app
+	}
+
+	tests := []struct {
+		name  string
+		right bool
+	}{
+		{name: "left"},
+		{name: "right", right: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := newApp()
+			labels := app.tabLabels()
+			for i := range labels {
+				labels[i].rendered = app.renderTab(labels, i, i == 0)
+				labels[i].width = lipgloss.Width(labels[i].rendered)
+			}
+			start, end := app.visibleTabWindow(labels)
+			if start == 0 || end == len(labels) {
+				t.Fatalf("visible window = [%d,%d), want overflow on both sides", start, end)
+			}
+
+			x := 1
+			want := start - 1
+			if tt.right {
+				x = lipgloss.Width(app.renderTabOverflowIndicator("↤ "+strconv.Itoa(start)+" more", true))
+				for i := start; i < end; i++ {
+					x += labels[i].width
+				}
+				x++
+				want = end
+			}
+
+			app = clickMouse(app, x, 1)
+			if app.activeTab != want {
+				t.Fatalf("active tab = %d, want adjacent hidden tab %d", app.activeTab, want)
+			}
+		})
+	}
 }
 
 func TestNavigationHome(t *testing.T) {
