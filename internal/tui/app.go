@@ -261,6 +261,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseClickMsg:
 		return m.handleMouseClick(msg)
+	case tea.MouseWheelMsg:
+		return m.handleMouseWheel(msg)
 
 	case tea.KeyPressMsg:
 		return m.handleKeyPress(msg)
@@ -2587,10 +2589,7 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 		return m, nil
 	}
 
-	headerHeight := 1
-	if m.detached {
-		headerHeight = 2
-	}
+	headerHeight := m.headerHeight()
 	if mouse.Y < headerHeight || mouse.Y >= headerHeight+3 {
 		return m, nil
 	}
@@ -2635,6 +2634,44 @@ func (m *AppModel) selectTab(index int) {
 	m.activeTab = index
 	m.rebuildContent()
 	m.updateCommentSidebar()
+}
+
+func (m *AppModel) headerHeight() int {
+	if m.detached {
+		return 2
+	}
+	return 1
+}
+
+func (m *AppModel) contentBounds() (left, top, right, bottom int) {
+	left = 0
+	top = m.headerHeight()
+	if m.multiFile {
+		left = 1
+		top += 3
+	}
+	right = left + m.contentViewport.Width()
+	bottom = top + m.contentViewport.Height()
+	return left, top, right, bottom
+}
+
+func (m *AppModel) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
+	if m.modal != noModal || m.waiting {
+		return m, nil
+	}
+	mouse := msg.Mouse()
+	left, top, right, bottom := m.contentBounds()
+	if mouse.X < left || mouse.X >= right || mouse.Y < top || mouse.Y >= bottom {
+		return m, nil
+	}
+
+	switch mouse.Button {
+	case tea.MouseWheelUp:
+		m.contentViewport.ScrollUp(m.contentViewport.MouseWheelDelta)
+	case tea.MouseWheelDown:
+		m.contentViewport.ScrollDown(m.contentViewport.MouseWheelDelta)
+	}
+	return m, nil
 }
 
 // renderTabBar renders the tab bar for multi-file mode.

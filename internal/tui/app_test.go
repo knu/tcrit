@@ -66,6 +66,17 @@ func clickMouse(app AppModel, x, y int) AppModel {
 	panic("unexpected model type")
 }
 
+func wheelMouse(app AppModel, x, y int, button tea.MouseButton) AppModel {
+	updated, _ := app.Update(tea.MouseWheelMsg{X: x, Y: y, Button: button})
+	switch v := updated.(type) {
+	case AppModel:
+		return v
+	case *AppModel:
+		return *v
+	}
+	panic("unexpected model type")
+}
+
 func TestMouseClickSelectsFileTab(t *testing.T) {
 	app := newCommentNavigationTestApp()
 	app.width = 120
@@ -178,6 +189,30 @@ func TestMouseClickSelectsTabBehindOverflowIndicator(t *testing.T) {
 				t.Fatalf("active tab = %d, want adjacent hidden tab %d", app.activeTab, want)
 			}
 		})
+	}
+}
+
+func TestMouseWheelScrollsCodePane(t *testing.T) {
+	app := setupAppWithDoc(t, strings.Repeat("line\n", 20))
+	app.width = 100
+	app.contentViewport.SetWidth(80)
+
+	app = wheelMouse(app, 10, 2, tea.MouseWheelDown)
+
+	if got := app.contentViewport.YOffset(); got != app.contentViewport.MouseWheelDelta {
+		t.Fatalf("viewport offset = %d, want %d", got, app.contentViewport.MouseWheelDelta)
+	}
+}
+
+func TestMouseWheelOutsideCodePaneDoesNotScroll(t *testing.T) {
+	app := setupAppWithDoc(t, strings.Repeat("line\n", 20))
+	app.width = 100
+	app.contentViewport.SetWidth(75)
+
+	app = wheelMouse(app, 80, 2, tea.MouseWheelDown)
+
+	if got := app.contentViewport.YOffset(); got != 0 {
+		t.Fatalf("viewport offset = %d, want 0", got)
 	}
 }
 
