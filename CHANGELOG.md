@@ -1,11 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.6.1
 
 ### Added
 
 - **Deleted-line comments** — select and comment on removed lines with the keyboard or mouse, including lines in fully deleted files
 - **Direct comment deletion** — press `d` to delete the selected comment after confirmation without opening its thread first
+
+### Fixed
+
+- Application headers consistently use TCrit branding
+- The code header remains stable while dragging a mouse selection beyond the viewport
 
 ## 0.6.0
 
