@@ -528,6 +528,12 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.modalTextarea.Focus()
 		}
 		return m, nil
+
+	case key.Matches(msg, keys.Delete):
+		if !t.selecting {
+			m.openSelectedCommentDelete()
+		}
+		return m, nil
 	}
 
 	// Tab switching (multi-file mode)
@@ -764,6 +770,39 @@ func (m *AppModel) openCommentThread(id string) {
 		m.modalTextarea.Focus()
 		return
 	}
+}
+
+func (m *AppModel) selectedCommentID() string {
+	t := m.tab()
+	switch m.focused {
+	case contentPane:
+		if !t.cursorOnAnnotation {
+			return ""
+		}
+		annotations := m.annotationsAfterLine(t.cursorLine, t.cursorSide)
+		if t.cursorAnnoIdx < len(annotations) {
+			return annotations[t.cursorAnnoIdx].id
+		}
+	case commentPane:
+		if t.sidebarCursor < len(t.sidebarItems) {
+			return t.sidebarItems[t.sidebarCursor].id
+		}
+	}
+	return ""
+}
+
+func (m *AppModel) openSelectedCommentDelete() {
+	id := m.selectedCommentID()
+	if id == "" {
+		return
+	}
+	m.editingID = id
+	m.editingReplyID = ""
+	if len(m.modalDeleteTargets()) == 0 {
+		m.editingID = ""
+		return
+	}
+	m.openDeleteConfirmation(0)
 }
 
 func (m *AppModel) openLineComment() {
@@ -1502,6 +1541,14 @@ func (m *AppModel) openDeleteConfirmation(targetIndex int) {
 }
 
 func (m *AppModel) cancelDeleteConfirmation() {
+	if m.deleteReturn == noModal {
+		m.modal = noModal
+		m.editingID = ""
+		m.editingReplyID = ""
+		m.pendingDelete = 0
+		m.modalFocus = 0
+		return
+	}
 	m.modal = m.deleteReturn
 	m.deleteReturn = noModal
 	m.modalFocus = m.modalDeleteStartFocus() + m.pendingDelete
@@ -3525,6 +3572,7 @@ func (m AppModel) renderHelp(innerWidth int) string {
 		{keys: "v", desc: "select"},
 		{keys: "s", desc: "sidebar"},
 		{keys: "r", desc: "resolve"},
+		{keys: "d", desc: "delete comment"},
 		{keys: "q/ctrl+c", desc: "finish"},
 		{keys: "?", desc: "help"},
 	}, columnWidth)

@@ -203,6 +203,7 @@ Tcrit resolves the tmux server and pane from the invoking process tree, so this 
 | `s`                                   | Toggle comment sidebar                   |
 | `[` / `]`                             | Jump to prev / next comment              |
 | `r`                                   | Resolve / unresolve the focused comment  |
+| `d`                                   | Delete the selected comment after confirmation |
 | `?`                                   | Show all keyboard shortcuts              |
 | `q`                                   | Finish review (Approve when no unresolved comments remain) |
 

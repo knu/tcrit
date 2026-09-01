@@ -2303,6 +2303,69 @@ func TestEditModalDeletesOwnCurrentRoundParent(t *testing.T) {
 	}
 }
 
+func TestDeleteKeyDeletesSelectedSidebarCommentAfterConfirmation(t *testing.T) {
+	comment := testComment()
+	comment.Author = "Tester"
+	comment.ReviewRound = 1
+	app, _ := newFinishTestApp(t, []review.Comment{comment}, false)
+	app.focused = commentPane
+	app.updateCommentSidebar()
+
+	app = pressKey(app, 'd')
+	if app.modal != deleteConfirmModal || app.editingID != comment.ID {
+		t.Fatalf("modal = %v, editing ID = %q; want delete confirmation for %q",
+			app.modal, app.editingID, comment.ID)
+	}
+	app = pressKey(app, 'n')
+	if app.modal != noModal || app.editingID != "" || len(app.tabs[0].state.Comments) != 1 {
+		t.Fatalf("cancel left modal = %v, editing ID = %q, comments = %+v",
+			app.modal, app.editingID, app.tabs[0].state.Comments)
+	}
+
+	app = pressKey(app, 'd')
+	app = pressKey(app, 'y')
+	if app.modal != noModal || len(app.tabs[0].state.Comments) != 0 {
+		t.Fatalf("modal = %v, comments = %+v; want selected comment deleted",
+			app.modal, app.tabs[0].state.Comments)
+	}
+}
+
+func TestDeleteKeyDeletesFocusedInlineCommentAfterConfirmation(t *testing.T) {
+	comment := testComment()
+	comment.Author = "Tester"
+	comment.ReviewRound = 1
+	app, _ := newFinishTestApp(t, []review.Comment{comment}, false)
+	app.focused = contentPane
+	app.tabs[0].cursorLine = comment.EndAt()
+	app.tabs[0].cursorOnAnnotation = true
+	app.tabs[0].cursorAnnoIdx = 0
+
+	app = pressKey(app, 'd')
+	if app.modal != deleteConfirmModal {
+		t.Fatalf("modal = %v, want delete confirmation", app.modal)
+	}
+	app = pressKey(app, 'y')
+	if len(app.tabs[0].state.Comments) != 0 || app.tabs[0].cursorOnAnnotation {
+		t.Fatalf("comments = %+v, annotation focus = %t; want focused comment deleted",
+			app.tabs[0].state.Comments, app.tabs[0].cursorOnAnnotation)
+	}
+}
+
+func TestDeleteKeyIgnoresIneligibleSelectedComment(t *testing.T) {
+	comment := testComment()
+	comment.Author = "another reviewer"
+	comment.ReviewRound = 1
+	app, _ := newFinishTestApp(t, []review.Comment{comment}, false)
+	app.focused = commentPane
+	app.updateCommentSidebar()
+
+	app = pressKey(app, 'd')
+	if app.modal != noModal || app.editingID != "" || len(app.tabs[0].state.Comments) != 1 {
+		t.Fatalf("modal = %v, editing ID = %q, comments = %+v; want no action",
+			app.modal, app.editingID, app.tabs[0].state.Comments)
+	}
+}
+
 func TestEditModalDeletesOnlyOwnCurrentRoundReply(t *testing.T) {
 	comment := testComment()
 	comment.Author = "Tester"
