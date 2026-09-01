@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Deleted-line comments** — select and comment on removed lines with the keyboard or mouse, including lines in fully deleted files
+
 ## 0.6.0
 
 ### Added

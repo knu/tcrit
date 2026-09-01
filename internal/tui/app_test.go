@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -976,21 +977,207 @@ func TestMouseClickFocusesScrolledCodeLine(t *testing.T) {
 	}
 }
 
-func TestMouseClickDeletedLineFocusesFollowingCodeLine(t *testing.T) {
+func TestMouseClickDeletedLineFocusesDeletedLine(t *testing.T) {
 	app := setupAppWithDoc(t, "first\nsecond\nthird\n")
 	app.width = 100
 	app.contentViewport.SetWidth(75)
 	app.tabs[0].deletedAfter = map[int][]gitpkg.DeletedLine{
 		1: {{OldLineNum: 2, Content: "deleted"}},
 	}
+	app.tabs[0].cursorLine = 1
 	app.rebuildContent()
 
 	x, y := contentScreenPoint(app, 10, 1)
 	app = clickMouse(app, x, y)
 
-	if app.tab().cursorLine != 2 || app.tab().cursorOnAnnotation {
-		t.Fatalf("line = %d, annotation = %t; want following line 2",
-			app.tab().cursorLine, app.tab().cursorOnAnnotation)
+	if app.tab().cursorLine != 2 || app.tab().cursorSide != "old" || app.tab().cursorOnAnnotation {
+		t.Fatalf("line = %d/%s, annotation = %t; want deleted line 2",
+			app.tab().cursorLine, app.tab().cursorSide, app.tab().cursorOnAnnotation)
+	}
+}
+
+func TestKeyboardCommentsDeletedLineRange(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nfourth\n")
+	app.width = 100
+	app.contentViewport.SetWidth(75)
+	app.commentViewport.SetWidth(25)
+	app.commentViewport.SetHeight(10)
+	app.tabs[0].deletedAfter = map[int][]gitpkg.DeletedLine{
+		1: {
+			{OldLineNum: 2, Content: "second"},
+			{OldLineNum: 3, Content: "third"},
+		},
+	}
+	app.tabs[0].cursorLine = 1
+	app.rebuildContent()
+
+	app = pressKey(app, 'j')
+	if app.tab().cursorLine != 2 || app.tab().cursorSide != "old" {
+		t.Fatalf("cursor = %d/%s, want deleted line 2", app.tab().cursorLine, app.tab().cursorSide)
+	}
+	app = pressKey(app, 'v')
+	app = pressKey(app, 'j')
+	app = pressKey(app, tea.KeyEnter)
+	if app.modal != commentModal || app.canSuggest() {
+		t.Fatalf("modal = %v, can suggest = %t; want deleted-line comment without Suggest", app.modal, app.canSuggest())
+	}
+	app.modalTextarea.SetValue("restore this logic")
+	app.modalSubmit()
+
+	if len(app.tab().state.Comments) != 1 {
+		t.Fatalf("comments = %+v, want one", app.tab().state.Comments)
+	}
+	c := app.tab().state.Comments[0]
+	if c.Side != "old" || c.StartLine != 2 || c.EndLine != 3 || c.Anchor != "second\nthird" {
+		t.Fatalf("comment = %+v, want old lines 2-3 with deleted anchor", c)
+	}
+}
+
+func TestLineCommentCritJSONCompatibility(t *testing.T) {
+	tests := []struct {
+		name    string
+		side    string
+		start   int
+		end     int
+		anchor  string
+		deleted map[int][]gitpkg.DeletedLine
+		changed map[int]bool
+	}{
+		{name: "added line", start: 1, end: 1, anchor: "first", changed: map[int]bool{1: true}},
+		{name: "added range", start: 1, end: 2, anchor: "first\nsecond", changed: map[int]bool{1: true, 2: true}},
+		{name: "deleted line", side: "old", start: 2, end: 2, anchor: "removed", deleted: map[int][]gitpkg.DeletedLine{
+			1: {{OldLineNum: 2, Content: "removed"}},
+		}},
+		{name: "deleted range", side: "old", start: 2, end: 3, anchor: "removed\nalso removed", deleted: map[int][]gitpkg.DeletedLine{
+			1: {
+				{OldLineNum: 2, Content: "removed"},
+				{OldLineNum: 3, Content: "also removed"},
+			},
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := setupAppWithDoc(t, "first\nsecond\n")
+			app.tabs[0].deletedAfter = tt.deleted
+			app.tabs[0].changedLines = tt.changed
+			app.tabs[0].cursorLine = tt.end
+			app.tabs[0].cursorSide = tt.side
+			if tt.start != tt.end {
+				app.tabs[0].selecting = true
+				app.tabs[0].selectAnchor = tt.start
+				app.tabs[0].selectSide = tt.side
+			}
+			app.openLineComment()
+			app.modalTextarea.SetValue("review note")
+			app.modalSubmit()
+
+			data, err := json.Marshal(app.tab().state.Comments[0])
+			if err != nil {
+				t.Fatalf("marshaling comment: %v", err)
+			}
+			var wire map[string]any
+			if err := json.Unmarshal(data, &wire); err != nil {
+				t.Fatalf("unmarshaling comment: %v", err)
+			}
+			if got := int(wire["start_line"].(float64)); got != tt.start {
+				t.Errorf("start_line = %d, want %d", got, tt.start)
+			}
+			if got := int(wire["end_line"].(float64)); got != tt.end {
+				t.Errorf("end_line = %d, want %d", got, tt.end)
+			}
+			if got := wire["anchor"]; got != tt.anchor {
+				t.Errorf("anchor = %q, want %q", got, tt.anchor)
+			}
+			gotSide, hasSide := wire["side"]
+			if tt.side == "" && hasSide {
+				t.Errorf("new-side JSON contains side = %q, want omitted", gotSide)
+			}
+			if tt.side == "old" && gotSide != "old" {
+				t.Errorf("old-side JSON side = %q, want old", gotSide)
+			}
+		})
+	}
+}
+
+func TestMouseDragSelectsDeletedLineRange(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nfourth\n")
+	app.width = 100
+	app.height = 20
+	app.recalculateLayout()
+	app.tabs[0].deletedAfter = map[int][]gitpkg.DeletedLine{
+		1: {
+			{OldLineNum: 2, Content: "second"},
+			{OldLineNum: 3, Content: "third"},
+		},
+	}
+	app.tabs[0].cursorLine = 1
+	app.rebuildContent()
+	left, top, _, _ := app.contentBounds()
+	startY := top + app.contentLayout.oldRanges[2].start
+	endY := top + app.contentLayout.oldRanges[3].start
+
+	app = pressMouse(app, left, startY)
+	app = moveMouse(app, left, endY)
+	app = releaseMouse(app, left, endY)
+
+	start, end := app.selectionRange()
+	if app.modal != commentModal || app.selectionSide() != "old" || start != 2 || end != 3 {
+		t.Fatalf("modal = %v, selection = %s:%d-%d; want old:2-3 comment",
+			app.modal, app.selectionSide(), start, end)
+	}
+}
+
+func TestOldSideCommentRendersAfterDeletedLine(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nthird\n")
+	app.width = 100
+	app.contentViewport.SetWidth(75)
+	app.commentViewport.SetWidth(25)
+	app.commentViewport.SetHeight(10)
+	app.tabs[0].deletedAfter = map[int][]gitpkg.DeletedLine{
+		1: {{OldLineNum: 2, Content: "second"}},
+	}
+	app.tabs[0].state.Comments = []review.Comment{{
+		ID: "c_old", Side: "old", StartLine: 2, EndLine: 2, Body: "deleted comment",
+	}}
+	app.updateCommentSidebar()
+	app.rebuildContent()
+
+	r := app.contentLayout.oldRanges[2]
+	if r.end-r.start < 2 {
+		t.Fatalf("deleted line occupies %d row(s), want inline annotation", r.end-r.start)
+	}
+	if got := ansi.Strip(app.contentViewport.View()); !strings.Contains(got, "deleted comment") {
+		t.Fatalf("content = %q, want old-side annotation", got)
+	}
+	if got := ansi.Strip(app.commentViewport.View()); !strings.Contains(got, "L2 (deleted)") {
+		t.Fatalf("sidebar = %q, want deleted-side label", got)
+	}
+}
+
+func TestDeletedFileRendersSelectableLines(t *testing.T) {
+	app := NewApp("deleted.go", AppConfig{})
+	app.tabs[0].doc = &document.Document{Path: "deleted.go"}
+	app.tabs[0].isDeleted = true
+	app.tabs[0].deletedAfter = map[int][]gitpkg.DeletedLine{
+		0: {
+			{OldLineNum: 1, Content: "package deleted"},
+			{OldLineNum: 2, Content: "var removed = true"},
+		},
+	}
+	app.tabs[0].cursorLine = 1
+	app.tabs[0].cursorSide = "old"
+	app.contentViewport.SetWidth(75)
+	app.contentViewport.SetHeight(10)
+	app.rebuildContent()
+
+	content := ansi.Strip(app.contentViewport.View())
+	if !strings.Contains(content, "package deleted") || !strings.Contains(content, "var removed = true") {
+		t.Fatalf("content = %q, want deleted file contents", content)
+	}
+	app = pressKey(app, 'j')
+	if app.tab().cursorLine != 2 || app.tab().cursorSide != "old" {
+		t.Fatalf("cursor = %d/%s, want deleted line 2", app.tab().cursorLine, app.tab().cursorSide)
 	}
 }
 
@@ -1510,9 +1697,12 @@ func TestDeletedMarkdownLinesWrap(t *testing.T) {
 		t.Fatalf("expected deleted Markdown line to wrap, got %d display line", len(lines))
 	}
 	app.rebuildContent()
-	r := app.contentLayout.lineRanges[1]
-	if got := r.end - r.start; got != len(lines)+1 {
-		t.Errorf("line range has %d rows, want %d deletion and source rows", got, len(lines)+1)
+	oldRange := app.contentLayout.oldRanges[1]
+	if got := oldRange.end - oldRange.start; got != len(lines) {
+		t.Errorf("deleted line range has %d rows, want %d", got, len(lines))
+	}
+	if got := app.contentLayout.lineRanges[1].end - app.contentLayout.lineRanges[1].start; got != 1 {
+		t.Errorf("source line range has %d rows, want 1", got)
 	}
 }
 

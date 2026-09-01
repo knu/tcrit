@@ -13,6 +13,7 @@
 - **CritJSON review state and CLI** — comments use [Crit](https://crit.md/)-compatible `review.json` data, with `tcrit comment` and `tcrit comments` for automation.
 - **File-level comments** — reviewers can press `f` to comment on the active file, with file threads kept in the comment sidebar instead of attached to a line.
 - **Comment editing tools** — `ctrl+y` inserts GitHub-compatible suggestions for selected or anchored lines, including replies, while `ctrl+o` edits comment and reply bodies in `$EDITOR`.
+- **Deleted-line comments** — removed lines, including lines in fully deleted files, can be selected and commented on from the keyboard or gutter.
 - **Mouse-first TUI controls** — click file tabs, code lines, comment threads, sidebar items, dialog actions, and the review-finish button; use the wheel to scroll code and drag the gutter to select line ranges.
 - **Versioned plan reviews** — `tcrit plan` saves immutable revisions and carries comment threads forward as the plan changes.
 - **Richer review lifecycle** — comment threads can be replied to, resolved, reopened, and approved together; resolved threads collapse out of the active comment view, while comments and changes can be navigated across files.
@@ -193,7 +194,7 @@ Tcrit resolves the tmux server and pane from the invoking process tree, so this 
 
 | Key                                   | Action                                   |
 |---------------------------------------|------------------------------------------|
-| `j` / `k`                             | Scroll down / up                         |
+| `j` / `k`                             | Move down / up through current and deleted lines |
 | `ctrl+d` / `ctrl+u` / `PgDn` / `PgUp` | Half page down / up                      |
 | `g` / `G` / `Home` / `End`            | Jump to top / bottom                     |
 | `enter`                               | Add comment at current line              |
@@ -225,7 +226,7 @@ Tcrit resolves the tmux server and pane from the invoking process tree, so this 
 
 - Click a file tab, code line, inline comment, sidebar, or sidebar comment to focus it.
 - Scroll code with the mouse wheel.
-- Hover over the `+`/`-` gutter to reveal a yellow `>` comment marker, then click to comment on that line or drag to select multiple lines.  Dragging to the top or bottom edge scrolls one line at a time.
+- Hover over the `+`/`-` gutter to reveal a yellow `>` comment marker, then click to comment on a current or deleted line, or drag to select multiple lines on the same diff side.  Dragging to the top or bottom edge scrolls one line at a time.
 - Click inside a comment text box to focus it and position the cursor, or use the mouse wheel to move through longer comments.
 - Click actions in comment and finish dialogs, including **Close**.  The footer **Approve** / **Finish Review** button opens the finish dialog.
 

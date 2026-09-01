@@ -101,6 +101,7 @@ type AppModel struct {
 	modalTextarea     textarea.Model
 	mouseSelecting    bool
 	hoveredGutterLine int
+	hoveredGutterSide string
 	contentLayout     renderedContentLayout
 	sidebarTargets    []int
 
@@ -136,6 +137,7 @@ func (r mouseRect) contains(mouse tea.Mouse) bool {
 type renderedContentLayout struct {
 	rows       []contentMouseTarget
 	lineRanges map[int]renderedRange
+	oldRanges  map[int]renderedRange
 }
 
 type renderedScreenLayout struct {
@@ -145,7 +147,10 @@ type renderedScreenLayout struct {
 }
 
 func newRenderedContentLayout() renderedContentLayout {
-	return renderedContentLayout{lineRanges: make(map[int]renderedRange)}
+	return renderedContentLayout{
+		lineRanges: make(map[int]renderedRange),
+		oldRanges:  make(map[int]renderedRange),
+	}
 }
 
 func (l *renderedContentLayout) appendBlock(b *strings.Builder, block string, target contentMouseTarget) {
@@ -159,12 +164,16 @@ func (l *renderedContentLayout) appendBlock(b *strings.Builder, block string, ta
 	if target.line <= 0 {
 		return
 	}
-	r, ok := l.lineRanges[target.line]
+	ranges := l.lineRanges
+	if target.side == "old" {
+		ranges = l.oldRanges
+	}
+	r, ok := ranges[target.line]
 	if !ok {
 		r.start = start
 	}
 	r.end = len(l.rows)
-	l.lineRanges[target.line] = r
+	ranges[target.line] = r
 }
 
 // tab returns the active FileTab. Panics if no tabs exist.
@@ -213,7 +222,7 @@ func NewCodeReviewApp(files []gitpkg.FileChange, ref string, cfg AppConfig) AppM
 	tabs := make([]FileTab, 0, len(sortedFiles))
 	for _, f := range sortedFiles {
 		var diff *gitpkg.DiffInfo
-		if f.Status != gitpkg.StatusDeleted && f.Status != gitpkg.StatusBinary {
+		if f.Status != gitpkg.StatusBinary {
 			diff, _ = gitpkg.DiffFile(f.Path, ref)
 		}
 		ft := newFileTab(f.Path, diff)
@@ -274,6 +283,70 @@ func (m *AppModel) selectionRange() (int, int) {
 	return start, end
 }
 
+func (m *AppModel) selectionSide() string {
+	t := m.tab()
+	if t.selecting {
+		return t.selectSide
+	}
+	return t.cursorSide
+}
+
+type lineRef struct {
+	side string
+	line int
+}
+
+func (m *AppModel) visualLines(t *FileTab) []lineRef {
+	if t.doc == nil {
+		return nil
+	}
+	lines := make([]lineRef, 0, t.doc.LineCount()+len(t.deletedAfter))
+	for line := 1; line <= t.doc.LineCount(); line++ {
+		for _, del := range t.deletedAfter[line-1] {
+			lines = append(lines, lineRef{side: "old", line: del.OldLineNum})
+		}
+		lines = append(lines, lineRef{line: line})
+	}
+	for _, del := range t.deletedAfter[t.doc.LineCount()] {
+		lines = append(lines, lineRef{side: "old", line: del.OldLineNum})
+	}
+	return lines
+}
+
+func (m *AppModel) adjacentLine(t *FileTab, step int) (lineRef, bool) {
+	lines := m.visualLines(t)
+	for i, ref := range lines {
+		if ref.line != t.cursorLine || ref.side != t.cursorSide {
+			continue
+		}
+		next := i + step
+		if next >= 0 && next < len(lines) {
+			return lines[next], true
+		}
+		break
+	}
+	return lineRef{}, false
+}
+
+func (m *AppModel) visualLineIndex(t *FileTab, target lineRef) int {
+	for i, ref := range m.visualLines(t) {
+		if ref == target {
+			return i
+		}
+	}
+	return -1
+}
+
+func (m *AppModel) moveCursorBy(t *FileTab, step, count int) {
+	for range count {
+		next, ok := m.adjacentLine(t, step)
+		if !ok || (t.selecting && next.side != t.selectSide) {
+			return
+		}
+		t.cursorLine, t.cursorSide = next.line, next.side
+	}
+}
+
 func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.BackgroundColorMsg:
@@ -299,7 +372,15 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for i := range m.tabs {
 			t := &m.tabs[i]
 			t.state = &fileReview{Comments: m.sessionComments(t.path)}
-			if t.isBinary || t.isDeleted {
+			if t.isBinary {
+				continue
+			}
+			if t.isDeleted {
+				t.doc = &document.Document{Path: t.path}
+				t.ensureHighlightCache()
+				if lines := m.visualLines(t); len(lines) > 0 {
+					t.cursorLine, t.cursorSide = lines[0].line, lines[0].side
+				}
 				continue
 			}
 			doc, _ := document.Load(t.path)
@@ -356,6 +437,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.hoveredGutterLine != 0 {
 		m.hoveredGutterLine = 0
+		m.hoveredGutterSide = ""
 		m.rebuildContent()
 	}
 	if m.modal == helpModal {
@@ -430,6 +512,7 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			} else {
 				t.selecting = true
 				t.selectAnchor = t.cursorLine
+				t.selectSide = t.cursorSide
 			}
 			m.rebuildContent()
 			return m, nil
@@ -505,23 +588,23 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		switch {
 		case key.Matches(msg, keys.Down):
 			if t.cursorOnAnnotation {
-				anns := m.annotationsAfterLine(t.cursorLine)
+				anns := m.annotationsAfterLine(t.cursorLine, t.cursorSide)
 				if t.cursorAnnoIdx < len(anns)-1 {
 					t.cursorAnnoIdx++
 				} else {
 					t.cursorOnAnnotation = false
 					t.cursorAnnoIdx = 0
-					if t.cursorLine < t.doc.LineCount() {
-						t.cursorLine++
+					if next, ok := m.adjacentLine(t, 1); ok && (!t.selecting || next.side == t.selectSide) {
+						t.cursorLine, t.cursorSide = next.line, next.side
 					}
 				}
 			} else {
-				anns := m.annotationsAfterLine(t.cursorLine)
+				anns := m.annotationsAfterLine(t.cursorLine, t.cursorSide)
 				if len(anns) > 0 {
 					t.cursorOnAnnotation = true
 					t.cursorAnnoIdx = 0
-				} else if t.cursorLine < t.doc.LineCount() {
-					t.cursorLine++
+				} else if next, ok := m.adjacentLine(t, 1); ok && (!t.selecting || next.side == t.selectSide) {
+					t.cursorLine, t.cursorSide = next.line, next.side
 				}
 			}
 			moved = true
@@ -534,15 +617,14 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 					t.cursorAnnoIdx = 0
 				}
 			} else {
-				prevLine := t.cursorLine - 1
-				if prevLine >= 1 {
-					anns := m.annotationsAfterLine(prevLine)
+				if prev, ok := m.adjacentLine(t, -1); ok && (!t.selecting || prev.side == t.selectSide) {
+					anns := m.annotationsAfterLine(prev.line, prev.side)
 					if len(anns) > 0 {
-						t.cursorLine = prevLine
+						t.cursorLine, t.cursorSide = prev.line, prev.side
 						t.cursorOnAnnotation = true
 						t.cursorAnnoIdx = len(anns) - 1
 					} else {
-						t.cursorLine = prevLine
+						t.cursorLine, t.cursorSide = prev.line, prev.side
 					}
 				}
 			}
@@ -551,33 +633,32 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			t.cursorOnAnnotation = false
 			t.cursorAnnoIdx = 0
 			jump := m.contentViewport.Height() / 2
-			t.cursorLine += jump
-			if t.cursorLine > t.doc.LineCount() {
-				t.cursorLine = t.doc.LineCount()
-			}
+			m.moveCursorBy(t, 1, jump)
 			moved = true
 		case key.Matches(msg, keys.HalfPageUp):
 			t.cursorOnAnnotation = false
 			t.cursorAnnoIdx = 0
 			jump := m.contentViewport.Height() / 2
-			t.cursorLine -= jump
-			if t.cursorLine < 1 {
-				t.cursorLine = 1
-			}
+			m.moveCursorBy(t, -1, jump)
 			moved = true
 		case key.Matches(msg, keys.Top):
 			t.cursorOnAnnotation = false
 			t.cursorAnnoIdx = 0
-			t.cursorLine = 1
+			if lines := m.visualLines(t); len(lines) > 0 && (!t.selecting || lines[0].side == t.selectSide) {
+				t.cursorLine, t.cursorSide = lines[0].line, lines[0].side
+			}
 			moved = true
 		case key.Matches(msg, keys.Bottom):
 			t.cursorOnAnnotation = false
 			t.cursorAnnoIdx = 0
-			t.cursorLine = t.doc.LineCount()
+			if lines := m.visualLines(t); len(lines) > 0 && (!t.selecting || lines[len(lines)-1].side == t.selectSide) {
+				last := lines[len(lines)-1]
+				t.cursorLine, t.cursorSide = last.line, last.side
+			}
 			moved = true
 		case key.Matches(msg, keys.Resolve):
 			if t.cursorOnAnnotation {
-				anns := m.annotationsAfterLine(t.cursorLine)
+				anns := m.annotationsAfterLine(t.cursorLine, t.cursorSide)
 				if t.cursorAnnoIdx < len(anns) {
 					m.toggleResolve(anns[t.cursorAnnoIdx].id)
 				}
@@ -585,7 +666,7 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 		case key.Matches(msg, keys.Confirm):
 			if t.cursorOnAnnotation {
-				anns := m.annotationsAfterLine(t.cursorLine)
+				anns := m.annotationsAfterLine(t.cursorLine, t.cursorSide)
 				if t.cursorAnnoIdx < len(anns) {
 					m.openCommentThread(anns[t.cursorAnnoIdx].id)
 					return m, nil
@@ -629,8 +710,8 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.rebuildContent()
 			sel := t.sidebarItems[t.sidebarCursor]
 			if sel.scope != "file" {
-				t.cursorLine = sel.line
-				m.scrollToAnnotation(sel.line, sel.endLine)
+				t.cursorLine, t.cursorSide = sel.line, sel.side
+				m.scrollToAnnotation(sel.side, sel.line, sel.endLine)
 			}
 			return m, nil
 		}
@@ -754,12 +835,14 @@ func (m *AppModel) modalSubmit() {
 		}
 	case commentModal:
 		startLine, endLine := m.selectionRange()
+		side := m.selectionSide()
 		now := review.Now()
 		c := review.Comment{
 			ID:        review.RandomCommentID(),
 			StartLine: startLine,
 			EndLine:   endLine,
-			Anchor:    m.anchorText(t, startLine, endLine),
+			Side:      side,
+			Anchor:    m.anchorText(t, side, startLine, endLine),
 			Body:      body,
 			Author:    m.author,
 			Scope:     "line",
@@ -980,11 +1063,27 @@ func (m *AppModel) sessionComments(path string) []review.Comment {
 
 // anchorText joins the full text of lines start..end as the comment's
 // drift-correction anchor.
-func (m *AppModel) anchorText(t *FileTab, start, end int) string {
+func (m *AppModel) anchorText(t *FileTab, side string, start, end int) string {
 	if t.doc == nil {
 		return ""
 	}
 	lines := make([]string, 0, end-start+1)
+	if side == "old" {
+		byLine := make(map[int]string)
+		for _, dels := range t.deletedAfter {
+			for _, del := range dels {
+				if del.OldLineNum >= start && del.OldLineNum <= end {
+					byLine[del.OldLineNum] = del.Content
+				}
+			}
+		}
+		for line := start; line <= end; line++ {
+			if content, ok := byLine[line]; ok {
+				lines = append(lines, content)
+			}
+		}
+		return strings.Join(lines, "\n")
+	}
 	for l := start; l <= end && l <= t.doc.LineCount(); l++ {
 		lines = append(lines, t.doc.LineAt(l))
 	}
@@ -996,7 +1095,7 @@ func (m *AppModel) insertSuggestion() {
 	if !ok {
 		return
 	}
-	code := m.anchorText(m.tab(), start, end)
+	code := m.anchorText(m.tab(), "", start, end)
 	if code == "" {
 		return
 	}
@@ -1011,6 +1110,9 @@ func (m *AppModel) insertSuggestion() {
 
 func (m *AppModel) suggestionRange() (int, int, bool) {
 	if m.modal == commentModal {
+		if m.selectionSide() == "old" {
+			return 0, 0, false
+		}
 		start, end := m.selectionRange()
 		return start, end, true
 	}
@@ -1022,7 +1124,7 @@ func (m *AppModel) suggestionRange() (int, int, bool) {
 		return 0, 0, false
 	}
 	for _, c := range t.state.Comments {
-		if c.ID == m.editingID && c.Scope != "file" && c.StartLine > 0 {
+		if c.ID == m.editingID && c.Scope != "file" && c.Side != "old" && c.StartLine > 0 {
 			return c.StartLine, c.EndAt(), true
 		}
 	}
@@ -1182,15 +1284,19 @@ func (m *AppModel) startNextRound() {
 	for i := range m.tabs {
 		t := &m.tabs[i]
 		comments := m.sessionComments(t.path)
-		if t.isBinary || t.isDeleted {
+		if t.isBinary {
 			t.state = &fileReview{Comments: comments}
 			continue
 		}
-		doc, _ := document.Load(t.path)
-		t.doc = doc
+		if t.isDeleted {
+			t.doc = &document.Document{Path: t.path}
+		} else {
+			doc, _ := document.Load(t.path)
+			t.doc = doc
+		}
 		t.chromaLines = nil
 		t.deletedLineCache = nil
-		if prev, ok := prevContents[t.path]; ok && t.doc != nil {
+		if prev, ok := prevContents[t.path]; ok && t.doc != nil && !t.isDeleted {
 			comments = review.CarryForwardFile(comments, prev, t.doc.Content, now)
 		}
 		t.state = &fileReview{Comments: comments}
@@ -1521,7 +1627,7 @@ func (m *AppModel) recalculateLayout() {
 
 // annotationsAfterLine returns annotations that render after the given line
 // (keyed by their endLine).
-func (m *AppModel) annotationsAfterLine(lineNum int) []annotation {
+func (m *AppModel) annotationsAfterLine(lineNum int, side string) []annotation {
 	t := m.tab()
 	if t.state == nil {
 		return nil
@@ -1531,7 +1637,7 @@ func (m *AppModel) annotationsAfterLine(lineNum int) []annotation {
 		if c.Scope == "file" {
 			continue
 		}
-		if c.EndAt() == lineNum {
+		if c.EndAt() == lineNum && c.Side == side {
 			anns = append(anns, newAnnotation(c))
 		}
 	}
@@ -1540,6 +1646,7 @@ func (m *AppModel) annotationsAfterLine(lineNum int) []annotation {
 
 type commentTarget struct {
 	line    int
+	side    string
 	annoIdx int
 }
 
@@ -1549,18 +1656,21 @@ func (m *AppModel) commentTargets(tabIndex int) []commentTarget {
 		return nil
 	}
 
-	indices := make(map[int]int)
+	indices := make(map[lineRef]int)
 	targets := make([]commentTarget, 0, len(t.state.Comments))
 	for _, c := range t.state.Comments {
 		if c.Scope == "file" {
 			continue
 		}
 		line := c.EndAt()
-		targets = append(targets, commentTarget{line: line, annoIdx: indices[line]})
-		indices[line]++
+		ref := lineRef{side: c.Side, line: line}
+		targets = append(targets, commentTarget{line: line, side: c.Side, annoIdx: indices[ref]})
+		indices[ref]++
 	}
 	sort.SliceStable(targets, func(i, j int) bool {
-		return targets[i].line < targets[j].line
+		ri := lineRef{side: targets[i].side, line: targets[i].line}
+		rj := lineRef{side: targets[j].side, line: targets[j].line}
+		return m.visualLineIndex(t, ri) < m.visualLineIndex(t, rj)
 	})
 	return targets
 }
@@ -1573,7 +1683,7 @@ func (m *AppModel) jumpToComment(step int) bool {
 	current := -1
 	if t.cursorOnAnnotation {
 		for i, target := range targets {
-			if target.line == t.cursorLine && target.annoIdx == t.cursorAnnoIdx {
+			if target.line == t.cursorLine && target.side == t.cursorSide && target.annoIdx == t.cursorAnnoIdx {
 				current = i
 				break
 			}
@@ -1588,14 +1698,14 @@ func (m *AppModel) jumpToComment(step int) bool {
 		}
 	} else if step > 0 {
 		for _, target := range targets {
-			if target.line >= t.cursorLine {
+			if m.visualLineIndex(t, lineRef{side: target.side, line: target.line}) >= m.visualLineIndex(t, lineRef{side: t.cursorSide, line: t.cursorLine}) {
 				m.selectComment(m.activeTab, target)
 				return true
 			}
 		}
 	} else {
 		for i := len(targets) - 1; i >= 0; i-- {
-			if targets[i].line <= t.cursorLine {
+			if m.visualLineIndex(t, lineRef{side: targets[i].side, line: targets[i].line}) <= m.visualLineIndex(t, lineRef{side: t.cursorSide, line: t.cursorLine}) {
 				m.selectComment(m.activeTab, targets[i])
 				return true
 			}
@@ -1621,7 +1731,7 @@ func (m *AppModel) jumpToComment(step int) bool {
 func (m *AppModel) selectComment(tabIndex int, target commentTarget) {
 	m.activeTab = tabIndex
 	t := m.tab()
-	t.cursorLine = target.line
+	t.cursorLine, t.cursorSide = target.line, target.side
 	t.cursorOnAnnotation = true
 	t.cursorAnnoIdx = target.annoIdx
 	m.rebuildContent()
@@ -1667,7 +1777,7 @@ func (m *AppModel) jumpToChange(step int) bool {
 func (m *AppModel) selectChange(tabIndex int, chunk changeChunk) {
 	m.activeTab = tabIndex
 	t := m.tab()
-	t.cursorLine = chunk.startLine
+	t.cursorLine, t.cursorSide = chunk.startLine, ""
 	t.cursorOnAnnotation = false
 	t.cursorAnnoIdx = 0
 	m.rebuildContent()
@@ -1681,6 +1791,7 @@ type sidebarItem struct {
 	scope   string
 	line    int
 	endLine int
+	side    string
 	body    string
 	author  string
 	replies []review.Reply
@@ -1692,6 +1803,7 @@ type annotation struct {
 	body     string
 	line     int
 	endLine  int
+	side     string
 	author   string
 	resolved bool
 	replies  []review.Reply
@@ -1700,7 +1812,7 @@ type annotation struct {
 func newAnnotation(c review.Comment) annotation {
 	return annotation{
 		id: c.ID, body: c.Body,
-		line: c.StartLine, endLine: c.EndLine,
+		line: c.StartLine, endLine: c.EndLine, side: c.Side,
 		author: c.Author, resolved: c.Resolved, replies: c.Replies,
 	}
 }
@@ -1727,44 +1839,50 @@ func (m *AppModel) rebuildContent() {
 		m.contentViewport.SetContent("\n  Binary file changed — cannot display content.\n")
 		return
 	}
-	if t.isDeleted {
-		m.contentViewport.SetContent("\n  File deleted.\n")
-		return
-	}
-
 	if t.doc == nil {
 		return
 	}
 
 	// Collect annotations keyed by the line they appear AFTER
 	annosByEndLine := make(map[int][]annotation)
+	oldAnnosByEndLine := make(map[int][]annotation)
 	if t.state != nil {
 		for _, c := range t.state.Comments {
 			if c.Scope == "file" {
 				continue
 			}
 			endAt := c.EndAt()
-			annosByEndLine[endAt] = append(annosByEndLine[endAt], newAnnotation(c))
+			if c.Side == "old" {
+				oldAnnosByEndLine[endAt] = append(oldAnnosByEndLine[endAt], newAnnotation(c))
+			} else {
+				annosByEndLine[endAt] = append(annosByEndLine[endAt], newAnnotation(c))
+			}
 		}
 	}
 
 	// Count how many comments cover each line (for overlap detection)
 	annotatedLines := make(map[int]int)
+	oldAnnotatedLines := make(map[int]int)
 	if t.state != nil {
 		for _, c := range t.state.Comments {
 			if c.Scope == "file" {
 				continue
 			}
+			lines := annotatedLines
+			if c.Side == "old" {
+				lines = oldAnnotatedLines
+			}
 			for l := c.StartLine; l <= c.EndAt(); l++ {
-				annotatedLines[l]++
+				lines[l]++
 			}
 		}
 	}
 
 	selStart, selEnd := m.selectionRange()
+	selSide := m.selectionSide()
 
 	// Determine which lines to highlight from the selected annotation.
-	sidebarHighlightStart, sidebarHighlightEnd := m.highlightedCommentLines()
+	sidebarHighlightStart, sidebarHighlightEnd, sidebarHighlightSide := m.highlightedCommentLines()
 
 	contentWidth := m.contentViewport.Width()
 	boxWidth := contentWidth - gutterWidth
@@ -1792,39 +1910,78 @@ func (m *AppModel) rebuildContent() {
 	var b strings.Builder
 	b.Grow(len(t.doc.Lines) * 200) // pre-allocate to reduce allocations
 	layout := newRenderedContentLayout()
+	renderDeleted := func(afterLine int) {
+		dels := t.deletedAfter[afterLine]
+		cachedHL := t.deletedLineCache[afterLine]
+		for di, del := range dels {
+			target := contentMouseTarget{line: del.OldLineNum, side: "old"}
+			isCursor := t.cursorSide == "old" && del.OldLineNum == t.cursorLine
+			isSelected := t.selecting && selSide == "old" && del.OldLineNum >= selStart && del.OldLineNum <= selEnd
+			isSidebarHighlight := sidebarHighlightSide == "old" && del.OldLineNum >= sidebarHighlightStart && del.OldLineNum <= sidebarHighlightEnd
+
+			marker := diffDeletedGutter.Render("-")
+			switch {
+			case del.OldLineNum == m.hoveredGutterLine && m.hoveredGutterSide == "old":
+				marker = commentGutterMarker.Render(">")
+			case isCursor && !t.cursorOnAnnotation:
+				marker = cursorMarker.Render(">")
+			case isSelected:
+				marker = selectedMarker.Render("|")
+			case isSidebarHighlight:
+				marker = cursorMarker.Render(">")
+			case oldAnnotatedLines[del.OldLineNum] > 1:
+				marker = gutterOverlap.Render("◆")
+			case oldAnnotatedLines[del.OldLineNum] == 1:
+				marker = annotationGutter.Render("■")
+			}
+
+			numStyle := diffDeletedLineNum
+			if isCursor {
+				numStyle = cursorLineNumStyle
+			} else if isSelected {
+				numStyle = selectedLineNumStyle
+			}
+			num := numStyle.Render(fmt.Sprintf("%d", del.OldLineNum))
+			var cached string
+			if di < len(cachedHL) {
+				cached = cachedHL[di]
+			}
+			for wi, content := range deletedDisplayLines(del.Content, cached, del.Inline, isMarkdown, textWidth) {
+				if isSelected {
+					content = inlineBackground(selectedLineBg, ansi.Strip(content))
+				} else if isSidebarHighlight {
+					content = inlineBackground(sidebarHighlightBg, ansi.Strip(content))
+				}
+				if wi == 0 {
+					layout.appendBlock(&b, fmt.Sprintf("%s%s %s", marker, num, content), target)
+				} else {
+					layout.appendBlock(&b, fmt.Sprintf(" %s %s", continuationGutter, content), target)
+				}
+			}
+			for idx, ann := range oldAnnosByEndLine[del.OldLineNum] {
+				focused := m.focused == contentPane && t.cursorOnAnnotation && isCursor && t.cursorAnnoIdx == idx
+				layout.appendBlock(&b, m.renderAnnotationBox(ann, boxWidth, focused), contentMouseTarget{
+					line: del.OldLineNum, side: "old", annotation: true, annotationIndex: idx,
+				})
+			}
+		}
+	}
 	for i, line := range t.doc.Lines {
 		lineNum := i + 1
 		lineTarget := contentMouseTarget{line: lineNum}
 
 		// Render deleted lines that appear before this line
-		if dels, ok := t.deletedAfter[lineNum-1]; ok {
-			cachedHL := t.deletedLineCache[lineNum-1]
-			for di, del := range dels {
-				var cached string
-				if cachedHL != nil && di < len(cachedHL) {
-					cached = cachedHL[di]
-				}
-				for wi, delContent := range deletedDisplayLines(del.Content, cached, del.Inline, isMarkdown, textWidth) {
-					if wi == 0 {
-						delMarker := diffDeletedGutter.Render("-")
-						delNum := diffDeletedLineNum.Render(fmt.Sprintf("%d", del.OldLineNum))
-						layout.appendBlock(&b, fmt.Sprintf("%s%s %s", delMarker, delNum, delContent), lineTarget)
-					} else {
-						layout.appendBlock(&b, fmt.Sprintf(" %s %s", continuationGutter, delContent), lineTarget)
-					}
-				}
-			}
-		}
+		renderDeleted(lineNum - 1)
 
-		isCursor := lineNum == t.cursorLine
-		isSelected := t.selecting && lineNum >= selStart && lineNum <= selEnd
-		isSidebarHighlight := sidebarHighlightStart > 0 && lineNum >= sidebarHighlightStart && lineNum <= sidebarHighlightEnd
+		isCursor := t.cursorSide == "" && lineNum == t.cursorLine
+		isSelected := t.selecting && selSide == "" && lineNum >= selStart && lineNum <= selEnd
+		isSidebarHighlight := sidebarHighlightSide == "" && sidebarHighlightStart > 0 && lineNum >= sidebarHighlightStart && lineNum <= sidebarHighlightEnd
 		isChanged := t.changedLines != nil && t.changedLines[lineNum]
 		inlineChanges := t.inlineChanges[lineNum]
 
 		// Marker column
 		var marker string
-		if lineNum == m.hoveredGutterLine {
+		if lineNum == m.hoveredGutterLine && m.hoveredGutterSide == "" {
 			marker = commentGutterMarker.Render(">")
 		} else if isCursor && !t.cursorOnAnnotation {
 			marker = cursorMarker.Render(">")
@@ -1919,13 +2076,14 @@ func (m *AppModel) rebuildContent() {
 		// Render inline annotations after this line
 		if anns, ok := annosByEndLine[lineNum]; ok {
 			for idx, ann := range anns {
-				focused := m.focused == contentPane && t.cursorOnAnnotation && t.cursorLine == lineNum && t.cursorAnnoIdx == idx
+				focused := m.focused == contentPane && t.cursorOnAnnotation && t.cursorSide == "" && t.cursorLine == lineNum && t.cursorAnnoIdx == idx
 				layout.appendBlock(&b, m.renderAnnotationBox(ann, boxWidth, focused), contentMouseTarget{
 					line: lineNum, annotation: true, annotationIndex: idx,
 				})
 			}
 		}
 	}
+	renderDeleted(t.doc.LineCount())
 
 	m.contentLayout = layout
 	m.contentViewport.SetContent(b.String())
@@ -1938,6 +2096,9 @@ func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused boo
 		lineLabel = fmt.Sprintf("L%d-%d", ann.line, ann.endLine)
 	} else {
 		lineLabel = fmt.Sprintf("L%d", ann.line)
+	}
+	if ann.side == "old" {
+		lineLabel += " (deleted)"
 	}
 
 	var boxContent strings.Builder
@@ -2270,7 +2431,7 @@ func (m *AppModel) scrollToCursor() {
 	if t.doc == nil {
 		return
 	}
-	r, ok := m.contentLayout.lineRanges[t.cursorLine]
+	r, ok := m.contentRenderedRange(t.cursorSide, t.cursorLine, t.cursorLine)
 	if !ok {
 		return
 	}
@@ -2304,7 +2465,7 @@ func (m *AppModel) scrollToChunk(chunk changeChunk) {
 	if endLine > t.doc.LineCount() {
 		endLine = t.doc.LineCount()
 	}
-	r, ok := m.contentRenderedRange(startLine, endLine)
+	r, ok := m.contentRenderedRange("", startLine, endLine)
 	if !ok {
 		return
 	}
@@ -2312,7 +2473,7 @@ func (m *AppModel) scrollToChunk(chunk changeChunk) {
 	m.contentViewport.SetYOffset(r.start)
 }
 
-func (m *AppModel) scrollToAnnotation(startLine, endLine int) {
+func (m *AppModel) scrollToAnnotation(side string, startLine, endLine int) {
 	t := m.tab()
 	if t.doc == nil {
 		return
@@ -2321,7 +2482,7 @@ func (m *AppModel) scrollToAnnotation(startLine, endLine int) {
 		endLine = startLine
 	}
 
-	r, ok := m.contentRenderedRange(startLine, endLine)
+	r, ok := m.contentRenderedRange(side, startLine, endLine)
 	if !ok {
 		return
 	}
@@ -2339,9 +2500,13 @@ func (m *AppModel) scrollToAnnotation(startLine, endLine int) {
 	m.contentViewport.SetYOffset(offset)
 }
 
-func (m *AppModel) contentRenderedRange(startLine, endLine int) (renderedRange, bool) {
-	start, startOK := m.contentLayout.lineRanges[startLine]
-	end, endOK := m.contentLayout.lineRanges[endLine]
+func (m *AppModel) contentRenderedRange(side string, startLine, endLine int) (renderedRange, bool) {
+	ranges := m.contentLayout.lineRanges
+	if side == "old" {
+		ranges = m.contentLayout.oldRanges
+	}
+	start, startOK := ranges[startLine]
+	end, endOK := ranges[endLine]
 	if !startOK || !endOK {
 		return renderedRange{}, false
 	}
@@ -2362,7 +2527,7 @@ func (m *AppModel) updateCommentSidebar() {
 		}
 		t.sidebarItems = append(t.sidebarItems, sidebarItem{
 			id: c.ID, scope: c.Scope, line: c.StartLine, endLine: c.EndLine,
-			body: c.Body, author: c.Author, replies: c.Replies,
+			side: c.Side, body: c.Body, author: c.Author, replies: c.Replies,
 		})
 	}
 	sort.SliceStable(t.sidebarItems, func(i, j int) bool {
@@ -2405,6 +2570,9 @@ func (m *AppModel) updateCommentSidebar() {
 			lineInfo = fmt.Sprintf("L%d-%d", it.line, it.endLine)
 		} else {
 			lineInfo = fmt.Sprintf("L%d", it.line)
+		}
+		if it.side == "old" {
+			lineInfo += " (deleted)"
 		}
 		lineInfo = commentLineStyle.Render(lineInfo)
 		if it.author != "" {
@@ -2499,9 +2667,17 @@ func (m AppModel) renderHeader() string {
 	if t.selecting {
 		start, end := m.selectionRange()
 		selLabel := visualModeIndicator.Render("VISUAL")
-		suffix = fmt.Sprintf("  %s L%d-%d", selLabel, start, end)
+		deleted := ""
+		if m.selectionSide() == "old" {
+			deleted = " (deleted)"
+		}
+		suffix = fmt.Sprintf("  %s L%d-%d%s", selLabel, start, end, deleted)
 	} else if t.doc != nil {
-		suffix = fmt.Sprintf("  %d comments  L%d/%d", commentCount, t.cursorLine, t.doc.LineCount())
+		if t.cursorSide == "old" {
+			suffix = fmt.Sprintf("  %d comments  L%d (deleted)", commentCount, t.cursorLine)
+		} else {
+			suffix = fmt.Sprintf("  %d comments  L%d/%d", commentCount, t.cursorLine, t.doc.LineCount())
+		}
 	} else {
 		suffix = fmt.Sprintf("  %d comments", commentCount)
 	}
@@ -2751,6 +2927,7 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 		return m, nil
 	}
 	m.hoveredGutterLine = 0
+	m.hoveredGutterSide = ""
 	if m.isTextModal() {
 		return m.handleTextModalMouse(mouse)
 	}
@@ -2814,19 +2991,19 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 			t := m.tab()
 			if mouse.X == left && !target.annotation && t.selecting {
 				start, end := m.selectionRange()
-				if start < end && target.line == end {
+				if start < end && target.side == t.selectSide && target.line == end {
 					m.openLineComment()
 					m.rebuildContent()
 					return m, nil
 				}
 			}
 			openThread := wasFocused && target.annotation && t.cursorOnAnnotation &&
-				t.cursorLine == target.line && t.cursorAnnoIdx == target.annotationIndex
-			t.cursorLine = target.line
+				t.cursorLine == target.line && t.cursorSide == target.side && t.cursorAnnoIdx == target.annotationIndex
+			t.cursorLine, t.cursorSide = target.line, target.side
 			t.cursorOnAnnotation = target.annotation
 			t.cursorAnnoIdx = target.annotationIndex
 			if openThread {
-				annotations := m.annotationsAfterLine(target.line)
+				annotations := m.annotationsAfterLine(target.line, target.side)
 				if target.annotationIndex < len(annotations) {
 					m.openCommentThread(annotations[target.annotationIndex].id)
 					return m, nil
@@ -2835,6 +3012,7 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 			if mouse.X == left && !target.annotation {
 				t.selecting = true
 				t.selectAnchor = target.line
+				t.selectSide = target.side
 				m.mouseSelecting = true
 			}
 		}
@@ -3006,18 +3184,21 @@ func (m *AppModel) handleMouseMotion(msg tea.MouseMotionMsg) (tea.Model, tea.Cmd
 
 func (m *AppModel) updateGutterHover(mouse tea.Mouse) {
 	line := 0
+	side := ""
 	if m.modal == noModal && !m.waiting && len(m.tabs) > 0 && m.tab().state != nil {
 		left, top, _, bottom := m.contentBounds()
 		if mouse.X == left && mouse.Y >= top && mouse.Y < bottom {
 			if target, ok := m.contentMouseTarget(mouse.Y - top + m.contentViewport.YOffset()); ok && !target.annotation {
 				line = target.line
+				side = target.side
 			}
 		}
 	}
-	if m.hoveredGutterLine == line {
+	if m.hoveredGutterLine == line && m.hoveredGutterSide == side {
 		return
 	}
 	m.hoveredGutterLine = line
+	m.hoveredGutterSide = side
 	m.rebuildContent()
 }
 
@@ -3028,7 +3209,7 @@ func (m *AppModel) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.C
 	m.updateMouseSelection(msg.Mouse(), false)
 	m.mouseSelecting = false
 	t := m.tab()
-	t.selecting = t.cursorLine != t.selectAnchor
+	t.selecting = t.cursorLine != t.selectAnchor || t.cursorSide != t.selectSide
 	m.openLineComment()
 	m.rebuildContent()
 	return m, nil
@@ -3049,7 +3230,10 @@ func (m *AppModel) updateMouseSelection(mouse tea.Mouse, autoScroll bool) {
 
 	if target, ok := m.contentMouseTarget(viewportY); ok {
 		t := m.tab()
-		t.cursorLine = target.line
+		if t.selecting && target.side != t.selectSide {
+			return
+		}
+		t.cursorLine, t.cursorSide = target.line, target.side
 		t.cursorOnAnnotation = false
 		t.cursorAnnoIdx = 0
 		t.selecting = true
@@ -3059,6 +3243,7 @@ func (m *AppModel) updateMouseSelection(mouse tea.Mouse, autoScroll bool) {
 
 type contentMouseTarget struct {
 	line            int
+	side            string
 	annotation      bool
 	annotationIndex int
 }
@@ -3070,20 +3255,20 @@ func (m *AppModel) contentMouseTarget(y int) (contentMouseTarget, bool) {
 	return m.contentLayout.rows[y], true
 }
 
-func (m *AppModel) highlightedCommentLines() (int, int) {
+func (m *AppModel) highlightedCommentLines() (int, int, string) {
 	t := m.tab()
 	if m.focused == commentPane && len(t.sidebarItems) > 0 && t.sidebarCursor < len(t.sidebarItems) {
 		item := t.sidebarItems[t.sidebarCursor]
-		return item.line, max(item.line, item.endLine)
+		return item.line, max(item.line, item.endLine), item.side
 	}
 	if m.focused == contentPane && t.cursorOnAnnotation {
-		annotations := m.annotationsAfterLine(t.cursorLine)
+		annotations := m.annotationsAfterLine(t.cursorLine, t.cursorSide)
 		if t.cursorAnnoIdx < len(annotations) {
 			ann := annotations[t.cursorAnnoIdx]
-			return ann.line, max(ann.line, ann.endLine)
+			return ann.line, max(ann.line, ann.endLine), ann.side
 		}
 	}
-	return 0, 0
+	return 0, 0, ""
 }
 
 func (m *AppModel) commentBounds() (left, top, right, bottom int) {
@@ -3114,10 +3299,10 @@ func (m *AppModel) selectSidebarItem(i int) {
 	item := t.sidebarItems[i]
 	t.sidebarCursor = i
 	if item.scope != "file" {
-		t.cursorLine = item.line
+		t.cursorLine, t.cursorSide = item.line, item.side
 		t.cursorOnAnnotation = false
 		t.cursorAnnoIdx = 0
-		m.scrollToAnnotation(item.line, item.endLine)
+		m.scrollToAnnotation(item.side, item.line, item.endLine)
 	}
 }
 
@@ -3439,7 +3624,7 @@ func (m AppModel) renderDeleteButton(label string, focused bool) string {
 	return modalBtnNormal.Render(modalDeleteBtnLabel.Render(label))
 }
 
-func (m AppModel) renderContextPreview(start, end, maxWidth int) string {
+func (m AppModel) renderContextPreview(side string, start, end, maxWidth int) string {
 	t := m.tabs[m.activeTab]
 	if t.doc == nil {
 		return ""
@@ -3449,8 +3634,11 @@ func (m AppModel) renderContextPreview(start, end, maxWidth int) string {
 	if maxLineText < 10 {
 		maxLineText = 10
 	}
-	for i := start; i <= end && i <= t.doc.LineCount(); i++ {
-		lineText := t.doc.LineAt(i)
+	for i := start; i <= end; i++ {
+		lineText := m.anchorText(&t, side, i, i)
+		if lineText == "" {
+			continue
+		}
 		wrapped := lipgloss.Wrap(lineText, maxLineText, "")
 		num := lineNumStyle.Render(fmt.Sprintf("%d", i))
 		wrapLines := strings.Split(wrapped, "\n")
@@ -3496,6 +3684,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 
 	case commentModal:
 		start, end := m.selectionRange()
+		side := m.selectionSide()
 		var title string
 		if start != end {
 			title = modalTitleStyle.Render(fmt.Sprintf("Add Comment (lines %d-%d)", start, end))
@@ -3504,16 +3693,22 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		}
 		contextBox := contextBoxStyle.
 			Width(innerWidth - 2).
-			Render(m.renderContextPreview(start, end, innerWidth-4))
+			Render(m.renderContextPreview(side, start, end, innerWidth-4))
 
 		prefix, textareaRegion := layoutModalTextarea(
 			title+"\n"+contextBox+"\n\n", m.modalTextarea.View(), innerWidth)
 		regions = append(regions, textareaRegion)
-		buttons, buttonRegions := layoutModalButtonRow([]modalButtonSpec{
+		buttonSpecs := []modalButtonSpec{
 			{rendered: m.renderModalButton("Save", "ctrl+s", m.modalFocus == 1), action: modalMouseAction{focus: 1}},
 			{rendered: m.renderModalButton("Close", "×", m.modalFocus == 2), action: modalMouseAction{focus: 2}},
-			{rendered: m.renderModalButton("Suggest", "ctrl+y", m.modalFocus == 3), action: modalMouseAction{focus: 3}},
-		}, innerWidth, strings.Count(prefix, "\n"))
+		}
+		if m.canSuggest() {
+			buttonSpecs = append(buttonSpecs, modalButtonSpec{
+				rendered: m.renderModalButton("Suggest", "ctrl+y", m.modalFocus == 3),
+				action:   modalMouseAction{focus: 3},
+			})
+		}
+		buttons, buttonRegions := layoutModalButtonRow(buttonSpecs, innerWidth, strings.Count(prefix, "\n"))
 		regions = append(regions, buttonRegions...)
 		modalContent = modalStyle.Width(modalWidth).Render(prefix + buttons)
 
@@ -3548,7 +3743,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 					end := c.EndAt()
 					contextSection = contextBoxStyle.
 						Width(innerWidth - 2).
-						Render(m.renderContextPreview(start, end, innerWidth-4))
+						Render(m.renderContextPreview(c.Side, start, end, innerWidth-4))
 				}
 				if m.modal == replyModal || m.editingReplyID != "" {
 					var thread strings.Builder

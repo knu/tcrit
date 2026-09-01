@@ -26,10 +26,12 @@ type FileTab struct {
 	deletedAfter  map[int][]gitpkg.DeletedLine // deleted lines keyed by new-file line they appear after
 	changeChunks  []changeChunk                // contiguous groups of changed lines
 	cursorLine    int                          // 1-based
+	cursorSide    string                       // "old" for deleted lines; empty means new side
 
 	// Visual selection mode
 	selecting    bool
 	selectAnchor int
+	selectSide   string
 
 	// Sidebar annotation list and cursor
 	sidebarItems  []sidebarItem
