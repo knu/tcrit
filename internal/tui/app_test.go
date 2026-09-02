@@ -2212,6 +2212,10 @@ func TestSuggestionButtonInsertsSelectedCodeAndPersistsComment(t *testing.T) {
 	if got := app.modalTextarea.Value(); got != wantBody {
 		t.Fatalf("suggestion body = %q, want %q", got, wantBody)
 	}
+	if app.modalTextarea.Line() != 4 || app.modalTextarea.Column() != len("second") {
+		t.Fatalf("suggestion cursor = %d:%d, want 4:%d",
+			app.modalTextarea.Line(), app.modalTextarea.Column(), len("second"))
+	}
 	if app.modalFocus != 0 || !app.modalTextarea.Focused() {
 		t.Fatalf("suggestion left focus at %d, focused=%t; want textarea", app.modalFocus, app.modalTextarea.Focused())
 	}
@@ -2261,12 +2265,38 @@ func TestSuggestionIsAvailableWhenReplyingToLineComment(t *testing.T) {
 	if got := app.modalTextarea.Value(); got != want {
 		t.Fatalf("reply suggestion = %q, want %q", got, want)
 	}
+	if app.modalTextarea.Line() != 2 || app.modalTextarea.Column() != len("second") {
+		t.Fatalf("reply suggestion cursor = %d:%d, want 2:%d",
+			app.modalTextarea.Line(), app.modalTextarea.Column(), len("second"))
+	}
 
 	app.width = 80
 	app.height = 24
 	background := lipgloss.NewStyle().Width(app.width).Height(app.height).Render("")
 	if rendered := app.renderWithModal(background); !strings.Contains(rendered, "Suggest") {
 		t.Fatalf("reply modal does not contain Suggest button: %q", rendered)
+	}
+}
+
+func TestSuggestionScrollsCursorIntoView(t *testing.T) {
+	lastLine := strings.Repeat("x", 48)
+	app := setupAppWithDoc(t, "first\n"+lastLine+"\n")
+	app.tabs[0].selecting = true
+	app.tabs[0].selectAnchor = 1
+	app.tabs[0].cursorLine = 2
+	app.modal = commentModal
+	app.modalTextarea.SetWidth(12)
+	app.modalTextarea.SetHeight(3)
+
+	app.insertSuggestion()
+	app.modalTextarea.SetVirtualCursor(false)
+	cursor := app.modalTextarea.Cursor()
+	if cursor == nil {
+		t.Fatal("suggestion cursor is hidden")
+	}
+	if cursor.Y < 0 || cursor.Y >= app.modalTextarea.Height() {
+		t.Fatalf("suggestion cursor Y = %d outside textarea height %d",
+			cursor.Y, app.modalTextarea.Height())
 	}
 }
 

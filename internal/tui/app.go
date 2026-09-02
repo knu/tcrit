@@ -1166,6 +1166,12 @@ func (m *AppModel) insertSuggestion() {
 		body += "\n\n"
 	}
 	m.modalTextarea.SetValue(body + "```suggestion\n" + code + "\n```")
+	m.modalTextarea.CursorStart()
+	m.modalTextarea.CursorUp()
+	m.modalTextarea.CursorEnd()
+	// Populate the internal viewport before repositioning it around the cursor.
+	_ = m.modalTextarea.View()
+	m.modalTextarea.SetHeight(m.modalTextarea.Height())
 	m.modalFocus = 0
 	m.modalTextarea.Focus()
 }
