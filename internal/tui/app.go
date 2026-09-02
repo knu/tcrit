@@ -3606,13 +3606,22 @@ func (m AppModel) renderHelp(innerWidth int) string {
 }
 
 func (m AppModel) renderModalButton(label, hint string, focused bool) string {
+	labelStyle := modalBtnNormalLabel
+	keyStyle := modalBtnNormalKey
 	if focused {
-		return modalBtnFocused.Render(label + " " + hint)
+		labelStyle = modalBtnFocusedLabel
+		keyStyle = modalBtnFocusedKey
 	}
-	btn := modalBtnLabel.Render(label)
-	h := modalBtnHint.Render(hint)
-	content := btn + " " + h
-	return modalBtnNormal.Render(content)
+
+	keys := strings.Split(hint, " / ")
+	var renderedHint strings.Builder
+	for i, key := range keys {
+		if i > 0 {
+			renderedHint.WriteString(labelStyle.Padding(0).Render(" / "))
+		}
+		renderedHint.WriteString(keyStyle.Render(key))
+	}
+	return labelStyle.Render(label+" ") + renderedHint.String()
 }
 
 func layoutModalButtonRow(specs []modalButtonSpec, width, top int) (string, []modalMouseRegion) {
@@ -3665,7 +3674,15 @@ func (m AppModel) modalMouseRegions() []modalMouseRegion {
 	return layout.modalRegions
 }
 
-func (m AppModel) renderDeleteButton(label string, focused bool) string {
+func (m AppModel) renderDeleteButton(label, hint string, focused bool) string {
+	if hint != "" {
+		keyStyle := modalBtnNormalKey
+		if focused {
+			keyStyle = modalBtnFocusedKey
+			return modalDeleteBtnFocused.PaddingRight(0).Render(label+" ") + keyStyle.Render(hint)
+		}
+		return modalBtnNormal.PaddingRight(0).Render(modalDeleteBtnLabel.Render(label+" ")) + keyStyle.Render(hint)
+	}
 	if focused {
 		return modalDeleteBtnFocused.Render(label)
 	}
@@ -3748,7 +3765,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		regions = append(regions, textareaRegion)
 		buttonSpecs := []modalButtonSpec{
 			{rendered: m.renderModalButton("Save", "ctrl+s", m.modalFocus == 1), action: modalMouseAction{focus: 1}},
-			{rendered: m.renderModalButton("Close", "×", m.modalFocus == 2), action: modalMouseAction{focus: 2}},
+			{rendered: m.renderModalButton("Close", "esc", m.modalFocus == 2), action: modalMouseAction{focus: 2}},
 		}
 		if m.canSuggest() {
 			buttonSpecs = append(buttonSpecs, modalButtonSpec{
@@ -3768,7 +3785,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		regions = append(regions, textareaRegion)
 		buttons, buttonRegions := layoutModalButtonRow([]modalButtonSpec{
 			{rendered: m.renderModalButton("Save", "ctrl+s", m.modalFocus == 1), action: modalMouseAction{focus: 1}},
-			{rendered: m.renderModalButton("Close", "×", m.modalFocus == 2), action: modalMouseAction{focus: 2}},
+			{rendered: m.renderModalButton("Close", "esc", m.modalFocus == 2), action: modalMouseAction{focus: 2}},
 		}, innerWidth, strings.Count(prefix, "\n"))
 		regions = append(regions, buttonRegions...)
 		modalContent = modalStyle.Width(modalWidth).Render(prefix + buttons)
@@ -3826,7 +3843,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		}
 		buttonSpecs := []modalButtonSpec{
 			{rendered: m.renderModalButton("Save", "ctrl+s", m.modalFocus == 1), action: modalMouseAction{focus: 1}},
-			{rendered: m.renderModalButton("Close", "×", m.modalFocus == 2), action: modalMouseAction{focus: 2}},
+			{rendered: m.renderModalButton("Close", "esc", m.modalFocus == 2), action: modalMouseAction{focus: 2}},
 		}
 		if m.canSuggest() {
 			buttonSpecs = append(buttonSpecs, modalButtonSpec{
@@ -3854,7 +3871,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		for i, target := range m.modalDeleteTargets() {
 			content += "\n"
 			deleteRow, deleteRegions := layoutModalButtonRow([]modalButtonSpec{{
-				rendered: m.renderDeleteButton(target.label, m.modalFocus == i+deleteStart),
+				rendered: m.renderDeleteButton(target.label, "", m.modalFocus == i+deleteStart),
 				action:   modalMouseAction{focus: i + deleteStart, deleteIndex: i},
 			}}, innerWidth, buttonY)
 			content += deleteRow
@@ -3883,7 +3900,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		info := "This cannot be undone."
 		prefix := lipgloss.Wrap(title+"\n"+info+"\n\n", innerWidth, "")
 		buttons, buttonRegions := layoutModalButtonRow([]modalButtonSpec{
-			{rendered: m.renderDeleteButton("Delete", m.modalFocus == 0), action: modalMouseAction{focus: 0}},
+			{rendered: m.renderDeleteButton("Delete", "y", m.modalFocus == 0), action: modalMouseAction{focus: 0}},
 			{rendered: m.renderModalButton("Keep", "n / esc", m.modalFocus == 1), action: modalMouseAction{focus: 1}},
 		}, innerWidth, strings.Count(prefix, "\n"))
 		regions = append(regions, buttonRegions...)
@@ -3907,7 +3924,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		prefix = lipgloss.Wrap(prefix, innerWidth, "")
 		buttons, buttonRegions := layoutModalButtonRow([]modalButtonSpec{
 			{rendered: m.renderModalButton(m.finishActionLabel(), "y", m.modalFocus == 0), action: modalMouseAction{focus: 0}},
-			{rendered: m.renderModalButton("Close", "n / ×", m.modalFocus == 1), action: modalMouseAction{focus: 1}},
+			{rendered: m.renderModalButton("Close", "n", m.modalFocus == 1), action: modalMouseAction{focus: 1}},
 		}, innerWidth, strings.Count(prefix, "\n"))
 		regions = append(regions, buttonRegions...)
 		hint := footerStyle.Render("esc: back to review · q: quit without finishing")

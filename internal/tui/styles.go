@@ -218,16 +218,26 @@ var (
 			Bold(true).
 			Foreground(lipgloss.BrightWhite)
 
-	modalBtnHint = lipgloss.NewStyle().
-			Italic(true).
-			Foreground(subtle)
-
-	modalBtnFocused = lipgloss.NewStyle().
-			Reverse(true).
-			Padding(0, 1)
-
 	modalBtnNormal = lipgloss.NewStyle().
 			Padding(0, 1)
+
+	modalBtnFocusedLabel = lipgloss.NewStyle().
+				Foreground(lipgloss.Black).
+				Background(lipgloss.White).
+				PaddingLeft(1)
+
+	modalBtnNormalLabel = modalBtnLabel.
+				PaddingLeft(1)
+
+	modalBtnFocusedKey = lipgloss.NewStyle().
+				Background(lipgloss.BrightYellow).
+				Foreground(lipgloss.Black).
+				Bold(true)
+
+	modalBtnNormalKey = lipgloss.NewStyle().
+				Background(lipgloss.Yellow).
+				Foreground(lipgloss.Black).
+				Bold(true)
 
 	modalDeleteBtnLabel = lipgloss.NewStyle().
 				Bold(true).
@@ -305,6 +315,10 @@ var (
 // initAdaptiveStyles updates background-dependent styles based on terminal background.
 func initAdaptiveStyles(hasDarkBG bool) {
 	ld := lipgloss.LightDark(hasDarkBG)
+	modalBtnFocusedLabel = lipgloss.NewStyle().
+		Foreground(ld(lipgloss.BrightWhite, lipgloss.Black)).
+		Background(ld(lipgloss.Black, lipgloss.White)).
+		PaddingLeft(1)
 
 	selectedLineBg = lipgloss.NewStyle().
 		Background(ld(lipgloss.Color("#E8E0F8"), lipgloss.Color("#2D2B55")))

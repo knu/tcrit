@@ -737,6 +737,28 @@ func TestMouseClickCommentModalSave(t *testing.T) {
 	}
 }
 
+func TestRenderModalButtonSeparatesShortcutKeys(t *testing.T) {
+	app := AppModel{}
+	tests := []struct {
+		name    string
+		label   string
+		hint    string
+		focused bool
+		want    string
+	}{
+		{name: "focused", label: "Approve", hint: "y", focused: true, want: " Approve y"},
+		{name: "multiple shortcuts", label: "Keep Editing", hint: "n / esc", want: " Keep Editing n / esc"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ansi.Strip(app.renderModalButton(tt.label, tt.hint, tt.focused))
+			if got != tt.want {
+				t.Errorf("renderModalButton() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMouseClickCommentTextareaFocusesAndMovesCursor(t *testing.T) {
 	app := setupAppWithDoc(t, "first\nsecond\n")
 	app.width = 100
@@ -799,7 +821,7 @@ func TestMouseClickCommentModalClose(t *testing.T) {
 	app.contentViewport.SetWidth(75)
 	app.openLineComment()
 
-	app = clickModalAction(t, app, "Close ×")
+	app = clickModalAction(t, app, "Close esc")
 
 	if app.modal != noModal {
 		t.Fatalf("modal = %v, want closed", app.modal)
@@ -814,7 +836,7 @@ func TestMouseClickDirtyCommentModalCloseConfirmsDiscard(t *testing.T) {
 	app.openLineComment()
 	app.modalTextarea.SetValue("unsaved comment")
 
-	app = clickModalAction(t, app, "Close ×")
+	app = clickModalAction(t, app, "Close esc")
 
 	if app.modal != discardChangesModal || app.discardReturn != commentModal {
 		t.Fatalf("modal = %v, return = %v; want discard confirmation for comment", app.modal, app.discardReturn)
@@ -837,7 +859,7 @@ func TestMouseClickDirtyCommentModalCloseConfirmsDiscard(t *testing.T) {
 			app.modal, app.modalTextarea.Value(), app.modalTextarea.Focused())
 	}
 
-	app = clickModalAction(t, app, "Close ×")
+	app = clickModalAction(t, app, "Close esc")
 	app = clickModalAction(t, app, "Discard y")
 	if app.modal != noModal || app.modalTextarea.Value() != "" {
 		t.Fatalf("modal = %v, textarea = %q; want discarded and closed", app.modal, app.modalTextarea.Value())
@@ -874,7 +896,7 @@ func TestMouseClickDirtyEditModalCloseConfirmsDiscard(t *testing.T) {
 	app.openCommentThread(comment.ID)
 	app.modalTextarea.SetValue("changed")
 
-	app = clickModalAction(t, app, "Close ×")
+	app = clickModalAction(t, app, "Close esc")
 	if app.modal != discardChangesModal || app.discardReturn != editModal {
 		t.Fatalf("modal = %v, return = %v; want discard confirmation for edit", app.modal, app.discardReturn)
 	}
@@ -897,7 +919,7 @@ func TestMouseClickUnchangedEditModalCloseDoesNotConfirm(t *testing.T) {
 	app.tabs[0].state.Comments = []review.Comment{comment}
 	app.openCommentThread(comment.ID)
 
-	app = clickModalAction(t, app, "Close ×")
+	app = clickModalAction(t, app, "Close esc")
 
 	if app.modal != noModal {
 		t.Fatalf("modal = %v, want unchanged edit to close directly", app.modal)
@@ -922,7 +944,7 @@ func TestMouseClickCommentModalDelete(t *testing.T) {
 	for _, region := range app.modalMouseRegions() {
 		switch region.action.focus {
 		case 0:
-			assertRegionContainsRenderedText(t, app, region.rect, "Delete")
+			assertRegionContainsRenderedText(t, app, region.rect, "Delete y")
 		case 1:
 			assertRegionContainsRenderedText(t, app, region.rect, "Keep n / esc")
 		}
@@ -934,7 +956,7 @@ func TestMouseClickCommentModalDelete(t *testing.T) {
 	}
 
 	app = clickModalAction(t, app, "Delete comment")
-	app = clickModalAction(t, app, "Delete")
+	app = clickModalAction(t, app, "Delete y")
 
 	if app.modal != noModal || len(app.tab().state.Comments) != 0 {
 		t.Fatalf("modal = %v, comments = %+v; want deleted", app.modal, app.tab().state.Comments)
@@ -1933,12 +1955,12 @@ func TestMouseClickFinishModalCloseReturnsToReview(t *testing.T) {
 	app, _ = pressKeyCmd(app, 'q')
 	for _, region := range app.modalMouseRegions() {
 		if region.action.focus == 1 {
-			assertRegionContainsRenderedText(t, app, region.rect, "Close n / ×")
+			assertRegionContainsRenderedText(t, app, region.rect, "Close n")
 			break
 		}
 	}
 
-	app = clickModalAction(t, app, "Close n / ×")
+	app = clickModalAction(t, app, "Close n")
 
 	if app.modal != noModal {
 		t.Fatalf("modal = %v, want no modal", app.modal)
