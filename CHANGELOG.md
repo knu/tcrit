@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.2
+
+### Changed
+
+- Agent replies now use cyan text so they remain visually distinct from reviewer comments in inline and sidebar threads
+- Dialog shortcut keys use highlighted backgrounds, with labels matching their actual keys
+- Reply editors keep complete code context and thread history together in one scrollable region while leaving actions accessible in short terminal panes
+- Newly saved comments remain selected so they can be deleted immediately if needed
+
+### Fixed
+
+- Inserting a suggestion leaves the cursor at the end of the final suggested code line and scrolls it into view
+
 ## 0.6.1
 
 ### Added

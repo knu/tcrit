@@ -12,11 +12,11 @@
 - **Native tmux context discovery** — tcrit finds the invoking pane from the agent's process ancestry even when tools such as Codex do not inherit `$TMUX` or `$TMUX_PANE`.
 - **CritJSON review state and CLI** — comments use [Crit](https://crit.md/)-compatible `review.json` data, with `tcrit comment` and `tcrit comments` for automation.
 - **File-level comments** — reviewers can press `f` to comment on the active file, with file threads kept in the comment sidebar instead of attached to a line.
-- **Comment editing tools** — `ctrl+y` inserts GitHub-compatible suggestions for selected or anchored lines, including replies, while `ctrl+o` edits comment and reply bodies in `$EDITOR`.
+- **Comment editing tools** — `ctrl+y` inserts GitHub-compatible suggestions for selected or anchored lines, including replies, and leaves the cursor at the end of the suggested code; `ctrl+o` edits comment and reply bodies in `$EDITOR`.
 - **Deleted-line comments** — removed lines, including lines in fully deleted files, can be selected and commented on from the keyboard or gutter.
 - **Mouse-first TUI controls** — click file tabs, code lines, comment threads, sidebar items, dialog actions, and the review-finish button; use the wheel to scroll code and drag the gutter to select line ranges.
 - **Versioned plan reviews** — `tcrit plan` saves immutable revisions and carries comment threads forward as the plan changes.
-- **Richer review lifecycle** — comment threads can be replied to, resolved, reopened, and approved together; resolved threads collapse out of the active comment view, while comments and changes can be navigated across files.
+- **Richer review lifecycle** — comment threads can be replied to, resolved, reopened, and approved together; agent replies are visually distinct, complete code context and thread history remain scrollable while editing, and comments and changes can be navigated across files.
 - **Improved diffs and Git handling** — inline replacements preserve whitespace, long syntax-highlighted lines wrap instead of being truncated, comment anchors survive edited rounds, and paths with spaces or special characters work correctly.
 - **Gemini CLI support** — the fork adds a Gemini agent alongside upstream's Claude Code integration.
 - **[Crit](https://crit.md/) CLI alignment** — customizable finish prompts, unified integration installers, and `tcrit check` were added as part of adopting the Crit CLI workflow.
