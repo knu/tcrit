@@ -106,14 +106,15 @@ type AppModel struct {
 	sidebarTargets    []int
 
 	// Editing state
-	editingID      string // ID of the parent comment being edited or replied to
-	editingReplyID string // ID of the reply being edited; empty when editing the parent
-	modalInitial   string // textarea value when the current text modal opened
-	discardReturn  modalType
-	deleteReturn   modalType
-	pendingDelete  int
-	modalFocus     int  // focus index within the active modal
-	newFeedback    bool // true after adding or editing a comment in this round
+	editingID            string // ID of the parent comment being edited or replied to
+	editingReplyID       string // ID of the reply being edited; empty when editing the parent
+	modalInitial         string // textarea value when the current text modal opened
+	modalReferenceOffset int
+	discardReturn        modalType
+	deleteReturn         modalType
+	pendingDelete        int
+	modalFocus           int  // focus index within the active modal
+	newFeedback          bool // true after adding or editing a comment in this round
 
 	err error
 }
@@ -751,6 +752,7 @@ func (m *AppModel) openCommentThread(id string) {
 		}
 		m.editingID = c.ID
 		m.editingReplyID = ""
+		m.modalReferenceOffset = -1
 		m.modalFocus = 0
 		m.modalTextarea.Reset()
 		if reply := m.latestOwnReply(c); reply != nil {
@@ -832,6 +834,8 @@ func (m *AppModel) modalSubmit() {
 	if body == "" || t.state == nil {
 		return
 	}
+	var addedLineComment *commentTarget
+	var addedFileCommentID string
 
 	switch m.modal {
 	case editModal:
@@ -891,6 +895,9 @@ func (m *AppModel) modalSubmit() {
 		if m.session != nil {
 			c.ReviewRound = m.session.CJ.ReviewRound
 		}
+		addedLineComment = &commentTarget{
+			line: endLine, side: side, annoIdx: len(m.annotationsAfterLine(endLine, side)),
+		}
 		t.state.Comments = append(t.state.Comments, c)
 	case fileCommentModal:
 		now := review.Now()
@@ -905,6 +912,7 @@ func (m *AppModel) modalSubmit() {
 		if m.session != nil {
 			c.ReviewRound = m.session.CJ.ReviewRound
 		}
+		addedFileCommentID = c.ID
 		t.state.Comments = append(t.state.Comments, c)
 	}
 	m.newFeedback = true
@@ -918,8 +926,23 @@ func (m *AppModel) modalSubmit() {
 	m.modal = noModal
 	m.modalTextarea.Blur()
 	t.selecting = false
+	if addedLineComment != nil {
+		m.focused = contentPane
+		m.selectComment(m.activeTab, *addedLineComment)
+		return
+	}
 	m.rebuildContent()
 	m.updateCommentSidebar()
+	if addedFileCommentID != "" {
+		for i, item := range t.sidebarItems {
+			if item.id == addedFileCommentID {
+				m.focused = commentPane
+				t.sidebarCursor = i
+				m.updateCommentSidebar()
+				break
+			}
+		}
+	}
 }
 
 type modalDeleteTarget struct {
@@ -3099,9 +3122,12 @@ func (m *AppModel) selectTab(index int) {
 }
 
 type modalMouseAction struct {
-	focus       int
-	deleteIndex int
-	textarea    bool
+	focus           int
+	deleteIndex     int
+	textarea        bool
+	scrollable      bool
+	scrollOffset    int
+	scrollMaxOffset int
 }
 
 type modalMouseRegion struct {
@@ -3127,6 +3153,9 @@ func (m *AppModel) handleTextModalMouse(mouse tea.Mouse) (tea.Model, tea.Cmd) {
 		action := region.action
 		if action.textarea {
 			m.focusTextareaAt(mouse, region.rect)
+			return m, nil
+		}
+		if action.scrollable {
 			return m, nil
 		}
 		m.modalFocus = action.focus
@@ -3411,7 +3440,19 @@ func (m *AppModel) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) 
 
 func (m *AppModel) handleTextModalWheel(mouse tea.Mouse) (tea.Model, tea.Cmd) {
 	for _, region := range m.modalMouseRegions() {
-		if !region.action.textarea || !region.rect.contains(mouse) {
+		if !region.rect.contains(mouse) {
+			continue
+		}
+		if region.action.scrollable {
+			switch mouse.Button {
+			case tea.MouseWheelUp:
+				m.modalReferenceOffset = max(0, region.action.scrollOffset-3)
+			case tea.MouseWheelDown:
+				m.modalReferenceOffset = min(region.action.scrollMaxOffset, region.action.scrollOffset+3)
+			}
+			return m, nil
+		}
+		if !region.action.textarea {
 			continue
 		}
 		m.modalFocus = 0
@@ -3669,6 +3710,45 @@ func layoutModalTextarea(before, textareaView string, width int) (string, modalM
 	}
 }
 
+func renderScrollableModalBox(content string, width, maxHeight, offset int) (string, int, int) {
+	if content == "" || maxHeight < 3 {
+		return "", 0, 0
+	}
+
+	contentWidth := max(1, width-2)
+	wrapped := lipgloss.Wrap(content, contentWidth, "")
+	lines := strings.Split(wrapped, "\n")
+	maxContentHeight := maxHeight - 2
+	maxOffset := max(0, len(lines)-maxContentHeight)
+	if offset < 0 {
+		offset = maxOffset
+	} else {
+		offset = min(offset, maxOffset)
+	}
+	lines = lines[offset:min(len(lines), offset+maxContentHeight)]
+	if offset > 0 {
+		lines[0] = footerStyle.Render("↑ ") + ansi.Truncate(lines[0], max(0, contentWidth-2), "")
+	}
+	if offset < maxOffset {
+		last := len(lines) - 1
+		lines[last] = ansi.Truncate(lines[last], max(0, contentWidth-2), "") + footerStyle.Render(" ↓")
+	}
+
+	borderStyle := lipgloss.NewStyle().Foreground(subtle)
+	top := borderStyle.Render("╭" + strings.Repeat("─", contentWidth) + "╮")
+	bottom := borderStyle.Render("╰" + strings.Repeat("─", contentWidth) + "╯")
+	rows := make([]string, 0, len(lines)+2)
+	rows = append(rows, top)
+	for _, line := range lines {
+		line = ansi.Truncate(line, contentWidth, "")
+		rows = append(rows, borderStyle.Render("│")+
+			lipgloss.NewStyle().Width(contentWidth).Render(line)+borderStyle.Render("│"))
+	}
+	rows = append(rows, bottom)
+
+	return strings.Join(rows, "\n"), offset, maxOffset
+}
+
 func (m AppModel) modalMouseRegions() []modalMouseRegion {
 	_, layout := m.renderReviewScreen()
 	return layout.modalRegions
@@ -3689,7 +3769,7 @@ func (m AppModel) renderDeleteButton(label, hint string, focused bool) string {
 	return modalBtnNormal.Render(modalDeleteBtnLabel.Render(label))
 }
 
-func (m AppModel) renderContextPreview(side string, start, end, maxWidth int) string {
+func (m AppModel) renderContextPreview(side string, start, end, maxWidth, maxLines int) string {
 	t := m.tabs[m.activeTab]
 	if t.doc == nil {
 		return ""
@@ -3715,8 +3795,8 @@ func (m AppModel) renderContextPreview(side string, start, end, maxWidth int) st
 			}
 		}
 	}
-	if len(lines) > 8 {
-		lines = append(lines[:7], footerStyle.Render(fmt.Sprintf("  ... +%d more lines", len(lines)-7)))
+	if maxLines > 0 && len(lines) > maxLines {
+		lines = append(lines[:maxLines-1], footerStyle.Render(fmt.Sprintf("  ... +%d more lines", len(lines)-maxLines+1)))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -3729,6 +3809,8 @@ func (m AppModel) renderWithModal(background string) string {
 func (m AppModel) renderWithModalLayout(background string) (string, []modalMouseRegion) {
 	var modalContent string
 	var regions []modalMouseRegion
+	bgW := lipgloss.Width(background)
+	bgH := lipgloss.Height(background)
 	modalWidth := m.width * 2 / 3
 	if m.modal == helpModal {
 		modalWidth = m.width - 4
@@ -3758,7 +3840,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		}
 		contextBox := contextBoxStyle.
 			Width(innerWidth - 2).
-			Render(m.renderContextPreview(side, start, end, innerWidth-4))
+			Render(m.renderContextPreview(side, start, end, innerWidth-4, 8))
 
 		prefix, textareaRegion := layoutModalTextarea(
 			title+"\n"+contextBox+"\n\n", m.modalTextarea.View(), innerWidth)
@@ -3798,17 +3880,15 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 			titleText = "Edit Reply"
 		}
 		title := modalTitleStyle.Render(titleText)
-		var contextSection, threadSection string
+		var referenceContent string
 		for _, c := range m.tabs[m.activeTab].state.Comments {
 			if c.ID == m.editingID {
 				if c.Scope == "file" {
-					contextSection = contextBoxStyle.Width(innerWidth - 2).Render(m.tab().path)
+					referenceContent = m.tab().path
 				} else {
 					start := c.StartLine
 					end := c.EndAt()
-					contextSection = contextBoxStyle.
-						Width(innerWidth - 2).
-						Render(m.renderContextPreview(c.Side, start, end, innerWidth-4))
+					referenceContent = m.renderContextPreview(c.Side, start, end, innerWidth-4, 0)
 				}
 				if m.modal == replyModal || m.editingReplyID != "" {
 					var thread strings.Builder
@@ -3817,12 +3897,8 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 						author = "comment"
 					}
 					thread.WriteString(commentLineStyle.Render("Comment — "+author) + "\n")
-					thread.WriteString(clampLines(c.Body, 3))
+					thread.WriteString(c.Body)
 					for i, reply := range c.Replies {
-						body := reply.Body
-						if newline := strings.IndexByte(body, '\n'); newline >= 0 {
-							body = body[:newline] + "…"
-						}
 						replyAuthor := reply.Author
 						if replyAuthor == "" {
 							replyAuthor = "reply"
@@ -3832,11 +3908,12 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 							prefix = "> "
 						}
 						thread.WriteString("\n" + replyStyle.Render(
-							fmt.Sprintf("%s%d. %s: %s", prefix, i+1, replyAuthor, body)))
+							fmt.Sprintf("%s%d. %s: %s", prefix, i+1, replyAuthor, reply.Body)))
 					}
-					threadSection = contextBoxStyle.
-						Width(innerWidth - 2).
-						Render(thread.String())
+					if referenceContent != "" {
+						referenceContent += "\n\n"
+					}
+					referenceContent += thread.String()
 				}
 				break
 			}
@@ -3852,33 +3929,51 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 			})
 		}
 
-		content := title + "\n"
-		if contextSection != "" {
-			content += contextSection + "\n\n"
+		buildContent := func(referenceSection string, scrollOffset, scrollMaxOffset int) (string, []modalMouseRegion) {
+			content := title + "\n"
+			var contentRegions []modalMouseRegion
+			if referenceSection != "" {
+				referenceTop := strings.Count(content, "\n")
+				content += referenceSection + "\n\n"
+				contentRegions = append(contentRegions, modalMouseRegion{
+					rect: mouseRect{
+						left: 0, top: referenceTop,
+						right: lipgloss.Width(referenceSection), bottom: referenceTop + lipgloss.Height(referenceSection),
+					},
+					action: modalMouseAction{
+						scrollable: true, scrollOffset: scrollOffset, scrollMaxOffset: scrollMaxOffset,
+					},
+				})
+			}
+			content, textareaRegion := layoutModalTextarea(content, m.modalTextarea.View(), innerWidth)
+			contentRegions = append(contentRegions, textareaRegion)
+			buttonY := strings.Count(content, "\n")
+			buttonRow, buttonRegions := layoutModalButtonRow(buttonSpecs, innerWidth, buttonY)
+			content += buttonRow
+			contentRegions = append(contentRegions, buttonRegions...)
+			buttonY += lipgloss.Height(buttonRow)
+			deleteStart := m.modalDeleteStartFocus()
+			for i, target := range m.modalDeleteTargets() {
+				content += "\n"
+				deleteRow, deleteRegions := layoutModalButtonRow([]modalButtonSpec{{
+					rendered: m.renderDeleteButton(target.label, "", m.modalFocus == i+deleteStart),
+					action:   modalMouseAction{focus: i + deleteStart, deleteIndex: i},
+				}}, innerWidth, buttonY)
+				content += deleteRow
+				contentRegions = append(contentRegions, deleteRegions...)
+				buttonY += lipgloss.Height(deleteRow)
+			}
+			return content, contentRegions
 		}
-		if threadSection != "" {
-			content += threadSection + "\n\n"
-		}
-		var textareaRegion modalMouseRegion
-		content, textareaRegion = layoutModalTextarea(content, m.modalTextarea.View(), innerWidth)
-		regions = append(regions, textareaRegion)
-		buttonY := strings.Count(content, "\n")
-		buttonRow, buttonRegions := layoutModalButtonRow(buttonSpecs, innerWidth, buttonY)
-		content += buttonRow
-		regions = append(regions, buttonRegions...)
-		buttonY += lipgloss.Height(buttonRow)
-		deleteStart := m.modalDeleteStartFocus()
-		for i, target := range m.modalDeleteTargets() {
-			content += "\n"
-			deleteRow, deleteRegions := layoutModalButtonRow([]modalButtonSpec{{
-				rendered: m.renderDeleteButton(target.label, "", m.modalFocus == i+deleteStart),
-				action:   modalMouseAction{focus: i + deleteStart, deleteIndex: i},
-			}}, innerWidth, buttonY)
-			content += deleteRow
-			regions = append(regions, deleteRegions...)
-			buttonY += lipgloss.Height(deleteRow)
-		}
+
+		fixedContent, _ := buildContent("", 0, 0)
+		fixedHeight := lipgloss.Height(modalStyle.Width(modalWidth).Render(fixedContent))
+		referenceHeight := max(3, bgH-fixedHeight-3)
+		referenceSection, scrollOffset, scrollMaxOffset := renderScrollableModalBox(
+			referenceContent, innerWidth-2, referenceHeight, m.modalReferenceOffset)
+		content, contentRegions := buildContent(referenceSection, scrollOffset, scrollMaxOffset)
 		modalContent = modalStyle.Width(modalWidth).Render(content)
+		regions = append(regions, contentRegions...)
 
 	case discardChangesModal:
 		title := modalTitleStyle.Render("Discard changes?")
@@ -3932,9 +4027,6 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		modalContent = modalStyle.Width(modalWidth).Render(prefix + buttons + "\n" + hint)
 	}
 
-	bgW := lipgloss.Width(background)
-	bgH := lipgloss.Height(background)
-
 	modalW := lipgloss.Width(modalContent)
 	modalH := lipgloss.Height(modalContent)
 
@@ -3943,7 +4035,9 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 	if mx < 0 {
 		mx = 0
 	}
-	if my < 0 {
+	if modalH > bgH && (m.modal == replyModal || m.modal == editModal) {
+		my = bgH - modalH
+	} else if my < 0 {
 		my = 0
 	}
 	contentX := mx + modalStyle.GetBorderLeftSize() + modalStyle.GetPaddingLeft()

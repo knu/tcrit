@@ -737,6 +737,41 @@ func TestMouseClickCommentModalSave(t *testing.T) {
 	}
 }
 
+func TestNewLineCommentIsSelectedForImmediateDeletion(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\n")
+	app.tabs[0].cursorLine = 2
+	app.openLineComment()
+	app.modalTextarea.SetValue("remove me")
+	app.modalSubmit()
+
+	comment := app.tab().state.Comments[0]
+	if app.focused != contentPane || app.selectedCommentID() != comment.ID {
+		t.Fatalf("selected comment = %q in pane %v, want %q in content pane",
+			app.selectedCommentID(), app.focused, comment.ID)
+	}
+	app = pressKey(app, 'd')
+	if app.modal != deleteConfirmModal {
+		t.Fatalf("d opened modal %v, want delete confirmation", app.modal)
+	}
+}
+
+func TestNewFileCommentIsSelectedForImmediateDeletion(t *testing.T) {
+	app := setupAppWithDoc(t, "first\n")
+	app.modal = fileCommentModal
+	app.modalTextarea.SetValue("remove me")
+	app.modalSubmit()
+
+	comment := app.tab().state.Comments[0]
+	if app.focused != commentPane || app.selectedCommentID() != comment.ID {
+		t.Fatalf("selected comment = %q in pane %v, want %q in comment pane",
+			app.selectedCommentID(), app.focused, comment.ID)
+	}
+	app = pressKey(app, 'd')
+	if app.modal != deleteConfirmModal {
+		t.Fatalf("d opened modal %v, want delete confirmation", app.modal)
+	}
+}
+
 func TestRenderModalButtonSeparatesShortcutKeys(t *testing.T) {
 	app := AppModel{}
 	tests := []struct {
@@ -2419,6 +2454,123 @@ func TestEditModalDeletesOnlyOwnCurrentRoundReply(t *testing.T) {
 	}
 	if len(comments[0].Replies) != 2 || comments[0].Replies[0].ID != "rp_old" || comments[0].Replies[1].ID != "rp_other" {
 		t.Fatalf("remaining replies = %+v, want old and other", comments[0].Replies)
+	}
+}
+
+func TestEditReplyModalKeepsDeleteButtonVisibleWithLongThread(t *testing.T) {
+	comment := testComment()
+	comment.EndLine = 12
+	comment.Author = "Reviewer"
+	comment.Body = strings.Repeat("long parent comment ", 12)
+	for i := range 12 {
+		comment.Replies = append(comment.Replies, review.Reply{
+			ID: "rp_" + string(rune('a'+i)), Author: "AI",
+			Body: strings.Repeat("long reply body ", 12), ReviewRound: 1,
+		})
+	}
+	comment.Replies = append(comment.Replies, review.Reply{
+		ID: "rp_own", Author: "Tester", Body: "edit me\nsecond line\nlast line", ReviewRound: 1,
+	})
+	app, _ := newFinishTestApp(t, []review.Comment{comment}, false)
+	lines := make([]string, comment.EndLine)
+	for i := range lines {
+		lines[i] = "context line " + strconv.Itoa(i+1)
+	}
+	app.tabs[0].doc = &document.Document{
+		Path: "test.go", Content: strings.Join(lines, "\n"), Lines: lines,
+	}
+	app.width = 128
+	app.height = 30
+	app.recalculateLayout()
+	app.modal = editModal
+	app.editingID = comment.ID
+	app.editingReplyID = "rp_own"
+	app.modalReferenceOffset = -1
+	app.modalTextarea.SetValue(strings.Repeat("unsaved reply text ", 12))
+
+	const displayHeight = 24
+	background := lipgloss.NewStyle().Width(app.width).Height(displayHeight).Render("")
+	staleHeightRendered, _ := app.renderWithModalLayout(background)
+	for _, action := range []string{"Save ctrl+s", "Close esc", "Suggest ctrl+y", "Delete reply"} {
+		if !strings.Contains(ansi.Strip(staleHeightRendered), action) {
+			t.Fatalf("modal using display height does not show %q", action)
+		}
+	}
+	app.height = displayHeight
+	app.recalculateLayout()
+	rendered, regions := app.renderWithModalLayout(background)
+	if height := lipgloss.Height(rendered); height > displayHeight {
+		t.Fatalf("modal height = %d, display height = %d", height, displayHeight)
+	}
+	plainRendered := ansi.Strip(rendered)
+	for _, action := range []string{"Save ctrl+s", "Close esc", "Suggest ctrl+y", "Delete reply"} {
+		if !strings.Contains(plainRendered, action) {
+			t.Fatalf("modal does not show %q", action)
+		}
+	}
+	var referenceRegion modalMouseRegion
+	deleteFound := false
+	for _, region := range regions {
+		if region.rect.bottom > displayHeight {
+			t.Fatalf("modal region bottom = %d, display height = %d", region.rect.bottom, displayHeight)
+		}
+		if region.action.scrollable {
+			referenceRegion = region
+		}
+		if region.action.deleteIndex == 0 && region.action.focus == app.modalDeleteStartFocus() {
+			deleteFound = true
+			break
+		}
+	}
+	if !deleteFound {
+		t.Fatal("delete reply button region not found")
+	}
+	if referenceRegion.rect.bottom == 0 {
+		t.Fatal("scrollable reference region not found")
+	}
+	if referenceRegion.action.scrollMaxOffset == 0 {
+		t.Fatal("long reference content is not scrollable")
+	}
+	before := ansi.Strip(rendered)
+	if !strings.Contains(before, "last line") {
+		t.Fatal("combined reference region does not initially show the latest reply")
+	}
+	app = wheelMouse(app, referenceRegion.rect.left, referenceRegion.rect.top, tea.MouseWheelUp)
+	if app.modalReferenceOffset >= referenceRegion.action.scrollMaxOffset {
+		t.Fatal("wheel up did not scroll reference content")
+	}
+	after := ansi.Strip(app.View().Content)
+	if before == after {
+		t.Fatal("reference content did not change after scrolling")
+	}
+	app.modalReferenceOffset = 0
+	if rendered := ansi.Strip(app.View().Content); !strings.Contains(rendered, "context line 1") {
+		t.Fatal("first line of code context is not reachable by scrolling")
+	}
+
+	const shortDisplayHeight = 16
+	shortBackground := lipgloss.NewStyle().Width(app.width).Height(shortDisplayHeight).Render("")
+	shortRendered, shortRegions := app.renderWithModalLayout(shortBackground)
+	if !strings.Contains(ansi.Strip(shortRendered), "Delete reply") {
+		t.Fatal("oversized modal is not initially scrolled to the delete action")
+	}
+	for _, region := range shortRegions {
+		if region.action.focus == app.modalDeleteStartFocus() && region.rect.bottom > shortDisplayHeight {
+			t.Fatalf("delete action bottom = %d, display height = %d", region.rect.bottom, shortDisplayHeight)
+		}
+	}
+}
+
+func TestScrollableModalBoxHonorsMinimumHeight(t *testing.T) {
+	box, _, maxOffset := renderScrollableModalBox(strings.Repeat("long content ", 20), 40, 3, 0)
+	if height := lipgloss.Height(box); height > 3 {
+		t.Fatalf("box height = %d, max height = 3", height)
+	}
+	if width := lipgloss.Width(box); width != 40 {
+		t.Fatalf("box width = %d, want 40", width)
+	}
+	if maxOffset == 0 {
+		t.Fatal("clipped box is not scrollable")
 	}
 }
 
