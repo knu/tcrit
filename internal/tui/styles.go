@@ -106,7 +106,7 @@ var (
 	inlineCommentBox = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(lipgloss.Blue).
-				Foreground(lipgloss.BrightCyan).
+				Foreground(muted).
 				PaddingLeft(1).
 				PaddingRight(1)
 
@@ -119,7 +119,7 @@ var (
 			Bold(true)
 
 	replyStyle = lipgloss.NewStyle().
-			Foreground(subtle)
+			Foreground(lipgloss.Cyan)
 
 	// Annotation gutter marker
 	annotationGutter = lipgloss.NewStyle().
