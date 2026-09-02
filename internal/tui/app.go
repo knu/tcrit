@@ -812,6 +812,7 @@ func (m *AppModel) openLineComment() {
 		return
 	}
 	m.modal = commentModal
+	m.modalReferenceOffset = -1
 	m.modalFocus = 0
 	m.modalTextarea.Placeholder = "Type your comment..."
 	m.modalTextarea.Reset()
@@ -1462,6 +1463,12 @@ func (m *AppModel) handleTextModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.closeTextModal()
 		return m, nil
+	case "ctrl+pgup":
+		m.scrollModalReference(-1)
+		return m, nil
+	case "ctrl+pgdown":
+		m.scrollModalReference(1)
+		return m, nil
 	case "tab", "shift+tab":
 		if msg.String() == "shift+tab" {
 			m.modalFocus = (m.modalFocus + focusCount - 1) % focusCount
@@ -1509,6 +1516,18 @@ func (m *AppModel) handleTextModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	return m, nil
+}
+
+func (m *AppModel) scrollModalReference(direction int) {
+	for _, region := range m.modalMouseRegions() {
+		if !region.action.scrollable {
+			continue
+		}
+		pageSize := max(1, region.rect.bottom-region.rect.top-2)
+		offset := region.action.scrollOffset + direction*pageSize
+		m.modalReferenceOffset = max(0, min(region.action.scrollMaxOffset, offset))
+		return
+	}
 }
 
 func (m *AppModel) closeTextModal() {
@@ -3643,7 +3662,7 @@ func (m AppModel) renderHelp(innerWidth int) string {
 
 	columns := lipgloss.JoinHorizontal(lipgloss.Top, general, "  ", navigation, "  ", codeReview)
 	contexts := renderHelpGroup("Selection and dialogs", []helpItem{
-		{keys: "↑/↓,j/k · enter/v/esc", desc: "extend · comment/toggle/cancel selection"},
+		{keys: "↑/↓,j/k · enter/v/esc · ctrl+PgUp/PgDn", desc: "extend · comment/toggle/cancel selection · scroll thread"},
 		{keys: "ctrl+s/o/y · tab/S-tab · enter/esc", desc: "save/editor/suggest · focus · activate/close dialog"},
 		{keys: "y/n/esc · ←/→,h/l,tab/shift+tab · enter", desc: "confirm/cancel · focus · activate finish dialog"},
 		{keys: "q/ctrl+c", desc: "quit from finish dialog"},
@@ -3844,13 +3863,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		} else {
 			title = modalTitleStyle.Render(fmt.Sprintf("Add Comment (line %d)", start))
 		}
-		contextBox := contextBoxStyle.
-			Width(innerWidth - 2).
-			Render(m.renderContextPreview(side, start, end, innerWidth-4, 8))
-
-		prefix, textareaRegion := layoutModalTextarea(
-			title+"\n"+contextBox+"\n\n", m.modalTextarea.View(), innerWidth)
-		regions = append(regions, textareaRegion)
+		contextContent := m.renderContextPreview(side, start, end, innerWidth-4, 0)
 		buttonSpecs := []modalButtonSpec{
 			{rendered: m.renderModalButton("Save", "ctrl+s", m.modalFocus == 1), action: modalMouseAction{focus: 1}},
 			{rendered: m.renderModalButton("Close", "esc", m.modalFocus == 2), action: modalMouseAction{focus: 2}},
@@ -3861,9 +3874,39 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 				action:   modalMouseAction{focus: 3},
 			})
 		}
-		buttons, buttonRegions := layoutModalButtonRow(buttonSpecs, innerWidth, strings.Count(prefix, "\n"))
-		regions = append(regions, buttonRegions...)
-		modalContent = modalStyle.Width(modalWidth).Render(prefix + buttons)
+
+		buildContent := func(contextSection string, scrollOffset, scrollMaxOffset int) (string, []modalMouseRegion) {
+			content := title + "\n"
+			var contentRegions []modalMouseRegion
+			if contextSection != "" {
+				contextTop := strings.Count(content, "\n")
+				content += contextSection + "\n\n"
+				contentRegions = append(contentRegions, modalMouseRegion{
+					rect: mouseRect{
+						left: 0, top: contextTop,
+						right: lipgloss.Width(contextSection), bottom: contextTop + lipgloss.Height(contextSection),
+					},
+					action: modalMouseAction{
+						scrollable: true, scrollOffset: scrollOffset, scrollMaxOffset: scrollMaxOffset,
+					},
+				})
+			}
+			content, textareaRegion := layoutModalTextarea(content, m.modalTextarea.View(), innerWidth)
+			contentRegions = append(contentRegions, textareaRegion)
+			buttons, buttonRegions := layoutModalButtonRow(buttonSpecs, innerWidth, strings.Count(content, "\n"))
+			content += buttons
+			contentRegions = append(contentRegions, buttonRegions...)
+			return content, contentRegions
+		}
+
+		fixedContent, _ := buildContent("", 0, 0)
+		fixedHeight := lipgloss.Height(modalStyle.Width(modalWidth).Render(fixedContent))
+		contextHeight := max(3, bgH-fixedHeight-3)
+		contextSection, scrollOffset, scrollMaxOffset := renderScrollableModalBox(
+			contextContent, innerWidth-2, contextHeight, m.modalReferenceOffset)
+		content, contentRegions := buildContent(contextSection, scrollOffset, scrollMaxOffset)
+		modalContent = modalStyle.Width(modalWidth).Render(content)
+		regions = append(regions, contentRegions...)
 
 	case fileCommentModal:
 		title := modalTitleStyle.Render("Add File Comment")
@@ -4041,7 +4084,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 	if mx < 0 {
 		mx = 0
 	}
-	if modalH > bgH && (m.modal == replyModal || m.modal == editModal) {
+	if modalH > bgH && (m.modal == commentModal || m.modal == replyModal || m.modal == editModal) {
 		my = bgH - modalH
 	} else if my < 0 {
 		my = 0

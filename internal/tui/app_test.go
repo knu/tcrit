@@ -1605,7 +1605,7 @@ func TestHelpModalShowsAllShortcutGroupsAndCloses(t *testing.T) {
 	rendered := app.renderWithModal(background)
 	for _, want := range []string{
 		"Keyboard Help", "General", "Navigation", "Code review", "Selection and dialogs",
-		"↑/↓,j/k", "PgUp/PgDn", "Home/End,g/G,</>", "tab/shift+tab", "ctrl+s", "y/n/esc", "Backspace",
+		"↑/↓,j/k", "PgUp/PgDn", "Home/End,g/G,</>", "tab/shift+tab", "ctrl+s", "ctrl+PgUp/PgDn", "y/n/esc", "Backspace",
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Errorf("help modal does not contain %q", want)
@@ -2247,6 +2247,51 @@ func TestSuggestionButtonIsInCommentModal(t *testing.T) {
 	}
 }
 
+func TestAddCommentModalKeepsFullContextScrollable(t *testing.T) {
+	lines := make([]string, 30)
+	for i := range lines {
+		lines[i] = "context line " + strconv.Itoa(i+1)
+	}
+	app := setupAppWithDoc(t, strings.Join(lines, "\n"))
+	app.width = 80
+	app.height = 24
+	app.recalculateLayout()
+	app.tabs[0].selecting = true
+	app.tabs[0].selectAnchor = 1
+	app.tabs[0].cursorLine = len(lines)
+	app.openLineComment()
+
+	background := lipgloss.NewStyle().Width(app.width).Height(app.height).Render("")
+	rendered, regions := app.renderWithModalLayout(background)
+	plainRendered := ansi.Strip(rendered)
+	if strings.Contains(plainRendered, "more lines") {
+		t.Fatal("add comment context is summarized instead of scrollable")
+	}
+	for _, action := range []string{"Save ctrl+s", "Close esc", "Suggest ctrl+y"} {
+		if !strings.Contains(plainRendered, action) {
+			t.Fatalf("add comment modal does not show %q", action)
+		}
+	}
+	if !strings.Contains(plainRendered, "context line 30") {
+		t.Fatal("add comment context does not initially show the final selected line")
+	}
+
+	var contextRegion modalMouseRegion
+	for _, region := range regions {
+		if region.action.scrollable {
+			contextRegion = region
+			break
+		}
+	}
+	if contextRegion.action.scrollMaxOffset == 0 {
+		t.Fatal("long add comment context is not scrollable")
+	}
+	app.modalReferenceOffset = 0
+	if rendered := ansi.Strip(app.View().Content); !strings.Contains(rendered, "context line 1") {
+		t.Fatal("first selected line is not reachable by scrolling")
+	}
+}
+
 func TestSuggestionIsAvailableWhenReplyingToLineComment(t *testing.T) {
 	app := setupAppWithDoc(t, "first\nsecond\nthird\n")
 	comment := review.Comment{
@@ -2588,6 +2633,46 @@ func TestEditReplyModalKeepsDeleteButtonVisibleWithLongThread(t *testing.T) {
 		if region.action.focus == app.modalDeleteStartFocus() && region.rect.bottom > shortDisplayHeight {
 			t.Fatalf("delete action bottom = %d, display height = %d", region.rect.bottom, shortDisplayHeight)
 		}
+	}
+}
+
+func TestKeyboardScrollsModalReferenceByPage(t *testing.T) {
+	comment := testComment()
+	comment.Author = "Reviewer"
+	comment.Body = strings.Repeat("long parent comment\n", 30)
+	app, _ := newFinishTestApp(t, []review.Comment{comment}, false)
+	app.width = 80
+	app.height = 24
+	app.recalculateLayout()
+	app.openCommentThread(comment.ID)
+
+	var scrollRegion modalMouseRegion
+	for _, region := range app.modalMouseRegions() {
+		if region.action.scrollable {
+			scrollRegion = region
+			break
+		}
+	}
+	if scrollRegion.action.scrollMaxOffset == 0 {
+		t.Fatal("long modal reference is not scrollable")
+	}
+
+	pageSize := max(1, scrollRegion.rect.bottom-scrollRegion.rect.top-2)
+	updated, _ := app.Update(tea.KeyPressMsg{Code: tea.KeyPgUp, Mod: tea.ModCtrl})
+	app = *updated.(*AppModel)
+	want := max(0, scrollRegion.action.scrollMaxOffset-pageSize)
+	if app.modalReferenceOffset != want {
+		t.Fatalf("Ctrl-PgUp offset = %d, want %d", app.modalReferenceOffset, want)
+	}
+	if !app.modalTextarea.Focused() {
+		t.Fatal("Ctrl-PgUp moved focus away from textarea")
+	}
+
+	updated, _ = app.Update(tea.KeyPressMsg{Code: tea.KeyPgDown, Mod: tea.ModCtrl})
+	app = *updated.(*AppModel)
+	if app.modalReferenceOffset != scrollRegion.action.scrollMaxOffset {
+		t.Fatalf("Ctrl-PgDown offset = %d, want %d",
+			app.modalReferenceOffset, scrollRegion.action.scrollMaxOffset)
 	}
 }
 

@@ -12,7 +12,7 @@
 - **Native tmux context discovery** — tcrit finds the invoking pane from the agent's process ancestry even when tools such as Codex do not inherit `$TMUX` or `$TMUX_PANE`.
 - **CritJSON review state and CLI** — comments use [Crit](https://crit.md/)-compatible `review.json` data, with `tcrit comment` and `tcrit comments` for automation.
 - **File-level comments** — reviewers can press `f` to comment on the active file, with file threads kept in the comment sidebar instead of attached to a line.
-- **Comment editing tools** — `ctrl+y` inserts GitHub-compatible suggestions for selected or anchored lines, including replies, and leaves the cursor at the end of the suggested code; `ctrl+o` edits comment and reply bodies in `$EDITOR`.
+- **Comment editing tools** — `ctrl+y` inserts GitHub-compatible suggestions for selected or anchored lines, including replies, and leaves the cursor at the end of the suggested code; `ctrl+o` edits comment and reply bodies in `$EDITOR`, while `ctrl+PgUp` / `ctrl+PgDn` scroll through code context and thread history.
 - **Deleted-line comments** — removed lines, including lines in fully deleted files, can be selected and commented on from the keyboard or gutter.
 - **Mouse-first TUI controls** — click file tabs, code lines, comment threads, sidebar items, dialog actions, and the review-finish button; use the wheel to scroll code and drag the gutter to select line ranges.
 - **Versioned plan reviews** — `tcrit plan` saves immutable revisions and carries comment threads forward as the plan changes.
@@ -214,6 +214,7 @@ Tcrit resolves the tmux server and pane from the invoking process tree, so this 
 | `ctrl+s` | Save the comment or reply                                     |
 | `ctrl+o` | Edit the comment or reply in `$EDITOR`                         |
 | `ctrl+y` | Insert a suggestion block for the selected or anchored lines  |
+| `ctrl+PgUp` / `ctrl+PgDn` | Scroll code context and thread history             |
 
 **Code review only:**
 
