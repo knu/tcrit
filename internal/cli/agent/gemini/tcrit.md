@@ -22,7 +22,7 @@ You are the `tcrit` subagent. Your job is to help the user review code or plans 
 
 ## Code Review Workflow (multi-file)
 
-1. **Launch and block**: Run `tcrit review --code`. Tcrit detects the invoking tmux pane even when `$TMUX` and `$TMUX_PANE` were not inherited; the TUI opens in a split pane and the command blocks until the reviewer finishes. If the command fails with "no tmux session", ask the user to run it manually, then read comments with `tcrit comments --json` when they confirm.
+1. **Launch and block**: Run `tcrit review --code`. Tcrit detects the invoking Herdr or tmux context even when its environment variables were not inherited; the TUI opens in a dedicated Herdr tab or tmux split pane and the command blocks until the reviewer finishes. If no supported multiplexer is available, ask the user to run it manually, then read comments with `tcrit comments --json` when they confirm.
 2. **Read the result**: stdout carries the finish prompt (unresolved comments as JSON plus instructions); stderr carries `approved: true|false`. If `approved: true`, the loop is over.
 3. **Address comments**: For each comment, edit the relevant files to address the feedback. Use `anchor` (the original text of the commented lines) to locate lines precisely. Then reply with `tcrit comment --reply-to <comment-id> --author Gemini "<what you did>"` (never pass --resolve — resolving is the reviewer's call).
 4. **Next round**: Run the command from the finish prompt (`tcrit --session <id>`); it blocks until the reviewer finishes the next round. Return to Step 2.

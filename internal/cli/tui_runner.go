@@ -110,6 +110,7 @@ func (s *tuiServer) handleConn(conn net.Conn) {
 		conn.Close()
 		return
 	}
+	focusCurrentHerdrTab()
 	s.mu.Lock()
 	startRound := s.finishCount > 0
 	s.waiters = append(s.waiters, conn)

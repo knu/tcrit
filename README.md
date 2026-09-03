@@ -9,7 +9,7 @@
 ## Key changes from upstream
 
 - **[Crit](https://crit.md/)-compatible agent workflow** — review commands block until the reviewer finishes, print an agent-facing result, and support iterative rounds through `tcrit --session <id>`; each round refreshes the changed-file set so newly added files appear without restarting the TUI.
-- **Native tmux context discovery** — tcrit finds the invoking pane from the agent's process ancestry even when tools such as Codex do not inherit `$TMUX` or `$TMUX_PANE`.
+- **Native Herdr and tmux workflows** — reviews open in a full-width Herdr tab or a tmux split; tcrit finds the invoking context from process ancestry even when tools such as Codex do not inherit multiplexer environment variables.
 - **CritJSON review state and CLI** — comments use [Crit](https://crit.md/)-compatible `review.json` data, with `tcrit comment` and `tcrit comments` for automation.
 - **File-level comments** — reviewers can press `f` to comment on the active file, with file threads kept in the comment sidebar instead of attached to a line.
 - **Comment editing tools** — `ctrl+y` inserts GitHub-compatible suggestions for selected or anchored lines, including replies, and leaves the cursor at the end of the suggested code; `ctrl+o` edits comment and reply bodies in `$EDITOR`, while `ctrl+PgUp` / `ctrl+PgDn` scroll through code context and thread history.
@@ -108,11 +108,13 @@ tcrit check                         # Report stale installed integrations
 ## Requirements
 
 - **Go 1.25+** for building from source
-- **tmux** for split-pane agent workflows. Without tmux, tcrit can run the TUI directly in an interactive terminal.
+- **Herdr or tmux** for automatic agent review workflows. Without either multiplexer, tcrit can run the TUI directly in an interactive terminal.
 
-### Starting a tmux session
+### Starting a multiplexer session
 
-If you're not already in tmux, start one before launching Claude Code:
+For the most spacious review layout, start the agent inside [Herdr](https://herdr.dev/). Tcrit opens each review in a dedicated tab and returns to the agent tab when the review ends.
+
+Alternatively, start tmux before launching your agent:
 
 ```bash
 tmux new -s work
@@ -120,7 +122,7 @@ tmux new -s work
 claude
 ```
 
-Without tmux, launch tcrit yourself in an interactive terminal when an agent asks you to review.
+Without Herdr or tmux, launch tcrit yourself in an interactive terminal when an agent asks you to review.
 
 ## CLI overview
 
@@ -161,7 +163,7 @@ tcrit comments --json
 
 ### How code review works
 
-1. An agent (or you) runs `tcrit review --code` — inside tmux the TUI opens in a split pane and the command blocks
+1. An agent (or you) runs `tcrit review --code` — the TUI opens in a Herdr tab or tmux split and the command blocks
 2. Navigate between files and leave inline comments on the changes
 3. Press `q` or click the footer button — with unresolved comments the button is **Finish Review**, without any it is **Approve**
 4. On finish, the blocked command prints the unresolved comments and instructions on stdout and `approved: true|false` on stderr
@@ -185,11 +187,11 @@ tcrit review docs/plans/my-plan.md
 
 Opens a full-screen terminal UI with syntax-highlighted markdown, a comment sidebar, and modal overlays for adding/editing comments.
 
-### tmux split pane mode
+### Multiplexer mode
 
-When `tcrit review` runs inside tmux (as the Claude Code skill does), the TUI automatically opens in a side-by-side split pane while the invoking command blocks until you finish the review — the same feedback loop as [crit](https://github.com/tomasz-tomczyk/crit), with a TUI in place of the browser.
+When `tcrit review` runs inside Herdr, the TUI automatically opens in a dedicated full-width tab. Inside tmux, it opens in a side-by-side split pane. In both cases the invoking command blocks until you finish the review — the same feedback loop as [crit](https://github.com/tomasz-tomczyk/crit), with a TUI in place of the browser.
 
-Tcrit resolves the tmux server and pane from the invoking process tree, so this mode also works with agents such as Codex that do not preserve `$TMUX` or `$TMUX_PANE` in command environments.
+Tcrit resolves the Herdr workspace, tab, and pane or the tmux server and pane from the invoking process tree. This also works with agents such as Codex that do not preserve the multiplexer environment in command runners. When multiplexers are nested, the nearest one in the process ancestry owns the review.
 
 ### How document review works
 
