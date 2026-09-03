@@ -18,7 +18,7 @@
 - **Versioned plan reviews** — `tcrit plan` saves immutable revisions and carries comment threads forward as the plan changes.
 - **Richer review lifecycle** — comment threads can be replied to, resolved, reopened, and approved together; agent replies are visually distinct, complete code context and thread history remain scrollable while editing, and comments and changes can be navigated across files.
 - **Improved diffs and Git handling** — inline replacements preserve whitespace, long syntax-highlighted lines wrap instead of being truncated, comment anchors survive edited rounds, and paths with spaces or special characters work correctly.
-- **Gemini CLI support** — the fork adds a Gemini agent alongside upstream's Claude Code integration.
+- **Agent integrations** — install review skills for Claude Code and Codex, or a Gemini CLI agent, with one command.
 - **[Crit](https://crit.md/) CLI alignment** — customizable finish prompts, unified integration installers, and `tcrit check` were added as part of adopting the Crit CLI workflow.
 
 TUI for reviewing AI-generated code and plans — built for human-in-the-loop agentic coding workflows.
@@ -79,6 +79,15 @@ The manual install provides these skills:
 - `/tcrit-code-review` — review Git changes with `tcrit review --code`
 - `/tcrit-plan-review <path>` — review immutable versions of a plan with `tcrit plan <path>`
 
+#### Codex
+
+```bash
+cd ~ && tcrit install codex        # Install globally (~/.agents/skills/)
+tcrit install codex                # From a repo root: install for that project
+```
+
+Then use `$tcrit-review` to choose between code and document/plan review. The installer also provides `$tcrit-code-review` and `$tcrit-plan-review` with Codex attribution and invocation syntax.
+
 #### Gemini CLI
 
 ```bash
@@ -127,7 +136,7 @@ Running `tcrit` with no subcommand reviews the current Git changes. Running `tcr
 | `tcrit comments [--json] [--all]` | List unresolved comments, optionally including resolved comments |
 | `tcrit clear <file>` | Clear a document review; use `--code` for code review or `--all` for all reviews in the current directory |
 | `tcrit status <file>` / `tcrit status --code` | Print the document or aggregate code-review status as JSON |
-| `tcrit install <target>` | Install `claude-code`, `gemini`, or `prompts`; `all` installs both agent integrations |
+| `tcrit install <target>` | Install `claude-code`, `codex`, `gemini`, or `prompts`; `all` installs every agent integration |
 | `tcrit check` | Report installed integration files that are stale |
 | `tcrit completion <shell>` | Generate completion for Bash, Zsh, Fish, or PowerShell |
 

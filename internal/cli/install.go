@@ -35,6 +35,18 @@ func embeddedFile(fs embed.FS, path string) func() ([]byte, error) {
 	return func() ([]byte, error) { return fs.ReadFile(path) }
 }
 
+func codexSkill(name string) func() ([]byte, error) {
+	return func() ([]byte, error) {
+		data, err := skillContent.ReadFile("skill/" + name + "/SKILL.md")
+		if err != nil {
+			return nil, err
+		}
+		data = bytes.ReplaceAll(data, []byte("/tcrit-"), []byte("$tcrit-"))
+		data = bytes.ReplaceAll(data, []byte("'Claude Code'"), []byte("'Codex'"))
+		return data, nil
+	}
+}
+
 // integrations maps install target names to their files, following crit's
 // naming (the Claude Code agent is "claude-code").
 func integrations() map[string][]integrationFile {
@@ -50,6 +62,17 @@ func integrations() map[string][]integrationFile {
 		})
 	}
 	m["claude-code"] = claude
+
+	var codex []integrationFile
+	for _, name := range []string{"tcrit-review", "tcrit-plan-review", "tcrit-code-review"} {
+		rel := filepath.Join(".agents", "skills", name, "SKILL.md")
+		codex = append(codex, integrationFile{
+			content:    codexSkill(name),
+			dest:       rel,
+			globalDest: rel,
+		})
+	}
+	m["codex"] = codex
 
 	m["gemini"] = []integrationFile{{
 		content:    embeddedFile(geminiContent, "agent/gemini/tcrit.md"),
@@ -77,8 +100,24 @@ func integrations() map[string][]integrationFile {
 	return m
 }
 
+func integrationTargets(target string, reg map[string][]integrationFile) ([]string, error) {
+	if target == "all" {
+		return []string{"claude-code", "codex", "gemini"}, nil
+	}
+	if _, ok := reg[target]; ok {
+		return []string{target}, nil
+	}
+
+	available := make([]string, 0, len(reg)+1)
+	for name := range reg {
+		available = append(available, name)
+	}
+	sort.Strings(available)
+	return nil, fmt.Errorf("unknown target %q (available: %s, all)", target, strings.Join(available, ", "))
+}
+
 var installCmd = &cobra.Command{
-	Use:   "install [--force] <claude-code|gemini|prompts|all>",
+	Use:   "install [--force] <claude-code|codex|gemini|prompts|all>",
 	Short: "Install agent integrations or stock prompt templates",
 	Long: `Install agent integrations (skills) or the stock finish prompt
 templates.
@@ -88,28 +127,17 @@ root to install for that project only, following crit's convention.
 
 Targets:
   claude-code  Claude Code skills (tcrit-review, tcrit-plan-review, tcrit-code-review)
+  codex        Codex skills (tcrit-review, tcrit-plan-review, tcrit-code-review)
   gemini       Gemini CLI agent (@tcrit)
   prompts      Stock finish prompt templates (customize after copying)
-  all          claude-code + gemini`,
+  all          claude-code + codex + gemini`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		target := args[0]
 		reg := integrations()
-
-		var names []string
-		switch target {
-		case "all":
-			names = []string{"claude-code", "gemini"}
-		default:
-			if _, ok := reg[target]; !ok {
-				available := make([]string, 0, len(reg)+1)
-				for name := range reg {
-					available = append(available, name)
-				}
-				sort.Strings(available)
-				return fmt.Errorf("unknown target %q (available: %s, all)", target, strings.Join(available, ", "))
-			}
-			names = []string{target}
+		names, err := integrationTargets(target, reg)
+		if err != nil {
+			return err
 		}
 
 		global, err := isGlobalInstall()
