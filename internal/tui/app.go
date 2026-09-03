@@ -1886,14 +1886,15 @@ func (m *AppModel) selectChange(tabIndex int, chunk changeChunk) {
 
 // sidebarItem represents a comment in the sidebar list.
 type sidebarItem struct {
-	id      string
-	scope   string
-	line    int
-	endLine int
-	side    string
-	body    string
-	author  string
-	replies []review.Reply
+	id       string
+	scope    string
+	line     int
+	endLine  int
+	side     string
+	body     string
+	author   string
+	replies  []review.Reply
+	resolved bool // shown collapsed; only file comments stay listed once resolved
 }
 
 // annotation represents an inline comment to render.
@@ -2625,17 +2626,24 @@ func (m *AppModel) updateCommentSidebar() {
 
 	t.sidebarItems = nil
 	for _, c := range t.state.Comments {
-		if c.Resolved {
+		// Resolved line comments stay reachable as collapsed inline
+		// annotations; file comments have no inline box, so keep them
+		// listed here in collapsed form.
+		if c.Resolved && c.Scope != "file" {
 			continue
 		}
 		t.sidebarItems = append(t.sidebarItems, sidebarItem{
 			id: c.ID, scope: c.Scope, line: c.StartLine, endLine: c.EndLine,
 			side: c.Side, body: c.Body, author: c.Author, replies: c.Replies,
+			resolved: c.Resolved,
 		})
 	}
 	sort.SliceStable(t.sidebarItems, func(i, j int) bool {
 		if t.sidebarItems[i].scope == "file" {
-			return t.sidebarItems[j].scope != "file"
+			if t.sidebarItems[j].scope != "file" {
+				return true
+			}
+			return !t.sidebarItems[i].resolved && t.sidebarItems[j].resolved
 		}
 		if t.sidebarItems[j].scope == "file" {
 			return false
@@ -2681,10 +2689,26 @@ func (m *AppModel) updateCommentSidebar() {
 		if it.author != "" {
 			lineInfo += " " + commentLineStyle.Render(it.author)
 		}
+		if it.resolved {
+			lineInfo += " " + resolvedBadge.Render("✓ resolved")
+		}
 		cursorCol := lipgloss.NewStyle().Width(2)
 		prefix := cursorCol.Render("")
 		if isSelected {
 			prefix = cursorCol.Render(cursorMarker.Render(">"))
+		}
+
+		if it.resolved {
+			fmt.Fprintf(&item, "%s%s", prefix, lineInfo)
+			wrapped := lipgloss.Wrap(expandDisplayTabs(item.String()), max(m.commentViewport.Width(), 1), "")
+			for _, row := range strings.Split(wrapped, "\n") {
+				b.WriteString(row)
+				b.WriteByte('\n')
+				m.sidebarTargets = append(m.sidebarTargets, idx)
+			}
+			b.WriteByte('\n')
+			m.sidebarTargets = append(m.sidebarTargets, idx)
+			continue
 		}
 
 		fmt.Fprintf(&item, "%s%s\n", prefix, lineInfo)

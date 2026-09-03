@@ -2993,3 +2993,34 @@ func TestRevertedAdditionShowsPlaceholderAndKeepsComments(t *testing.T) {
 		t.Fatalf("persisted comments = %+v, want the kept comment", got)
 	}
 }
+
+func TestCommentSidebarCollapsesResolvedFileComments(t *testing.T) {
+	fileComment := review.Comment{ID: "c_file", Scope: "file", Body: "split this file", Author: "Reviewer", Resolved: true, CreatedAt: review.Now()}
+	lineComment := testComment()
+
+	app, _ := newFinishTestApp(t, []review.Comment{lineComment, fileComment}, false)
+	app.commentViewport.SetWidth(40)
+	app.commentViewport.SetHeight(20)
+	app.focused = commentPane
+	app.updateCommentSidebar()
+
+	items := app.tabs[0].sidebarItems
+	if len(items) != 2 || items[0].id != fileComment.ID || !items[0].resolved {
+		t.Fatalf("sidebar items = %+v, want the resolved file comment first", items)
+	}
+	rendered := ansi.Strip(app.commentViewport.View())
+	if !strings.Contains(rendered, "✓ resolved") || strings.Contains(rendered, fileComment.Body) {
+		t.Fatalf("sidebar = %q, want a collapsed resolved header without the body", rendered)
+	}
+
+	app.tabs[0].sidebarCursor = 0
+	app = pressKey(app, 'r')
+
+	if app.tabs[0].state.Comments[1].Resolved {
+		t.Fatal("expected r to reopen the resolved file comment")
+	}
+	rendered = ansi.Strip(app.commentViewport.View())
+	if !strings.Contains(rendered, fileComment.Body) {
+		t.Fatalf("sidebar = %q, want the reopened body", rendered)
+	}
+}
