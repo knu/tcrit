@@ -7,7 +7,7 @@
     {
       "name": "tcrit",
       "source": "./plugin/tcrit",
-      "description": "Review markdown documents with an interactive TUI and let Claude address feedback automatically."
+      "description": "Review code changes and documents with an interactive TUI. Leave inline comments, then let Claude address the feedback and reply automatically."
     }
   ]
 }

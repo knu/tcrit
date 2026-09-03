@@ -40,7 +40,7 @@ tcrit is available as a Claude Code plugin. Add the marketplace and install:
 /plugin install tcrit
 ```
 
-Then use `/tcrit:review` in Claude Code. It asks whether you want to review code changes or a document, opens the TUI, and has Claude address your comments after each round.
+Then use `/tcrit:tcrit [file]` in Claude Code. It opens the TUI on the git changes or on the given document and has Claude address your comments after each round.
 
 ### Command-line binary
 
@@ -64,34 +64,35 @@ export PATH="$PATH:$(go env GOPATH)/bin"
 
 ### Manual skill install
 
-If you prefer not to use the plugin, you can install the skill directly:
+If you prefer not to use the plugin, install the integration for your agent directly. Every target provides two pieces:
+
+- `tcrit [file]` — the interactive review loop. It opens the TUI on the git changes (`tcrit`), a document (`tcrit <file>`), or a versioned plan (`tcrit plan <file>`), then has the agent address the comments round by round.
+- `tcrit-cli` — a reference skill the agent loads when it needs `tcrit comment`, `tcrit comments`, session or plan targeting, bulk JSON input, or the review file format.
+
+Run the installer from your home directory to install globally, or from a repository root to install for that project only.
 
 #### Claude Code
 
 ```bash
-cd ~ && tcrit install claude-code   # Install globally (~/.claude/skills/)
+cd ~ && tcrit install claude-code   # ~/.claude/skills/{tcrit,tcrit-cli}/
 tcrit install claude-code           # From a repo root: install for that project
 ```
 
-The manual install provides these skills:
-
-- `/tcrit-review` — choose between code and document/plan review
-- `/tcrit-code-review` — review Git changes with `tcrit review --code`
-- `/tcrit-plan-review <path>` — review immutable versions of a plan with `tcrit plan <path>`
+Then use `/tcrit [file]`.
 
 #### Codex
 
 ```bash
-cd ~ && tcrit install codex        # Install globally (~/.agents/skills/)
+cd ~ && tcrit install codex        # ~/.agents/skills/{tcrit,tcrit-cli}/
 tcrit install codex                # From a repo root: install for that project
 ```
 
-Then use `$tcrit-review` to choose between code and document/plan review. The installer also provides `$tcrit-code-review` and `$tcrit-plan-review` with Codex attribution and invocation syntax.
+Then use `$tcrit`. The installed skills use Codex invocation syntax and reply attribution.
 
 #### Gemini CLI
 
 ```bash
-cd ~ && tcrit install gemini        # Install globally (~/.gemini/)
+cd ~ && tcrit install gemini        # ~/.gemini/agents/tcrit.md and ~/.gemini/skills/tcrit-cli/
 tcrit install gemini                # From a repo root: install for that project
 ```
 

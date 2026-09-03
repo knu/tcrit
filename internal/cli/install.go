@@ -15,7 +15,7 @@ import (
 	"github.com/knu/tcrit/internal/xdg"
 )
 
-//go:embed skill/tcrit-review/SKILL.md skill/tcrit-plan-review/SKILL.md skill/tcrit-code-review/SKILL.md
+//go:embed skill/tcrit/SKILL.md skill/tcrit-cli/SKILL.md
 var skillContent embed.FS
 
 //go:embed agent/gemini/tcrit.md
@@ -31,19 +31,103 @@ type integrationFile struct {
 	globalDest string // relative to $HOME, or absolute when starting with "/"
 }
 
+// skillVariant describes how the embedded Claude Code skills are rewritten
+// for another agent: how that agent invokes a skill or command, how replies
+// are attributed, and which frontmatter keys it does not understand.
+type skillVariant struct {
+	author         string
+	skillRef       func(name string) string
+	argumentsToken string
+	dropKeys       []string
+}
+
+var skillVariants = map[string]skillVariant{
+	"claude-code": {
+		author:         "Claude Code",
+		skillRef:       func(name string) string { return "/" + name },
+		argumentsToken: "$ARGUMENTS",
+	},
+	"codex": {
+		author:         "Codex",
+		skillRef:       func(name string) string { return "$" + name },
+		argumentsToken: "<arguments>",
+		dropKeys:       []string{"allowed-tools", "argument-hint", "user-invocable"},
+	},
+	"gemini": {
+		author:         "Gemini",
+		skillRef:       func(name string) string { return name },
+		argumentsToken: "$ARGUMENTS",
+		dropKeys:       []string{"allowed-tools", "argument-hint", "user-invocable"},
+	},
+}
+
+var skillNames = []string{"tcrit", "tcrit-cli"}
+
 func embeddedFile(fs embed.FS, path string) func() ([]byte, error) {
 	return func() ([]byte, error) { return fs.ReadFile(path) }
 }
 
-func codexSkill(name string) func() ([]byte, error) {
-	return func() ([]byte, error) {
-		data, err := skillContent.ReadFile("skill/" + name + "/SKILL.md")
-		if err != nil {
-			return nil, err
-		}
-		data = bytes.ReplaceAll(data, []byte("/tcrit-"), []byte("$tcrit-"))
-		data = bytes.ReplaceAll(data, []byte("'Claude Code'"), []byte("'Codex'"))
+// renderSkill returns the embedded skill rewritten for the named agent.
+func renderSkill(name, agent string) ([]byte, error) {
+	data, err := skillContent.ReadFile("skill/" + name + "/SKILL.md")
+	if err != nil {
+		return nil, err
+	}
+	variant := skillVariants[agent]
+	base := skillVariants["claude-code"]
+	if agent == "claude-code" {
 		return data, nil
+	}
+	for _, skill := range skillNames {
+		data = bytes.ReplaceAll(data,
+			[]byte("`"+base.skillRef(skill)+"`"),
+			[]byte("`"+variant.skillRef(skill)+"`"))
+	}
+	for _, quote := range []string{"'", `"`} {
+		data = bytes.ReplaceAll(data, []byte(quote+base.author+quote), []byte(quote+variant.author+quote))
+	}
+	data = bytes.ReplaceAll(data, []byte(base.argumentsToken), []byte(variant.argumentsToken))
+	return dropFrontmatterKeys(data, variant.dropKeys), nil
+}
+
+// dropFrontmatterKeys removes the given top-level keys from the YAML
+// frontmatter at the start of data.  Only single-line keys are handled,
+// which is all the embedded skills use.
+func dropFrontmatterKeys(data []byte, keys []string) []byte {
+	if len(keys) == 0 || !bytes.HasPrefix(data, []byte("---\n")) {
+		return data
+	}
+	rest := data[len("---\n"):]
+	end := bytes.Index(rest, []byte("\n---\n"))
+	if end < 0 {
+		return data
+	}
+	var kept [][]byte
+	for _, line := range bytes.Split(rest[:end], []byte("\n")) {
+		drop := false
+		for _, key := range keys {
+			if bytes.HasPrefix(line, []byte(key+":")) {
+				drop = true
+				break
+			}
+		}
+		if !drop {
+			kept = append(kept, line)
+		}
+	}
+	var out bytes.Buffer
+	out.WriteString("---\n")
+	out.Write(bytes.Join(kept, []byte("\n")))
+	out.Write(rest[end:])
+	return out.Bytes()
+}
+
+func skillFile(name, agent, dir string) integrationFile {
+	rel := filepath.Join(dir, "skills", name, "SKILL.md")
+	return integrationFile{
+		content:    func() ([]byte, error) { return renderSkill(name, agent) },
+		dest:       rel,
+		globalDest: rel,
 	}
 }
 
@@ -52,33 +136,25 @@ func codexSkill(name string) func() ([]byte, error) {
 func integrations() map[string][]integrationFile {
 	m := map[string][]integrationFile{}
 
-	var claude []integrationFile
-	for _, name := range []string{"tcrit-review", "tcrit-plan-review", "tcrit-code-review"} {
-		rel := filepath.Join(".claude", "skills", name, "SKILL.md")
-		claude = append(claude, integrationFile{
-			content:    embeddedFile(skillContent, "skill/"+name+"/SKILL.md"),
-			dest:       rel,
-			globalDest: rel,
-		})
+	m["claude-code"] = []integrationFile{
+		skillFile("tcrit", "claude-code", ".claude"),
+		skillFile("tcrit-cli", "claude-code", ".claude"),
 	}
-	m["claude-code"] = claude
 
-	var codex []integrationFile
-	for _, name := range []string{"tcrit-review", "tcrit-plan-review", "tcrit-code-review"} {
-		rel := filepath.Join(".agents", "skills", name, "SKILL.md")
-		codex = append(codex, integrationFile{
-			content:    codexSkill(name),
-			dest:       rel,
-			globalDest: rel,
-		})
+	m["codex"] = []integrationFile{
+		skillFile("tcrit", "codex", ".agents"),
+		skillFile("tcrit-cli", "codex", ".agents"),
 	}
-	m["codex"] = codex
 
-	m["gemini"] = []integrationFile{{
-		content:    embeddedFile(geminiContent, "agent/gemini/tcrit.md"),
-		dest:       filepath.Join(".gemini", "agents", "tcrit.md"),
-		globalDest: filepath.Join(".gemini", "agents", "tcrit.md"),
-	}}
+	geminiAgent := filepath.Join(".gemini", "agents", "tcrit.md")
+	m["gemini"] = []integrationFile{
+		{
+			content:    embeddedFile(geminiContent, "agent/gemini/tcrit.md"),
+			dest:       geminiAgent,
+			globalDest: geminiAgent,
+		},
+		skillFile("tcrit-cli", "gemini", ".gemini"),
+	}
 
 	var prompts []integrationFile
 	stock := prompt.StockTemplates()
@@ -100,9 +176,11 @@ func integrations() map[string][]integrationFile {
 	return m
 }
 
+var agentTargets = []string{"claude-code", "codex", "gemini"}
+
 func integrationTargets(target string, reg map[string][]integrationFile) ([]string, error) {
 	if target == "all" {
-		return []string{"claude-code", "codex", "gemini"}, nil
+		return agentTargets, nil
 	}
 	if _, ok := reg[target]; ok {
 		return []string{target}, nil
@@ -126,9 +204,9 @@ Run from your home directory to install globally, or from a repository
 root to install for that project only, following crit's convention.
 
 Targets:
-  claude-code  Claude Code skills (tcrit-review, tcrit-plan-review, tcrit-code-review)
-  codex        Codex skills (tcrit-review, tcrit-plan-review, tcrit-code-review)
-  gemini       Gemini CLI agent (@tcrit)
+  claude-code  Claude Code skills (tcrit, tcrit-cli)
+  codex        Codex skills (tcrit, tcrit-cli)
+  gemini       Gemini CLI agent (@tcrit) and skill (tcrit-cli)
   prompts      Stock finish prompt templates (customize after copying)
   all          claude-code + codex + gemini`,
 	Args: cobra.ExactArgs(1),

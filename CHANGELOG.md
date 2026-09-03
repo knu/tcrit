@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`tcrit-cli` reference skill** — documents `tcrit comment`, `tcrit comments`, session and plan targeting, bulk JSON input, the review file format, and clearing, so agents no longer guess at headless usage
+
+### Changed
+
+- **Simpler skill set** — a single `tcrit` skill passes its arguments straight to the CLI, which chooses between git changes, a document, and a plan, instead of asking the user which mode to use; Claude Code, Codex, and Gemini all install the same `tcrit` + `tcrit-cli` pair
+- The Claude Code plugin ships the skills under `plugin/tcrit/skills/` and is invoked as `/tcrit:tcrit`
+
+### Removed
+
+- The `tcrit-review`, `tcrit-code-review`, and `tcrit-plan-review` skills, the `tcrit:review`, `tcrit:code-review`, and `tcrit:plan-review` plugin commands, and the legacy root-level plugin manifest inherited from upstream
+
 ## 0.7.0
 
 ### Added
