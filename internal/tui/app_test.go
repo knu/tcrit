@@ -2736,6 +2736,21 @@ func TestEnterAddsThenEditsOwnCurrentRoundReply(t *testing.T) {
 	}
 }
 
+func TestEnterDoesNotEditOwnReplyAfterFollowup(t *testing.T) {
+	comment := testComment()
+	comment.Replies = []review.Reply{
+		{ID: "rp_own", Author: "Tester", Body: "question", ReviewRound: 1},
+		{ID: "rp_ai", Author: "AI", Body: "answer", ReviewRound: 1},
+	}
+	app, _ := newFinishTestApp(t, []review.Comment{comment}, false)
+
+	app.openCommentThread(comment.ID)
+
+	if app.modal != replyModal || app.editingReplyID != "" {
+		t.Fatalf("modal = %v, editing reply = %q; want a new reply", app.modal, app.editingReplyID)
+	}
+}
+
 func TestEnterEditsOnlyOwnUnrepliedCurrentRoundParent(t *testing.T) {
 	tests := []struct {
 		name      string

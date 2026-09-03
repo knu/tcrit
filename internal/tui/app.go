@@ -821,12 +821,14 @@ func (m *AppModel) openLineComment() {
 }
 
 func (m *AppModel) latestOwnReply(c *review.Comment) *review.Reply {
-	for i := len(c.Replies) - 1; i >= 0; i-- {
-		if m.authoredThisRound(c.Replies[i].Author, c.Replies[i].ReviewRound) {
-			return &c.Replies[i]
-		}
+	if len(c.Replies) == 0 {
+		return nil
 	}
-	return nil
+	reply := &c.Replies[len(c.Replies)-1]
+	if !m.authoredThisRound(reply.Author, reply.ReviewRound) {
+		return nil
+	}
+	return reply
 }
 
 func (m *AppModel) modalSubmit() {
