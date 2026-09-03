@@ -53,6 +53,17 @@ var skillVariants = map[string]skillVariant{
 		argumentsToken: "<arguments>",
 		dropKeys:       []string{"allowed-tools", "argument-hint", "user-invocable"},
 	},
+	"opencode": {
+		author: "OpenCode",
+		skillRef: func(name string) string {
+			if name == "tcrit" {
+				return "/tcrit" // installed as a command
+			}
+			return name
+		},
+		argumentsToken: "$ARGUMENTS",
+		dropKeys:       []string{"allowed-tools", "argument-hint", "user-invocable"},
+	},
 	"gemini": {
 		author:         "Gemini",
 		skillRef:       func(name string) string { return name },
@@ -146,6 +157,22 @@ func integrations() map[string][]integrationFile {
 		skillFile("tcrit-cli", "codex", ".agents"),
 	}
 
+	openCodeCommand := filepath.Join(".opencode", "commands", "tcrit.md")
+	m["opencode"] = []integrationFile{
+		{
+			content: func() ([]byte, error) {
+				data, err := renderSkill("tcrit", "opencode")
+				if err != nil {
+					return nil, err
+				}
+				return dropFrontmatterKeys(data, []string{"name"}), nil // commands are named by their file
+			},
+			dest:       openCodeCommand,
+			globalDest: openCodeCommand,
+		},
+		skillFile("tcrit-cli", "opencode", ".opencode"),
+	}
+
 	geminiAgent := filepath.Join(".gemini", "agents", "tcrit.md")
 	m["gemini"] = []integrationFile{
 		{
@@ -176,7 +203,7 @@ func integrations() map[string][]integrationFile {
 	return m
 }
 
-var agentTargets = []string{"claude-code", "codex", "gemini"}
+var agentTargets = []string{"claude-code", "codex", "opencode", "gemini"}
 
 func integrationTargets(target string, reg map[string][]integrationFile) ([]string, error) {
 	if target == "all" {
@@ -195,7 +222,7 @@ func integrationTargets(target string, reg map[string][]integrationFile) ([]stri
 }
 
 var installCmd = &cobra.Command{
-	Use:   "install [--force] <claude-code|codex|gemini|prompts|all>",
+	Use:   "install [--force] <claude-code|codex|opencode|gemini|prompts|all>",
 	Short: "Install agent integrations or stock prompt templates",
 	Long: `Install agent integrations (skills) or the stock finish prompt
 templates.
@@ -206,9 +233,10 @@ root to install for that project only, following crit's convention.
 Targets:
   claude-code  Claude Code skills (tcrit, tcrit-cli)
   codex        Codex skills (tcrit, tcrit-cli)
+  opencode     OpenCode command (/tcrit) and skill (tcrit-cli)
   gemini       Gemini CLI agent (@tcrit) and skill (tcrit-cli)
   prompts      Stock finish prompt templates (customize after copying)
-  all          claude-code + codex + gemini`,
+  all          claude-code + codex + opencode + gemini`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		target := args[0]

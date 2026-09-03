@@ -89,6 +89,15 @@ tcrit install codex                # From a repo root: install for that project
 
 Then use `$tcrit`. The installed skills use Codex invocation syntax and reply attribution.
 
+#### OpenCode
+
+```bash
+cd ~ && tcrit install opencode     # ~/.opencode/commands/tcrit.md and ~/.opencode/skills/tcrit-cli/
+tcrit install opencode             # From a repo root: install for that project
+```
+
+Then use `/tcrit [file]`.
+
 #### Gemini CLI
 
 ```bash

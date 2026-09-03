@@ -46,6 +46,10 @@ func TestIntegrationLayouts(t *testing.T) {
 			filepath.Join(".agents", "skills", "tcrit", "SKILL.md"),
 			filepath.Join(".agents", "skills", "tcrit-cli", "SKILL.md"),
 		},
+		"opencode": {
+			filepath.Join(".opencode", "commands", "tcrit.md"),
+			filepath.Join(".opencode", "skills", "tcrit-cli", "SKILL.md"),
+		},
 		"gemini": {
 			filepath.Join(".gemini", "agents", "tcrit.md"),
 			filepath.Join(".gemini", "skills", "tcrit-cli", "SKILL.md"),
@@ -63,7 +67,7 @@ func TestAllIncludesEveryAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, agent := range []string{"claude-code", "codex", "gemini"} {
+	for _, agent := range []string{"claude-code", "codex", "opencode", "gemini"} {
 		if !slices.Contains(names, agent) {
 			t.Errorf("all target %q lacks %s", names, agent)
 		}
@@ -107,6 +111,34 @@ func TestCodexSkillsUseCodexConventions(t *testing.T) {
 	}
 	if !strings.HasPrefix(cli, "---\nname: tcrit-cli\ndescription: ") {
 		t.Errorf("Codex tcrit-cli frontmatter is malformed:\n%s", cli[:min(len(cli), 200)])
+	}
+}
+
+func TestOpenCodeCommandKeepsArgumentsAndDropsClaudeKeys(t *testing.T) {
+	command := integrationContent(t, "opencode", filepath.Join(".opencode", "commands", "tcrit.md"))
+	cli := integrationContent(t, "opencode", filepath.Join(".opencode", "skills", "tcrit-cli", "SKILL.md"))
+
+	if !strings.Contains(command, "tcrit $ARGUMENTS") {
+		t.Error("OpenCode command lost $ARGUMENTS")
+	}
+	if !strings.HasPrefix(command, "---\ndescription: ") {
+		t.Errorf("OpenCode command frontmatter should start with description:\n%s", command[:min(len(command), 120)])
+	}
+	if !strings.Contains(command, "`tcrit-cli`") || strings.Contains(command, "`/tcrit-cli`") {
+		t.Error("OpenCode command must reference the tcrit-cli skill by bare name")
+	}
+	if !strings.Contains(cli, "`/tcrit`") {
+		t.Error("OpenCode tcrit-cli must point at the /tcrit command")
+	}
+	for _, content := range []string{command, cli} {
+		for _, unwanted := range []string{"Claude Code", "allowed-tools:", "argument-hint:", "user-invocable:"} {
+			if strings.Contains(content, unwanted) {
+				t.Errorf("OpenCode file still contains %q", unwanted)
+			}
+		}
+		if !strings.Contains(content, "'OpenCode'") {
+			t.Error("OpenCode file is not attributed to OpenCode")
+		}
 	}
 }
 
