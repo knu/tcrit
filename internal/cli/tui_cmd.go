@@ -9,8 +9,8 @@ import (
 
 var tuiPlan string
 
-// tuiCmd is the internal command run inside the tmux split pane: it owns
-// the review session, serves the session socket, and stays across rounds.
+// tuiCmd is the internal command run in the multiplexer surface: it owns the
+// review session, serves the session socket, and stays across rounds.
 var tuiCmd = &cobra.Command{
 	Use:    "_tui [file]",
 	Short:  "Run the internal review TUI server",

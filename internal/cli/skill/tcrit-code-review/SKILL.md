@@ -24,15 +24,15 @@ When starting a new review task (not a later round of the same task), reset stat
 tcrit clear --all
 ```
 
-Run this command with a **timeout of 600000** (10 minutes) since it blocks until the reviewer finishes (pass `--base <ref>` to change the diff base).  Tcrit detects the invoking tmux pane even when `$TMUX` and `$TMUX_PANE` were not inherited:
+Run this command with a **timeout of 600000** (10 minutes) since it blocks until the reviewer finishes (pass `--base <ref>` to change the diff base).  Tcrit detects the invoking Herdr or tmux context even when its environment variables were not inherited:
 
 ```bash
 tcrit review --code
 ```
 
-The TUI opens in a tmux split pane; the command blocks until the reviewer approves or finishes with comments. If the command runner yields an execution session ID, keep polling that execution session until the process exits. A quick exit is a valid completed review; do not impose a minimum wait, and never use a fixed sleep in place of session polling.
+The TUI opens in a dedicated Herdr tab or a tmux split pane; the command blocks until the reviewer approves or finishes with comments. If the command runner yields an execution session ID, keep polling that execution session until the process exits. A quick exit is a valid completed review; do not impose a minimum wait, and never use a fixed sleep in place of session polling.
 
-If not in tmux (the command fails with "no tmux session"), ask the user to run the TUI manually:
+If no supported multiplexer is available, ask the user to run the TUI manually:
 
 > Please run this in your terminal, review the changes, and let me know when you're done:
 >

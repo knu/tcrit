@@ -54,6 +54,9 @@ func reconnectSession(key string) error {
 	if !ipc.Alive(sock) {
 		return fmt.Errorf("review session %s is not running; start a new review with `tcrit`", key)
 	}
+	if multiplexer := findMultiplexerContext(); multiplexer != nil {
+		defer multiplexer.restoreFocus()
+	}
 	return runReviewCycle(cfg, sess, sock)
 }
 

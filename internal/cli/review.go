@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -49,10 +50,11 @@ var reviewCmd = &cobra.Command{
 With no file argument, reviews the current git changes (multi-file mode).
 With a file argument, reviews that document.
 
-Inside tmux the TUI opens in a split pane and this command blocks until
-the reviewer approves or finishes with comments, printing the resulting
-agent prompt on stdout and "approved: true|false" on stderr.  Outside
-tmux the TUI runs in the current terminal.`,
+Inside Herdr the TUI opens in a dedicated tab; inside tmux it opens in a
+split pane. This command blocks until the reviewer approves or finishes
+with comments, printing the resulting agent prompt on stdout and
+"approved: true|false" on stderr. Outside a multiplexer the TUI runs in
+the current terminal.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runReview(args)
@@ -111,20 +113,22 @@ func runReview(args []string) error {
 	return runReviewFlow(cfg, sess, mode)
 }
 
-// runReviewFlow connects to a live session, spawns the TUI in a tmux split,
-// or runs the TUI inline, then handles the finish result.
+// runReviewFlow connects to a live session, opens the TUI in the caller's
+// terminal multiplexer, or runs it inline, then handles the finish result.
 func runReviewFlow(cfg *config.Config, sess *review.Session, mode *reviewMode) error {
 	sock := review.SocketPathFor(sess.Key)
 	if ipc.Alive(sock) {
 		return runReviewCycle(cfg, sess, sock)
 	}
 
-	tmux := findTMUXContext()
-	if tmux.active() {
-		if err := spawnTUIPane(mode, tmux); err != nil {
+	if multiplexer := findMultiplexerContext(); multiplexer != nil {
+		launch, err := multiplexer.launchReview(mode)
+		if err != nil {
 			return err
 		}
+		defer launch.restoreFocus()
 		if err := ipc.WaitAlive(sock, 15*time.Second); err != nil {
+			launch.close()
 			return err
 		}
 		return runReviewCycle(cfg, sess, sock)
@@ -146,7 +150,7 @@ func runReviewFlow(cfg *config.Config, sess *review.Session, mode *reviewMode) e
 		return nil
 	}
 
-	return fmt.Errorf("no tmux session and no terminal to open the TUI in; run inside tmux, or have the reviewer run `tcrit%s` in a terminal", reviewArgSuffix(mode))
+	return fmt.Errorf("no Herdr or tmux session and no terminal to open the TUI in; run inside Herdr or tmux, or have the reviewer run `tcrit%s` in a terminal", reviewArgSuffix(mode))
 }
 
 func reviewArgSuffix(mode *reviewMode) string {
@@ -270,35 +274,9 @@ func spawnTUIPane(mode *reviewMode, tmux tmuxContext) error {
 	if err != nil {
 		return fmt.Errorf("tmux binary not found on PATH: %w", err)
 	}
-	tcritBin, err := resolveExec()
+	tuiCmd, err := buildTUICommand(mode)
 	if err != nil {
-		return fmt.Errorf("resolving tcrit binary path: %w", err)
-	}
-
-	// tmux panes inherit the server's environment, not the caller's, so
-	// pass through the variables that decide where session state lives.
-	envPrefix := "TCRIT_DETACHED=1"
-	for _, name := range []string{"XDG_STATE_HOME", "XDG_CONFIG_HOME"} {
-		if val := os.Getenv(name); val != "" {
-			envPrefix += " " + name + "=" + shellEscape(val)
-		}
-	}
-
-	var tuiCmd string
-	switch {
-	case mode.plan():
-		tuiCmd = fmt.Sprintf("%s %s _tui --plan %s",
-			envPrefix, shellEscape(tcritBin), shellEscape(mode.planSlug))
-	case mode.code():
-		tuiCmd = fmt.Sprintf("%s %s _tui --base %s",
-			envPrefix, shellEscape(tcritBin), shellEscape(mode.ref))
-	default:
-		absPath, err := filepath.Abs(mode.docPath)
-		if err != nil {
-			return fmt.Errorf("resolving absolute path: %w", err)
-		}
-		tuiCmd = fmt.Sprintf("%s %s _tui %s",
-			envPrefix, shellEscape(tcritBin), shellEscape(absPath))
+		return err
 	}
 
 	splitCmd := tmuxCommand(tmuxBin, tmux, splitWindowArgs(true, tuiCmd, tmux.pane)...)
@@ -312,6 +290,38 @@ func spawnTUIPane(mode *reviewMode, tmux tmuxContext) error {
 	}
 	fmt.Fprintln(os.Stderr, "Opened review in tmux pane")
 	return nil
+}
+
+func buildTUICommand(mode *reviewMode) (string, error) {
+	tcritBin, err := resolveExec()
+	if err != nil {
+		return "", fmt.Errorf("resolving tcrit binary path: %w", err)
+	}
+
+	// Multiplexer panes inherit their host's environment, not necessarily the
+	// caller's, so pass through the variables that locate review state.
+	envPrefix := "env TCRIT_DETACHED=1"
+	for _, name := range []string{"XDG_STATE_HOME", "XDG_CONFIG_HOME"} {
+		if val := os.Getenv(name); val != "" {
+			envPrefix += " " + name + "=" + shellEscape(val)
+		}
+	}
+
+	switch {
+	case mode.plan():
+		return fmt.Sprintf("%s %s _tui --plan %s",
+			envPrefix, shellEscape(tcritBin), shellEscape(mode.planSlug)), nil
+	case mode.code():
+		return fmt.Sprintf("%s %s _tui --base %s",
+			envPrefix, shellEscape(tcritBin), shellEscape(mode.ref)), nil
+	default:
+		absPath, err := filepath.Abs(mode.docPath)
+		if err != nil {
+			return "", fmt.Errorf("resolving absolute path: %w", err)
+		}
+		return fmt.Sprintf("%s %s _tui %s",
+			envPrefix, shellEscape(tcritBin), shellEscape(absPath)), nil
+	}
 }
 
 func fallbackRef() (string, []git.FileChange, error) {
@@ -369,57 +379,69 @@ type tmuxContext struct {
 	pane    string
 }
 
-func (c tmuxContext) active() bool {
-	return c.session != "" || c.pane != ""
+type tmuxDetector struct{}
+
+func (tmuxDetector) environmentPresent() bool {
+	return os.Getenv("TMUX") != "" || os.Getenv("TMUX_PANE") != ""
 }
 
-func findTMUXContext() tmuxContext {
-	ctx := tmuxContext{
-		session: os.Getenv("TMUX"),
-		pane:    os.Getenv("TMUX_PANE"),
-	}
-	if ctx.session != "" && ctx.pane != "" {
-		return ctx
-	}
-
-	found := resolveTMUXContext()
-	if ctx.session == "" {
-		ctx.session = found.session
-	}
-	if ctx.pane == "" {
-		ctx.pane = found.pane
+func (tmuxDetector) environmentContext() reviewMultiplexerContext {
+	ctx := tmuxContext{session: os.Getenv("TMUX"), pane: os.Getenv("TMUX_PANE")}
+	if !ctx.active() {
+		return nil
 	}
 	return ctx
 }
 
-func resolveTMUXContext() tmuxContext {
-	tmuxBin, err := lookPath("tmux")
-	if err != nil {
-		return tmuxContext{}
+func (tmuxDetector) processContexts() map[int]reviewMultiplexerContext {
+	contexts := make(map[int]reviewMultiplexerContext)
+	for pid, ctx := range tmuxProcessContexts() {
+		contexts[pid] = ctx
 	}
-
-	panes := tmuxPIDContexts(tmuxBin, "list-panes", "-a", "-F", "#{pane_pid}\t#{socket_path}\t#{pid}\t#{session_id}\t#{pane_id}")
-	clients := tmuxPIDContexts(tmuxBin, "list-clients", "-F", "#{client_pid}\t#{socket_path}\t#{pid}\t#{session_id}")
-	seen := make(map[int]bool)
-	for pid := parentProcessID(); pid > 1 && !seen[pid]; {
-		seen[pid] = true
-		if ctx, ok := panes[pid]; ok {
-			return ctx
-		}
-		if ctx, ok := clients[pid]; ok {
-			return ctx
-		}
-		ppid, err := inspectProcess(pid)
-		if err != nil {
-			break
-		}
-		pid = ppid
-	}
-	return tmuxContext{}
+	return contexts
 }
 
-func tmuxPIDContexts(tmuxBin string, args ...string) map[int]tmuxContext {
-	out, err := commandOutput(exec.Command(tmuxBin, args...))
+func (c tmuxContext) launchReview(mode *reviewMode) (reviewMultiplexerLaunch, error) {
+	if err := spawnTUIPane(mode, c); err != nil {
+		return nil, err
+	}
+	return tmuxLaunch{}, nil
+}
+
+func (tmuxContext) restoreFocus() {}
+
+type tmuxLaunch struct{}
+
+func (tmuxLaunch) close()        {}
+func (tmuxLaunch) restoreFocus() {}
+
+func (c tmuxContext) active() bool {
+	return c.session != "" || c.pane != ""
+}
+
+func tmuxProcessContexts() map[int]tmuxContext {
+	tmuxBin, err := lookPath("tmux")
+	if err != nil {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	panes := tmuxPIDContexts(ctx, tmuxBin, "list-panes", "-a", "-F", "#{pane_pid}\t#{socket_path}\t#{pid}\t#{session_id}\t#{pane_id}")
+	clients := tmuxPIDContexts(ctx, tmuxBin, "list-clients", "-F", "#{client_pid}\t#{socket_path}\t#{pid}\t#{session_id}")
+	if panes == nil {
+		panes = make(map[int]tmuxContext)
+	}
+	for pid, ctx := range clients {
+		if _, exists := panes[pid]; !exists {
+			panes[pid] = ctx
+		}
+	}
+	return panes
+}
+
+func tmuxPIDContexts(ctx context.Context, tmuxBin string, args ...string) map[int]tmuxContext {
+	out, err := commandOutput(exec.CommandContext(ctx, tmuxBin, args...))
 	if err != nil {
 		return nil
 	}

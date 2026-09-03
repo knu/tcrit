@@ -141,13 +141,17 @@ func TestSpawnTUIPaneRetriesWithoutPercentage(t *testing.T) {
 	}
 }
 
-func TestFindTMUXContextUsesEnvironment(t *testing.T) {
+func TestTMUXDetectorUsesEnvironment(t *testing.T) {
 	t.Setenv("TMUX", "/tmp/tmux/default,100,2")
 	t.Setenv("TMUX_PANE", "%7")
 
-	got := findTMUXContext()
+	context := (tmuxDetector{}).environmentContext()
+	got, ok := context.(tmuxContext)
+	if !ok {
+		t.Fatalf("environmentContext() = %T, want tmuxContext", context)
+	}
 	if got.session != "/tmp/tmux/default,100,2" || got.pane != "%7" {
-		t.Errorf("findTMUXContext() = %+v", got)
+		t.Errorf("environmentContext() = %+v", got)
 	}
 }
 
@@ -177,9 +181,13 @@ func TestResolveTMUXContextFromAncestorPanePID(t *testing.T) {
 		commandOutput, parentProcessID, inspectProcess, lookPath = origOutput, origParent, origInspect, origLook
 	})
 
-	got := resolveTMUXContext()
+	context := walkAncestorContexts([]multiplexerDetector{tmuxDetector{}})
+	got, ok := context.(tmuxContext)
+	if !ok {
+		t.Fatalf("walkAncestorContexts() = %T, want tmuxContext", context)
+	}
 	if got.session != "/tmp/tmux-501/default,100,2" || got.pane != "%7" {
-		t.Errorf("resolveTMUXContext() = %+v", got)
+		t.Errorf("walkAncestorContexts() = %+v", got)
 	}
 }
 
@@ -198,9 +206,13 @@ func TestResolveTMUXContextFallsBackToClientPID(t *testing.T) {
 		commandOutput, parentProcessID, inspectProcess, lookPath = origOutput, origParent, origInspect, origLook
 	})
 
-	got := resolveTMUXContext()
+	context := walkAncestorContexts([]multiplexerDetector{tmuxDetector{}})
+	got, ok := context.(tmuxContext)
+	if !ok {
+		t.Fatalf("walkAncestorContexts() = %T, want tmuxContext", context)
+	}
 	if got.session != "/tmp/tmux-501/default,100,3" || got.pane != "" {
-		t.Errorf("resolveTMUXContext() = %+v", got)
+		t.Errorf("walkAncestorContexts() = %+v", got)
 	}
 }
 
