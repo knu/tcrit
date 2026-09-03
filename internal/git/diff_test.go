@@ -249,3 +249,36 @@ func TestDiffFileAnnotatesReplacementLines(t *testing.T) {
 		t.Fatalf("expected inline changes for deleted replacement line, got %+v", deleted)
 	}
 }
+
+func TestDiffFileDeletedFileAnchorsBeforeFirstLine(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+	runGit(t, dir, "init", "-q")
+	runGit(t, dir, "config", "user.email", "test@example.com")
+	runGit(t, dir, "config", "user.name", "Test")
+	runGit(t, dir, "config", "commit.gpgsign", "false")
+
+	writeFile(t, dir, "gone.txt", []byte("one\ntwo\nthree\n"))
+	runGit(t, dir, "add", "gone.txt")
+	runGit(t, dir, "commit", "-q", "-m", "initial")
+	runGit(t, dir, "rm", "-q", "gone.txt")
+
+	t.Chdir(dir)
+	info, err := DiffFile("gone.txt", "HEAD")
+	if err != nil {
+		t.Fatalf("DiffFile: %v", err)
+	}
+	if len(info.DeletedAfter) != 1 {
+		t.Fatalf("DeletedAfter keys = %v, want only 0", info.DeletedAfter)
+	}
+	deleted := info.DeletedAfter[0]
+	if len(deleted) != 3 {
+		t.Fatalf("DeletedAfter[0] = %+v, want the three deleted lines", deleted)
+	}
+	for i, want := range []string{"one", "two", "three"} {
+		if deleted[i].OldLineNum != i+1 || deleted[i].Content != want {
+			t.Errorf("deleted[%d] = %+v, want line %d %q", i, deleted[i], i+1, want)
+		}
+	}
+}

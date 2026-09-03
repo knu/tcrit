@@ -12,6 +12,10 @@
 - **Simpler skill set** — a single `tcrit` skill passes its arguments straight to the CLI, which chooses between git changes, a document, and a plan, instead of asking the user which mode to use; Claude Code, Codex, OpenCode, and Gemini all install the same `tcrit` + `tcrit-cli` pair
 - The Claude Code plugin ships the skills under `plugin/tcrit/skills/` and is invoked as `/tcrit:tcrit`
 
+### Fixed
+
+- Files deleted since the base ref now show their removed lines in the code review TUI instead of an empty tab
+
 ### Removed
 
 - The `tcrit-review`, `tcrit-code-review`, and `tcrit-plan-review` skills, the `tcrit:review`, `tcrit:code-review`, and `tcrit:plan-review` plugin commands, and the legacy root-level plugin manifest inherited from upstream

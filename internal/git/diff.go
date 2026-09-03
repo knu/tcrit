@@ -134,8 +134,10 @@ func DiffFile(path string, ref string) (*DiffInfo, error) {
 		for _, frag := range f.TextFragments {
 			newLine := frag.NewPosition
 			oldLine := frag.OldPosition
-			// Track the last new-file line we've seen (for anchoring deletions)
-			lastNewLine := int(newLine) - 1 // before the hunk starts
+			// Track the last new-file line we've seen (for anchoring deletions).
+			// A hunk with no new-side lines (a deleted file) starts at
+			// position 0, which still anchors before line 1.
+			lastNewLine := max(int(newLine)-1, 0)
 
 			for _, line := range frag.Lines {
 				switch line.Op {
