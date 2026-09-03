@@ -28,12 +28,29 @@ func destinations(t *testing.T, target string) []string {
 	t.Helper()
 	var dests []string
 	for _, f := range integrations()[target] {
-		if f.dest != f.globalDest {
+		if target != "opencode" && f.dest != f.globalDest {
 			t.Errorf("%s %s: global destination %q differs", target, f.dest, f.globalDest)
 		}
 		dests = append(dests, f.dest)
 	}
 	return dests
+}
+
+func TestOpenCodeGlobalFilesUseXDGConfigDir(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "xdg"))
+	want := map[string]string{
+		filepath.Join(".opencode", "commands", "tcrit.md"):            filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "opencode", "commands", "tcrit.md"),
+		filepath.Join(".opencode", "skills", "tcrit-cli", "SKILL.md"): filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "opencode", "skills", "tcrit-cli", "SKILL.md"),
+	}
+	for _, f := range integrations()["opencode"] {
+		if f.globalDest != want[f.dest] {
+			t.Errorf("%s global destination = %q, want %q", f.dest, f.globalDest, want[f.dest])
+		}
+		global, err := integrationDest(f, true)
+		if err != nil || global != want[f.dest] {
+			t.Errorf("integrationDest(%s, global) = %q, %v", f.dest, global, err)
+		}
+	}
 }
 
 func TestIntegrationLayouts(t *testing.T) {

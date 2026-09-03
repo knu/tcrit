@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- `tcrit install opencode` run from the home directory now installs into OpenCode's global config directory (`$XDG_CONFIG_HOME/opencode`, `~/.config/opencode` by default) instead of `~/.opencode`
+
 ## 0.7.1
 
 ### Added

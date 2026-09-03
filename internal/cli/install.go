@@ -157,7 +157,11 @@ func integrations() map[string][]integrationFile {
 		skillFile("tcrit-cli", "codex", ".agents"),
 	}
 
-	openCodeCommand := filepath.Join(".opencode", "commands", "tcrit.md")
+	// OpenCode reads project files from .opencode/ but global ones from its
+	// XDG config directory (~/.config/opencode by default).
+	openCodeGlobal := xdg.AppConfigHome("opencode")
+	openCodeCLI := skillFile("tcrit-cli", "opencode", ".opencode")
+	openCodeCLI.globalDest = filepath.Join(openCodeGlobal, "skills", "tcrit-cli", "SKILL.md")
 	m["opencode"] = []integrationFile{
 		{
 			content: func() ([]byte, error) {
@@ -167,10 +171,10 @@ func integrations() map[string][]integrationFile {
 				}
 				return dropFrontmatterKeys(data, []string{"name"}), nil // commands are named by their file
 			},
-			dest:       openCodeCommand,
-			globalDest: openCodeCommand,
+			dest:       filepath.Join(".opencode", "commands", "tcrit.md"),
+			globalDest: filepath.Join(openCodeGlobal, "commands", "tcrit.md"), // absolute
 		},
-		skillFile("tcrit-cli", "opencode", ".opencode"),
+		openCodeCLI,
 	}
 
 	geminiAgent := filepath.Join(".gemini", "agents", "tcrit.md")

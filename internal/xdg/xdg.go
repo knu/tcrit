@@ -23,10 +23,16 @@ func StateHome() string {
 // ConfigHome returns the base config directory ($XDG_CONFIG_HOME or
 // ~/.config) with the tcrit application directory appended.
 func ConfigHome() string {
+	return AppConfigHome(appDir)
+}
+
+// AppConfigHome returns the XDG config directory of another application,
+// such as the global OpenCode config directory.
+func AppConfigHome(app string) string {
 	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
-		return filepath.Join(dir, appDir)
+		return filepath.Join(dir, app)
 	}
-	return filepath.Join(homeDir(), ".config", appDir)
+	return filepath.Join(homeDir(), ".config", app)
 }
 
 func homeDir() string {

@@ -92,7 +92,7 @@ Then use `$tcrit`. The installed skills use Codex invocation syntax and reply at
 #### OpenCode
 
 ```bash
-cd ~ && tcrit install opencode     # ~/.opencode/commands/tcrit.md and ~/.opencode/skills/tcrit-cli/
+cd ~ && tcrit install opencode     # ~/.config/opencode/commands/tcrit.md and ~/.config/opencode/skills/tcrit-cli/
 tcrit install opencode             # From a repo root: install for that project
 ```
 
