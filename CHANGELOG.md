@@ -17,6 +17,7 @@
 - Files deleted since the base ref now show their removed lines in the code review TUI instead of an empty tab
 - A commented file whose addition is reverted in a later round now shows a placeholder instead of its stale content; the comments stay in the sidebar and in `review.json`
 - Resolved file comments stay in the sidebar as collapsed headers so they can be reopened with `r`, instead of vanishing
+- `[` and `]` now visit file comments too, moving focus to their sidebar entry, and work from the sidebar as well as the content pane
 
 ### Removed
 

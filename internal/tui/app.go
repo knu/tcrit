@@ -691,6 +691,17 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if m.focused == commentPane {
+		switch {
+		case key.Matches(msg, keys.NextComment):
+			m.jumpToComment(1)
+			return m, nil
+		case key.Matches(msg, keys.PrevComment):
+			m.jumpToComment(-1)
+			return m, nil
+		}
+	}
+
 	// Comment pane navigation
 	if m.focused == commentPane && len(t.sidebarItems) > 0 {
 		sidebarMoved := false
@@ -1744,11 +1755,17 @@ func (m *AppModel) annotationsAfterLine(lineNum int, side string) []annotation {
 }
 
 type commentTarget struct {
-	line    int
-	side    string
-	annoIdx int
+	id       string
+	scope    string // "file" targets live in the sidebar; others are inline annotations
+	resolved bool
+	line     int
+	side     string
+	annoIdx  int
 }
 
+// commentTargets lists a tab's comments in navigation order: file comments
+// first (open before resolved, as the sidebar shows them), then line
+// comments in visual order.
 func (m *AppModel) commentTargets(tabIndex int) []commentTarget {
 	t := &m.tabs[tabIndex]
 	if t.state == nil {
@@ -1756,22 +1773,61 @@ func (m *AppModel) commentTargets(tabIndex int) []commentTarget {
 	}
 
 	indices := make(map[lineRef]int)
-	targets := make([]commentTarget, 0, len(t.state.Comments))
+	var fileTargets, lineTargets []commentTarget
 	for _, c := range t.state.Comments {
 		if c.Scope == "file" {
+			fileTargets = append(fileTargets, commentTarget{id: c.ID, scope: "file", resolved: c.Resolved})
 			continue
 		}
 		line := c.EndAt()
 		ref := lineRef{side: c.Side, line: line}
-		targets = append(targets, commentTarget{line: line, side: c.Side, annoIdx: indices[ref]})
+		lineTargets = append(lineTargets, commentTarget{id: c.ID, line: line, side: c.Side, annoIdx: indices[ref]})
 		indices[ref]++
 	}
-	sort.SliceStable(targets, func(i, j int) bool {
-		ri := lineRef{side: targets[i].side, line: targets[i].line}
-		rj := lineRef{side: targets[j].side, line: targets[j].line}
+	sort.SliceStable(fileTargets, func(i, j int) bool {
+		return !fileTargets[i].resolved && fileTargets[j].resolved
+	})
+	sort.SliceStable(lineTargets, func(i, j int) bool {
+		ri := lineRef{side: lineTargets[i].side, line: lineTargets[i].line}
+		rj := lineRef{side: lineTargets[j].side, line: lineTargets[j].line}
 		return m.visualLineIndex(t, ri) < m.visualLineIndex(t, rj)
 	})
-	return targets
+	return append(fileTargets, lineTargets...)
+}
+
+// targetPosition orders a target against the content cursor.  File comments
+// sit before the first line.
+func (m *AppModel) targetPosition(t *FileTab, target commentTarget) int {
+	if target.scope == "file" {
+		return -1
+	}
+	return m.visualLineIndex(t, lineRef{side: target.side, line: target.line})
+}
+
+// currentCommentTarget returns the index of the target the user is on: the
+// selected sidebar item when the sidebar has focus, otherwise the focused
+// inline annotation.
+func (m *AppModel) currentCommentTarget(targets []commentTarget) int {
+	t := m.tab()
+	if m.focused == commentPane {
+		if t.sidebarCursor < len(t.sidebarItems) {
+			id := t.sidebarItems[t.sidebarCursor].id
+			for i, target := range targets {
+				if target.id == id {
+					return i
+				}
+			}
+		}
+		return -1
+	}
+	if t.cursorOnAnnotation {
+		for i, target := range targets {
+			if target.scope != "file" && target.line == t.cursorLine && target.side == t.cursorSide && target.annoIdx == t.cursorAnnoIdx {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 // jumpToComment moves to the adjacent comment in tab, line, and annotation
@@ -1779,15 +1835,7 @@ func (m *AppModel) commentTargets(tabIndex int) []commentTarget {
 func (m *AppModel) jumpToComment(step int) bool {
 	t := m.tab()
 	targets := m.commentTargets(m.activeTab)
-	current := -1
-	if t.cursorOnAnnotation {
-		for i, target := range targets {
-			if target.line == t.cursorLine && target.side == t.cursorSide && target.annoIdx == t.cursorAnnoIdx {
-				current = i
-				break
-			}
-		}
-	}
+	current := m.currentCommentTarget(targets)
 
 	if current >= 0 {
 		adjacent := current + step
@@ -1795,18 +1843,21 @@ func (m *AppModel) jumpToComment(step int) bool {
 			m.selectComment(m.activeTab, targets[adjacent])
 			return true
 		}
-	} else if step > 0 {
-		for _, target := range targets {
-			if m.visualLineIndex(t, lineRef{side: target.side, line: target.line}) >= m.visualLineIndex(t, lineRef{side: t.cursorSide, line: t.cursorLine}) {
-				m.selectComment(m.activeTab, target)
-				return true
-			}
-		}
 	} else {
-		for i := len(targets) - 1; i >= 0; i-- {
-			if m.visualLineIndex(t, lineRef{side: targets[i].side, line: targets[i].line}) <= m.visualLineIndex(t, lineRef{side: t.cursorSide, line: t.cursorLine}) {
-				m.selectComment(m.activeTab, targets[i])
-				return true
+		cursor := m.visualLineIndex(t, lineRef{side: t.cursorSide, line: t.cursorLine})
+		if step > 0 {
+			for _, target := range targets {
+				if m.targetPosition(t, target) >= cursor {
+					m.selectComment(m.activeTab, target)
+					return true
+				}
+			}
+		} else {
+			for i := len(targets) - 1; i >= 0; i-- {
+				if m.targetPosition(t, targets[i]) <= cursor {
+					m.selectComment(m.activeTab, targets[i])
+					return true
+				}
 			}
 		}
 	}
@@ -1830,6 +1881,23 @@ func (m *AppModel) jumpToComment(step int) bool {
 func (m *AppModel) selectComment(tabIndex int, target commentTarget) {
 	m.activeTab = tabIndex
 	t := m.tab()
+	if target.scope == "file" {
+		// File comments have no inline box, so land on their sidebar entry.
+		m.focused = commentPane
+		t.cursorOnAnnotation = false
+		t.cursorAnnoIdx = 0
+		m.updateCommentSidebar()
+		for i, item := range t.sidebarItems {
+			if item.id == target.id {
+				t.sidebarCursor = i
+				break
+			}
+		}
+		m.updateCommentSidebar()
+		m.rebuildContent()
+		return
+	}
+	m.focused = contentPane
 	t.cursorLine, t.cursorSide = target.line, target.side
 	t.cursorOnAnnotation = true
 	t.cursorAnnoIdx = target.annoIdx

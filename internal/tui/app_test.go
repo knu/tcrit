@@ -2189,8 +2189,8 @@ func TestFileCommentShortcutCreatesSidebarOnlyComment(t *testing.T) {
 	if got := app.commentViewport.View(); !strings.Contains(got, "File") || !strings.Contains(got, comment.Body) {
 		t.Fatalf("sidebar = %q, want file comment", got)
 	}
-	if targets := app.commentTargets(0); len(targets) != 0 {
-		t.Fatalf("file comment became an inline navigation target: %+v", targets)
+	if targets := app.commentTargets(0); len(targets) != 1 || targets[0].scope != "file" {
+		t.Fatalf("navigation targets = %+v, want one file-scoped target", targets)
 	}
 	if got := app.contentViewport.View(); strings.Contains(got, comment.Body) {
 		t.Fatalf("file comment rendered inline: %q", got)
@@ -3022,5 +3022,44 @@ func TestCommentSidebarCollapsesResolvedFileComments(t *testing.T) {
 	rendered = ansi.Strip(app.commentViewport.View())
 	if !strings.Contains(rendered, fileComment.Body) {
 		t.Fatalf("sidebar = %q, want the reopened body", rendered)
+	}
+}
+
+func TestCommentNavigationVisitsFileComments(t *testing.T) {
+	app := newCommentNavigationTestApp()
+	app.commentViewport.SetWidth(40)
+	app.commentViewport.SetHeight(20)
+	fileComment := review.Comment{ID: "first-file", Scope: "file", Body: "file-wide note"}
+	app.tabs[0].state.Comments = append(app.tabs[0].state.Comments, fileComment)
+	app.updateCommentSidebar()
+
+	// Backward from the top of the first file lands on its file comment.
+	app = pressKey(app, '[')
+	if app.activeTab != 0 || app.focused != commentPane || app.tab().sidebarItems[app.tab().sidebarCursor].id != fileComment.ID {
+		t.Fatalf("previous from top = tab %d, focus %v, sidebar %d; want the file comment in the sidebar",
+			app.activeTab, app.focused, app.tab().sidebarCursor)
+	}
+
+	// Forward from the sidebar continues to the first line comment.
+	app = pressKey(app, ']')
+	if app.focused != contentPane || app.tab().cursorLine != 2 || !app.tab().cursorOnAnnotation || app.tab().cursorAnnoIdx != 0 {
+		t.Fatalf("next from file comment = focus %v, line %d, annotation %t/%d; want line 2 annotation 0",
+			app.focused, app.tab().cursorLine, app.tab().cursorOnAnnotation, app.tab().cursorAnnoIdx)
+	}
+
+	// Backward from the first line comment returns to the file comment.
+	app = pressKey(app, '[')
+	if app.focused != commentPane || app.tab().sidebarItems[app.tab().sidebarCursor].id != fileComment.ID {
+		t.Fatalf("previous from line comment did not return to the file comment (focus %v)", app.focused)
+	}
+
+	// Wrapping past the last comment of the review reaches the file comment first.
+	app.focused = contentPane
+	app.activeTab = 2
+	app.tabs[2].cursorLine = 3
+	app.tabs[2].cursorOnAnnotation = true
+	app = pressKey(app, ']')
+	if app.activeTab != 0 || app.focused != commentPane || app.tab().sidebarItems[app.tab().sidebarCursor].id != fileComment.ID {
+		t.Fatalf("wrapped next = tab %d, focus %v; want the file comment of tab 0", app.activeTab, app.focused)
 	}
 }
