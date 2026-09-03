@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.3
+
+### Added
+
+- **Codex skill installer** — `tcrit install codex` installs project-local or global review skills with Codex invocation syntax and reply attribution; the `all` target now includes Codex
+
+### Changed
+
+- `Ctrl-PgUp` and `Ctrl-PgDn` scroll through complete code context and thread history while the comment textarea keeps focus
+
+### Fixed
+
+- A reviewer can edit only their latest reply when it is also the thread's latest reply, preventing an earlier response from being overwritten after another participant replies
+
 ## 0.6.2
 
 ### Changed

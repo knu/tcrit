@@ -1,7 +1,7 @@
 {
   "name": "tcrit",
   "description": "Review code changes and documents with an interactive TUI. Leave inline comments, then let Claude address the feedback and reply automatically.",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "author": {
     "name": "Akinori Musha"
   },
