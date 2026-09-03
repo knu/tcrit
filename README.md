@@ -16,9 +16,9 @@
 - **Deleted-line comments** — removed lines, including lines in fully deleted files, can be selected and commented on from the keyboard or gutter.
 - **Mouse-first TUI controls** — click file tabs, code lines, comment threads, sidebar items, dialog actions, and the review-finish button; use the wheel to scroll code and drag the gutter to select line ranges.
 - **Versioned plan reviews** — `tcrit plan` saves immutable revisions and carries comment threads forward as the plan changes.
-- **Richer review lifecycle** — comment threads can be replied to, resolved, reopened, and approved together; agent replies are visually distinct, complete code context and thread history remain scrollable while editing, and comments and changes can be navigated across files.
+- **Richer review lifecycle** — comment threads can be replied to, resolved, reopened, and approved together; agent replies are visually distinct, complete code context and thread history remain scrollable while editing, and `[` / `]` and `n` / `N` navigate comments (including file comments) and changes across files.
 - **Improved diffs and Git handling** — inline replacements preserve whitespace, long syntax-highlighted lines wrap instead of being truncated, comment anchors survive edited rounds, and paths with spaces or special characters work correctly.
-- **Agent integrations** — install review skills for Claude Code and Codex, or a Gemini CLI agent, with one command.
+- **Agent integrations** — one command installs the `tcrit` review loop and the `tcrit-cli` reference for Claude Code, Codex, OpenCode, and Gemini CLI; the loop picks code, document, or plan review from its arguments instead of asking.
 - **[Crit](https://crit.md/) CLI alignment** — customizable finish prompts, unified integration installers, and `tcrit check` were added as part of adopting the Crit CLI workflow.
 
 TUI for reviewing AI-generated code and plans — built for human-in-the-loop agentic coding workflows.
