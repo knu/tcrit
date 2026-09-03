@@ -302,6 +302,8 @@ func TestSpawnTUIHerdrTabClosesIncompleteTab(t *testing.T) {
 func TestSpawnTUIHerdrTabCleansUpWhenFocusFails(t *testing.T) {
 	var calls [][]string
 	origOutput, origRun, origLook, origResolve := commandOutput, runCommand, lookPath, resolveExec
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("XDG_STATE_HOME", "")
 	commandOutput = func(*exec.Cmd) ([]byte, error) {
 		return []byte(`{"result":{"tab":{"tab_id":"w1:t9"},"root_pane":{"pane_id":"w1:p9"}}}`), nil
 	}
