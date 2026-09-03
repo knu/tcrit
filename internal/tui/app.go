@@ -1419,6 +1419,7 @@ func (m *AppModel) syncCodeReviewTabs(files []gitpkg.FileChange) {
 		}
 		t.isBinary = f.Status == gitpkg.StatusBinary
 		t.isDeleted = f.Status == gitpkg.StatusDeleted
+		t.outsideChanges = false
 		tabs = append(tabs, t)
 	}
 
@@ -1430,6 +1431,7 @@ func (m *AppModel) syncCodeReviewTabs(files []gitpkg.FileChange) {
 		if changed[t.path] || !hasComments {
 			continue
 		}
+		t.outsideChanges = true
 		tabs = append(tabs, t)
 	}
 
@@ -1934,6 +1936,10 @@ func (m *AppModel) rebuildContent() {
 	// Handle placeholder tabs
 	if t.isBinary {
 		m.contentViewport.SetContent("\n  Binary file changed — cannot display content.\n")
+		return
+	}
+	if t.outsideChanges && t.doc == nil {
+		m.contentViewport.SetContent("\n  Added file removed — no longer part of the changes.\n  Comments are kept in the sidebar.\n")
 		return
 	}
 	if t.doc == nil {

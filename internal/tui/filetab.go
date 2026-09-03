@@ -44,6 +44,9 @@ type FileTab struct {
 	// Placeholder tabs
 	isBinary  bool
 	isDeleted bool
+	// outsideChanges marks a tab kept only for its comments after the
+	// file left the change set in a later round.
+	outsideChanges bool
 
 	// Cached rendering data (computed once per tab switch, not per keystroke)
 	chromaLines      []string         // syntax-highlighted lines (nil for markdown)

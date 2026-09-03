@@ -2918,3 +2918,78 @@ func TestRoundStartRefreshesCodeReviewTabs(t *testing.T) {
 		}
 	}
 }
+
+func runGitIn(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+func TestRevertedAdditionShowsPlaceholderAndKeepsComments(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	runGitIn(t, dir, "init", "-q")
+	runGitIn(t, dir, "config", "user.email", "test@example.com")
+	runGitIn(t, dir, "config", "user.name", "Test")
+	runGitIn(t, dir, "config", "commit.gpgsign", "false")
+	if err := os.WriteFile(filepath.Join(dir, "keep.txt"), []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitIn(t, dir, "add", "keep.txt")
+	runGitIn(t, dir, "commit", "-q", "-m", "initial")
+	if err := os.WriteFile(filepath.Join(dir, "added.go"), []byte("package added\nvar x = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitIn(t, dir, "add", "added.go")
+	t.Chdir(dir)
+
+	files, err := gitpkg.ChangedFilesFrom("HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := review.OpenCodeSession("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := NewCodeReviewApp(files, "HEAD", AppConfig{Session: sess, Author: "Tester", Serving: true})
+	updated, _ := app.Update(docRenderedMsg{})
+	app = updated.(AppModel)
+	app.width, app.height = 100, 30
+	app.recalculateLayout()
+	for i := range app.tabs {
+		if app.tabs[i].path == "added.go" {
+			app.activeTab = i
+			app.tabs[i].state.Comments = append(app.tabs[i].state.Comments, review.Comment{
+				ID: "c_1", StartLine: 2, EndLine: 2, Body: "why one?", Anchor: "var x = 1", Author: "Tester",
+			})
+		}
+	}
+	app.persist()
+
+	runGitIn(t, dir, "rm", "-q", "-f", "added.go")
+	app.startNextRound()
+
+	if app.tab().path != "added.go" || !app.tab().outsideChanges {
+		t.Fatalf("active tab = %q (outside changes: %t), want added.go kept outside the changes", app.tab().path, app.tab().outsideChanges)
+	}
+	content := ansi.Strip(app.contentViewport.View())
+	if !strings.Contains(content, "no longer part of the changes") || strings.Contains(content, "var x = 1") {
+		t.Fatalf("content = %q, want placeholder without stale content", content)
+	}
+	if got := ansi.Strip(app.commentViewport.View()); !strings.Contains(got, "why one?") {
+		t.Fatalf("sidebar = %q, want the kept comment", got)
+	}
+	app.persist()
+	fresh, err := review.OpenSessionAt(sess.Key, sess.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fresh.CJ.Files["added.go"].Comments; len(got) != 1 || got[0].Body != "why one?" {
+		t.Fatalf("persisted comments = %+v, want the kept comment", got)
+	}
+}
