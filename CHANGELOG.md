@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.0
+
+### Added
+
+- **Native Herdr workflow** — discover the invoking Herdr workspace, tab, and pane from inherited context or process ancestry, open reviews in a dedicated full-width tab, and restore focus to the agent tab between rounds
+
+### Changed
+
+- Multiplexer discovery now supports Herdr and tmux together and selects whichever context is nearest in the process ancestry when they are nested
+
 ## 0.6.3
 
 ### Added
