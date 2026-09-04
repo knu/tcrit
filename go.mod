@@ -10,7 +10,7 @@ require (
 	github.com/aymanbagabas/go-udiff v0.4.1
 	github.com/bluekeyes/go-gitdiff v0.9.0
 	github.com/charmbracelet/x/ansi v0.11.8
-	github.com/gofrs/flock v0.13.0
+	github.com/gofrs/flock v0.13.1
 	github.com/mattn/go-shellwords v1.0.14
 	github.com/spf13/cobra v1.10.2
 	github.com/tklauser/ps v0.0.4
