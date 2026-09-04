@@ -62,7 +62,9 @@ type Comment struct {
 	GitLabResolved     *bool  `json:"gitlab_resolved,omitempty"`
 	LastPushedBodyHash string `json:"last_pushed_body_hash,omitempty"`
 
-	HeadSHA   string `json:"head_sha,omitempty"`
+	HeadSHA string `json:"head_sha,omitempty"`
+	// DiffScope is "layer" or "full_stack" for Crit range-focus comments.
+	// Working-tree filters such as staged and unstaged intentionally leave it empty.
 	DiffScope string `json:"diff_scope,omitempty"`
 	FocusKey  string `json:"focus_key,omitempty"`
 }
@@ -100,6 +102,8 @@ type CritJSON struct {
 	ShareOrgName    string `json:"share_org_name,omitempty"`
 	ShareVisibility string `json:"share_visibility,omitempty"`
 	LastShareHash   string `json:"last_share_hash,omitempty"`
+	// ActiveDiffScope mirrors Crit's current range focus ("layer" or
+	// "full_stack").  It is empty for working-tree reviews, including staged.
 	ActiveDiffScope string `json:"active_diff_scope,omitempty"`
 }
 

@@ -21,6 +21,7 @@ import (
 
 var reviewCode bool
 var reviewBase string
+var reviewStaged bool
 
 // The following function variables allow tests to replace shell interactions
 // without actually shelling out.
@@ -66,6 +67,7 @@ type reviewMode struct {
 	docPath  string // non-empty for single-document and plan modes
 	ref      string // diff base for code mode
 	files    []git.FileChange
+	staged   bool
 	planSlug string // non-empty for plan mode
 	planFile string // original plan path ("" when read from stdin)
 }
@@ -90,6 +92,22 @@ func (m *reviewMode) internalMode() string {
 	default:
 		return "files"
 	}
+}
+
+// persistedCLIArgs returns the code-review scope arguments recorded in
+// review.json.  BaseRef carries the resolved diff base; CliArgs distinguishes
+// staged reviews, whose base is also HEAD, from full working-tree reviews.
+func (m *reviewMode) persistedCLIArgs() []string {
+	if !m.code() {
+		return nil
+	}
+	if m.staged {
+		return []string{"--staged"}
+	}
+	if m.ref != "" && m.ref != "HEAD" {
+		return []string{"review", "--base", m.ref}
+	}
+	return nil
 }
 
 func runReview(args []string) error {
@@ -155,6 +173,9 @@ func runReviewFlow(cfg *config.Config, sess *review.Session, mode *reviewMode) e
 
 func reviewArgSuffix(mode *reviewMode) string {
 	if mode.code() {
+		if mode.staged {
+			return " --staged"
+		}
 		return ""
 	}
 	return " " + mode.docPath
@@ -163,6 +184,9 @@ func reviewArgSuffix(mode *reviewMode) string {
 // resolveReviewMode classifies the arguments and, for code mode, detects
 // the changed files up front so failures surface before any TUI spawns.
 func resolveReviewMode(args []string, cfg *config.Config) (*reviewMode, error) {
+	if reviewStaged && len(args) > 0 {
+		return nil, fmt.Errorf("--staged is only valid for code review")
+	}
 	if len(args) == 1 && !reviewCode {
 		filePath := args[0]
 		if _, err := os.Stat(filePath); os.IsNotExist(err) {
@@ -175,15 +199,27 @@ func resolveReviewMode(args []string, cfg *config.Config) (*reviewMode, error) {
 		return nil, fmt.Errorf("code review requires a git repository (pass a file argument to review a document)")
 	}
 
+	if reviewStaged && reviewBase != "" {
+		return nil, fmt.Errorf("--staged cannot be combined with --base")
+	}
 	base := reviewBase
-	if base == "" {
+	if base == "" && !reviewStaged {
 		base = cfg.BaseBranch
 	}
 
 	var ref string
 	var files []git.FileChange
 	var err error
-	if base != "" {
+	if reviewStaged {
+		ref = "HEAD"
+		files, err = git.ChangedFilesStaged()
+		if err != nil {
+			return nil, fmt.Errorf("detecting staged files: %w", err)
+		}
+		if len(files) == 0 {
+			return nil, fmt.Errorf("no staged files found")
+		}
+	} else if base != "" {
 		ref = base
 		files, err = git.ChangedFilesFrom(ref)
 		if err != nil {
@@ -205,7 +241,7 @@ func resolveReviewMode(args []string, cfg *config.Config) (*reviewMode, error) {
 			}
 		}
 	}
-	return &reviewMode{ref: ref, files: files}, nil
+	return &reviewMode{ref: ref, files: files, staged: reviewStaged}, nil
 }
 
 func openReviewSession(cfg *config.Config, mode *reviewMode) (*review.Session, error) {
@@ -222,6 +258,11 @@ func openReviewSession(cfg *config.Config, mode *reviewMode) (*review.Session, e
 		return nil, fmt.Errorf("loading review state: %w", err)
 	}
 	sess.CJ.BaseRef = mode.ref
+	sess.CJ.CliArgs = mode.persistedCLIArgs()
+	// TCrit currently reviews working-tree ranges only.  In CritJSON,
+	// ActiveDiffScope and Comment.DiffScope are reserved for PR/range focus
+	// values ("layer" and "full_stack"), not all/staged/unstaged filtering.
+	sess.CJ.ActiveDiffScope = ""
 	for _, f := range mode.files {
 		sess.SetFileComments(f.Path, f.Status.String(), sess.FileComments(f.Path))
 	}
@@ -312,6 +353,10 @@ func buildTUICommand(mode *reviewMode) (string, error) {
 		return fmt.Sprintf("%s %s _tui --plan %s",
 			envPrefix, shellEscape(tcritBin), shellEscape(mode.planSlug)), nil
 	case mode.code():
+		if mode.staged {
+			return fmt.Sprintf("%s %s _tui --staged",
+				envPrefix, shellEscape(tcritBin)), nil
+		}
 		return fmt.Sprintf("%s %s _tui --base %s",
 			envPrefix, shellEscape(tcritBin), shellEscape(mode.ref)), nil
 	default:
@@ -491,6 +536,7 @@ func shellEscape(s string) string {
 func init() {
 	rootCmd.AddCommand(reviewCmd)
 	reviewCmd.Flags().BoolVar(&reviewCode, "code", false, "review code changes (default when no file argument is given)")
+	reviewCmd.Flags().BoolVar(&reviewStaged, "staged", false, "review only changes staged in the index")
 	reviewCmd.Flags().StringVar(&reviewBase, "base", "", "base ref to diff against in code mode")
 	reviewCmd.Flags().StringVar(&reviewBase, "base-branch", "", "alias for --base")
 	reviewCmd.Flags().MarkHidden("base-branch")

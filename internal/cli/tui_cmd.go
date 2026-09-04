@@ -51,5 +51,6 @@ var tuiCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(tuiCmd)
 	tuiCmd.Flags().StringVar(&reviewBase, "base", "", "base ref to diff against in code mode")
+	tuiCmd.Flags().BoolVar(&reviewStaged, "staged", false, "review only changes staged in the index")
 	tuiCmd.Flags().StringVar(&tuiPlan, "plan", "", "plan slug to review")
 }

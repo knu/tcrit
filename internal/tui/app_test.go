@@ -2919,6 +2919,58 @@ func TestRoundStartRefreshesCodeReviewTabs(t *testing.T) {
 	}
 }
 
+func TestStagedRoundUsesIndexDocument(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	runGitIn(t, dir, "init", "-q")
+	runGitIn(t, dir, "config", "user.email", "test@example.com")
+	runGitIn(t, dir, "config", "user.name", "Test")
+	runGitIn(t, dir, "config", "commit.gpgsign", "false")
+	path := filepath.Join(dir, "partial.go")
+	if err := os.WriteFile(path, []byte("package base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitIn(t, dir, "add", "partial.go")
+	runGitIn(t, dir, "commit", "-q", "-m", "initial")
+	if err := os.WriteFile(path, []byte("package staged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitIn(t, dir, "add", "partial.go")
+	if err := os.WriteFile(path, []byte("package unstaged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	files, err := gitpkg.ChangedFilesStaged()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := review.OpenCodeSession("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := NewCodeReviewApp(files, "HEAD", AppConfig{Session: sess, Staged: true})
+	updated, _ := app.Update(docRenderedMsg{})
+	app = updated.(AppModel)
+	if got := app.tab().doc.Content; got != "package staged\n" {
+		t.Fatalf("initial document = %q, want indexed content", got)
+	}
+
+	if err := os.WriteFile(path, []byte("package nextstaged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitIn(t, dir, "add", "partial.go")
+	if err := os.WriteFile(path, []byte("package nextunstaged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	app.startNextRound()
+	if got := app.tab().doc.Content; got != "package nextstaged\n" {
+		t.Fatalf("next-round document = %q, want indexed content", got)
+	}
+}
+
 func runGitIn(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)

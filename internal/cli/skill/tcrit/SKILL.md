@@ -23,6 +23,7 @@ The CLI picks the review mode from its arguments, so do not ask the user which m
 
 ```bash
 tcrit $ARGUMENTS            # a file reviews that document; no argument reviews the git changes
+tcrit --staged              # review only changes staged in the index
 tcrit plan <file>           # a plan written in this conversation: each round is saved as a new version
 tcrit review --base <ref>   # git changes against another base
 ```

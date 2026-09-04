@@ -141,7 +141,8 @@ Running `tcrit` with no subcommand reviews the current Git changes. Running `tcr
 | Command | Purpose |
 |---------|---------|
 | `tcrit [file]` | Review current Git changes, or review `file` when given |
-| `tcrit review [--base <ref>] [file]` | Explicit form of the default review command; `--code` is accepted but unnecessary without a file |
+| `tcrit --staged` | Review only changes staged in the index |
+| `tcrit review [--base <ref>\|--staged] [file]` | Explicit form of the default review command; `--staged` reviews only the index |
 | `tcrit plan [--name <slug>] [file]` | Create or continue a versioned plan review; reads stdin when `file` is omitted |
 | `tcrit --session <id>` | Reconnect to a running review and start its next round |
 | `tcrit comment ...` | Add comments or replies, import JSON, or clear the selected review |
@@ -158,11 +159,16 @@ Running `tcrit` with no subcommand reviews the current Git changes. Running `tcr
 tcrit
 # Equivalent explicit form; use --base <ref> to choose another diff base
 tcrit review
+# Review only changes staged in the index
+tcrit --staged
+# Equivalent explicit form
+tcrit review --staged
 ```
 
 Detects changed files in your git repo and opens a tabbed TUI with syntax highlighting, diff markers, and inline commenting across all changed files.
 
 - Diffs staged, unstaged, and untracked changes against `HEAD` by default; falls back to `HEAD~1` or `main` when the worktree is clean
+- With `--staged`, reads both the file list and displayed contents from the index, excluding unstaged and untracked work
 - Green gutter markers highlight changed lines
 - Comments are aggregated across all files in the session
 

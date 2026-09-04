@@ -123,6 +123,9 @@ func TestCodexSkillsUseCodexConventions(t *testing.T) {
 			t.Errorf("Codex tcrit skill lacks %q", wanted)
 		}
 	}
+	if !strings.Contains(skill, "tcrit --staged") {
+		t.Error("Codex tcrit skill does not document staged-only review")
+	}
 	if !strings.Contains(cli, "`$tcrit`") {
 		t.Error("Codex tcrit-cli skill does not point at $tcrit")
 	}
@@ -137,6 +140,9 @@ func TestOpenCodeCommandKeepsArgumentsAndDropsClaudeKeys(t *testing.T) {
 
 	if !strings.Contains(command, "tcrit $ARGUMENTS") {
 		t.Error("OpenCode command lost $ARGUMENTS")
+	}
+	if !strings.Contains(command, "tcrit --staged") {
+		t.Error("OpenCode command does not document staged-only review")
 	}
 	if !strings.HasPrefix(command, "---\ndescription: ") {
 		t.Errorf("OpenCode command frontmatter should start with description:\n%s", command[:min(len(command), 120)])
@@ -168,6 +174,9 @@ func TestGeminiIntegration(t *testing.T) {
 	}
 	if !strings.Contains(agent, "--author 'Gemini'") {
 		t.Error("Gemini agent is not attributed to Gemini")
+	}
+	if !strings.Contains(agent, "tcrit --staged") {
+		t.Error("Gemini agent does not document staged-only review")
 	}
 	if !strings.Contains(cli, "'Gemini'") || strings.Contains(cli, "user-invocable:") {
 		t.Error("Gemini tcrit-cli skill is not rewritten for Gemini")

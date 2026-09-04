@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/knu/tcrit/internal/config"
+	"github.com/knu/tcrit/internal/git"
 	"github.com/knu/tcrit/internal/review"
 )
 
@@ -22,6 +23,104 @@ func TestShellEscape(t *testing.T) {
 		if got := shellEscape(tt.in); got != tt.want {
 			t.Errorf("shellEscape(%q) = %q, want %q", tt.in, got, tt.want)
 		}
+	}
+}
+
+func TestResolveStagedReviewUsesIndexAndOverridesConfigBase(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+	t.Chdir(dir)
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-q")
+	run("config", "user.email", "test@example.com")
+	run("config", "user.name", "Test")
+	if err := os.WriteFile("base.txt", []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "base.txt")
+	run("commit", "-q", "-m", "initial")
+	if err := os.WriteFile("staged.txt", []byte("staged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "staged.txt")
+
+	originalCode, originalBase, originalStaged := reviewCode, reviewBase, reviewStaged
+	reviewCode, reviewBase, reviewStaged = true, "", true
+	t.Cleanup(func() {
+		reviewCode, reviewBase, reviewStaged = originalCode, originalBase, originalStaged
+	})
+
+	mode, err := resolveReviewMode(nil, &config.Config{BaseBranch: "missing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !mode.staged || mode.ref != "HEAD" {
+		t.Errorf("mode = %+v, want staged HEAD review", mode)
+	}
+	if len(mode.files) != 1 || mode.files[0].Path != "staged.txt" {
+		t.Errorf("files = %+v, want only staged.txt", mode.files)
+	}
+}
+
+func TestReviewModePersistedCLIArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		mode reviewMode
+		want []string
+	}{
+		{name: "working tree", mode: reviewMode{ref: "HEAD"}},
+		{name: "staged", mode: reviewMode{ref: "HEAD", staged: true}, want: []string{"--staged"}},
+		{name: "base", mode: reviewMode{ref: "main"}, want: []string{"review", "--base", "main"}},
+		{name: "document", mode: reviewMode{docPath: "plan.md"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.mode.persistedCLIArgs(); !slices.Equal(got, tt.want) {
+				t.Errorf("persistedCLIArgs() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOpenReviewSessionPersistsStagedScope(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateDir)
+	cfg := &config.Config{Output: t.TempDir()}
+	mode := &reviewMode{
+		ref:    "HEAD",
+		staged: true,
+		files:  []git.FileChange{{Path: "staged.go", Status: git.StatusModified}},
+	}
+
+	sess, err := openReviewSession(cfg, mode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := review.OpenSessionAt(sess.Key, sess.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.CJ.BaseRef != "HEAD" {
+		t.Errorf("base_ref = %q, want HEAD", reloaded.CJ.BaseRef)
+	}
+	if !slices.Equal(reloaded.CJ.CliArgs, []string{"--staged"}) {
+		t.Errorf("cli_args = %q, want [--staged]", reloaded.CJ.CliArgs)
+	}
+	if reloaded.CJ.ActiveDiffScope != "" {
+		t.Errorf("active_diff_scope = %q, want empty for a working-tree scope", reloaded.CJ.ActiveDiffScope)
+	}
+}
+
+func TestRootCommandSupportsStagedFlag(t *testing.T) {
+	if rootCmd.Flags().Lookup("staged") == nil {
+		t.Fatal("root command has no --staged flag")
 	}
 }
 
@@ -91,6 +190,21 @@ func TestSpawnTUIPaneCodeMode(t *testing.T) {
 	}
 	if !slices.Contains((*calls)[0], "%42") {
 		t.Errorf("tmux call should target the resolved pane: %v", (*calls)[0])
+	}
+}
+
+func TestBuildTUICommandStagedMode(t *testing.T) {
+	captureSpawns(t)
+
+	cmd, err := buildTUICommand(&reviewMode{ref: "HEAD", staged: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(cmd, "_tui --staged") {
+		t.Errorf("pane command missing staged scope: %s", cmd)
+	}
+	if strings.Contains(cmd, "--base") {
+		t.Errorf("staged pane command should not include --base: %s", cmd)
 	}
 }
 

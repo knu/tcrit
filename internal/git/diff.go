@@ -52,15 +52,24 @@ func ChangedFiles() ([]FileChange, error) {
 	return ChangedFilesFrom("HEAD")
 }
 
+// ChangedFilesStaged returns files changed in the index relative to HEAD.
+func ChangedFilesStaged() ([]FileChange, error) {
+	return changedFilesFrom("HEAD", true)
+}
+
 // ChangedFilesFrom returns files changed relative to a ref (branch, commit, HEAD~N).
 func ChangedFilesFrom(ref string) ([]FileChange, error) {
-	files, err := diffNameStatus(ref)
+	return changedFilesFrom(ref, false)
+}
+
+func changedFilesFrom(ref string, staged bool) ([]FileChange, error) {
+	files, err := diffNameStatus(ref, staged)
 	if err != nil {
 		return nil, err
 	}
 
 	// Detect binary files via --numstat (binary shows - - for counts)
-	binaries, err := detectBinaryFiles(ref)
+	binaries, err := detectBinaryFiles(ref, staged)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +81,7 @@ func ChangedFilesFrom(ref string) ([]FileChange, error) {
 	}
 
 	// Add untracked files (only for HEAD-based diffs)
-	if ref == "HEAD" {
+	if ref == "HEAD" && !staged {
 		untracked, err := untrackedFiles()
 		if err != nil {
 			return nil, err
@@ -110,7 +119,23 @@ type InlineSegment struct {
 
 // DiffFile returns full diff information for a file relative to the given ref.
 func DiffFile(path string, ref string) (*DiffInfo, error) {
-	out, err := gitCommand("diff", ref, "--", path)
+	return diffFile(path, ref, false)
+}
+
+// DiffFileStaged returns diff information for the indexed version of a file.
+func DiffFileStaged(path string) (*DiffInfo, error) {
+	return diffFile(path, "HEAD", true)
+}
+
+func diffFile(path, ref string, staged bool) (*DiffInfo, error) {
+	args := []string{"diff"}
+	if staged {
+		args = append(args, "--cached")
+	} else {
+		args = append(args, ref)
+	}
+	args = append(args, "--", path)
+	out, err := gitCommand(args...)
 	if err != nil {
 		return nil, fmt.Errorf("git diff for %s: %w", path, err)
 	}
@@ -289,8 +314,15 @@ func setDeletedInline(info *DiffInfo, oldLine int, segments []InlineSegment) {
 // diffNameStatus runs git diff --name-status and parses the output.
 // It uses -z so paths with spaces, tabs, or non-ASCII characters arrive
 // unquoted and NUL-separated.
-func diffNameStatus(ref string) ([]FileChange, error) {
-	out, err := gitCommand("diff", ref, "--name-status", "-z")
+func diffNameStatus(ref string, staged bool) ([]FileChange, error) {
+	args := []string{"diff"}
+	if staged {
+		args = append(args, "--cached")
+	} else {
+		args = append(args, ref)
+	}
+	args = append(args, "--name-status", "-z")
+	out, err := gitCommand(args...)
 	if err != nil {
 		return nil, fmt.Errorf("git diff --name-status: %w", err)
 	}
@@ -336,12 +368,28 @@ func parseNameStatusZ(out string) []FileChange {
 }
 
 // detectBinaryFiles returns a set of paths that are binary.
-func detectBinaryFiles(ref string) (map[string]bool, error) {
-	out, err := gitCommand("diff", ref, "--numstat", "-z")
+func detectBinaryFiles(ref string, staged bool) (map[string]bool, error) {
+	args := []string{"diff"}
+	if staged {
+		args = append(args, "--cached")
+	} else {
+		args = append(args, ref)
+	}
+	args = append(args, "--numstat", "-z")
+	out, err := gitCommand(args...)
 	if err != nil {
 		return nil, fmt.Errorf("git diff --numstat: %w", err)
 	}
 	return parseNumstatZ(out), nil
+}
+
+// FileContentFromIndex returns a file's staged content.
+func FileContentFromIndex(path string) ([]byte, error) {
+	out, err := gitCommand("show", ":"+path)
+	if err != nil {
+		return nil, fmt.Errorf("reading staged file %s: %w", path, err)
+	}
+	return []byte(out), nil
 }
 
 // parseNumstatZ parses NUL-separated `git diff --numstat -z` output.

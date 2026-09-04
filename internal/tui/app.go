@@ -56,6 +56,8 @@ type RoundStartMsg struct{}
 type AppConfig struct {
 	Session *review.Session
 	Author  string
+	// Staged reads code-review files and diffs from the Git index.
+	Staged bool
 	// Serving is true when an agent client may be blocked on this review;
 	// an unresolved finish then parks the TUI in a waiting state instead
 	// of quitting.
@@ -93,6 +95,7 @@ type AppModel struct {
 	finishCh chan<- FinishEvent
 	waiting  bool
 	baseRef  string
+	staged   bool
 
 	detached bool
 
@@ -224,7 +227,7 @@ func NewCodeReviewApp(files []gitpkg.FileChange, ref string, cfg AppConfig) AppM
 	for _, f := range sortedFiles {
 		var diff *gitpkg.DiffInfo
 		if f.Status != gitpkg.StatusBinary {
-			diff, _ = gitpkg.DiffFile(f.Path, ref)
+			diff, _ = codeDiff(f.Path, ref, cfg.Staged)
 		}
 		ft := newFileTab(f.Path, diff)
 		if f.Status == gitpkg.StatusBinary {
@@ -245,6 +248,7 @@ func NewCodeReviewApp(files []gitpkg.FileChange, ref string, cfg AppConfig) AppM
 		serving:         cfg.Serving,
 		finishCh:        cfg.FinishCh,
 		baseRef:         ref,
+		staged:          cfg.Staged,
 		detached:        os.Getenv("TCRIT_DETACHED") == "1",
 		contentViewport: viewport.New(),
 		commentViewport: viewport.New(),
@@ -262,12 +266,30 @@ func (m AppModel) loadDocuments() tea.Cmd {
 			if tab.isBinary || tab.isDeleted {
 				continue
 			}
-			if _, err := document.Load(tab.path); err != nil {
+			if _, err := m.loadDocument(tab.path); err != nil {
 				return errMsg{err}
 			}
 		}
 		return docRenderedMsg{}
 	}
+}
+
+func (m AppModel) loadDocument(path string) (*document.Document, error) {
+	if !m.staged {
+		return document.Load(path)
+	}
+	content, err := gitpkg.FileContentFromIndex(path)
+	if err != nil {
+		return nil, err
+	}
+	return document.FromContent(path, content), nil
+}
+
+func codeDiff(path, ref string, staged bool) (*gitpkg.DiffInfo, error) {
+	if staged {
+		return gitpkg.DiffFileStaged(path)
+	}
+	return gitpkg.DiffFile(path, ref)
 }
 
 // selectionRange returns the ordered start/end of the current selection.
@@ -384,7 +406,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				continue
 			}
-			doc, _ := document.Load(t.path)
+			doc, _ := m.loadDocument(t.path)
 			t.doc = doc
 			t.ensureHighlightCache()
 		}
@@ -1357,7 +1379,14 @@ func (m *AppModel) startNextRound() {
 		}
 	}
 	if m.multiFile && m.baseRef != "" {
-		if files, err := gitpkg.ChangedFilesFrom(m.baseRef); err == nil {
+		var files []gitpkg.FileChange
+		var err error
+		if m.staged {
+			files, err = gitpkg.ChangedFilesStaged()
+		} else {
+			files, err = gitpkg.ChangedFilesFrom(m.baseRef)
+		}
+		if err == nil {
 			m.syncCodeReviewTabs(files)
 		}
 	}
@@ -1373,7 +1402,7 @@ func (m *AppModel) startNextRound() {
 		if t.isDeleted {
 			t.doc = &document.Document{Path: t.path}
 		} else {
-			doc, _ := document.Load(t.path)
+			doc, _ := m.loadDocument(t.path)
 			t.doc = doc
 		}
 		t.chromaLines = nil
@@ -1387,7 +1416,7 @@ func (m *AppModel) startNextRound() {
 			t.inlineChanges = nil
 			t.deletedAfter = nil
 			t.changeChunks = nil
-			if diff, err := gitpkg.DiffFile(t.path, m.baseRef); err == nil && diff != nil {
+			if diff, err := codeDiff(t.path, m.baseRef, m.staged); err == nil && diff != nil {
 				t.changedLines = diff.ChangedLines
 				t.inlineChanges = diff.InlineChanges
 				t.deletedAfter = diff.DeletedAfter

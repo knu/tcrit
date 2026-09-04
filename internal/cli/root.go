@@ -18,7 +18,8 @@ var rootCmd = &cobra.Command{
 	Short:   "Review code changes and documents from the terminal",
 	Long: "TCrit is a terminal-based review tool for code changes and documents. " +
 		"It provides an interactive TUI for humans and scriptable CLI commands for agents.\n\n" +
-		"Run `tcrit` to review the current git changes, `tcrit <file>` to review a document, " +
+		"Run `tcrit` to review the current git changes, `tcrit --staged` to review only the index, " +
+		"`tcrit <file>` to review a document, " +
 		"or `tcrit --session <id>` to reconnect to a running review and start the next round.",
 	Args:         cobra.MaximumNArgs(1),
 	SilenceUsage: true,
@@ -26,6 +27,9 @@ var rootCmd = &cobra.Command{
 		if rootSession != "" {
 			if len(args) > 0 {
 				return fmt.Errorf("--session cannot be combined with a file argument")
+			}
+			if reviewStaged {
+				return fmt.Errorf("--session cannot be combined with --staged")
 			}
 			return reconnectSession(rootSession)
 		}
@@ -69,4 +73,5 @@ func Execute() int {
 
 func init() {
 	rootCmd.Flags().StringVar(&rootSession, "session", "", "reconnect to a running review session by ID")
+	rootCmd.Flags().BoolVar(&reviewStaged, "staged", false, "review only changes staged in the index")
 }

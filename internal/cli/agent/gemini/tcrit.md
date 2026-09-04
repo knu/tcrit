@@ -17,7 +17,7 @@ The CLI picks the review mode from its arguments, so do not ask which mode to us
 
 - A file path was given: `tcrit <file>` reviews that document.
 - A plan was written earlier in this conversation: `tcrit plan <file>` reviews it as a new version each round.
-- Otherwise: bare `tcrit` reviews the git changes (`tcrit review --base <ref>` changes the base).
+- Otherwise: bare `tcrit` reviews the git changes.  Use `tcrit --staged` to review only changes staged in the index; `tcrit review --base <ref>` changes the base.
 
 ## Run the loop
 

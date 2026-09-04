@@ -178,6 +178,72 @@ func TestChangedFilesWithSpecialPaths(t *testing.T) {
 	}
 }
 
+func TestStagedReviewUsesIndexContent(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+	runGit(t, dir, "init", "-q")
+	runGit(t, dir, "config", "user.email", "test@example.com")
+	runGit(t, dir, "config", "user.name", "Test")
+	runGit(t, dir, "config", "commit.gpgsign", "false")
+
+	writeFile(t, dir, "partial.txt", []byte("base\n"))
+	runGit(t, dir, "add", "partial.txt")
+	runGit(t, dir, "commit", "-q", "-m", "initial")
+	writeFile(t, dir, "partial.txt", []byte("staged\n"))
+	runGit(t, dir, "add", "partial.txt")
+	writeFile(t, dir, "partial.txt", []byte("unstaged\n"))
+	writeFile(t, dir, "untracked.txt", []byte("untracked\n"))
+
+	t.Chdir(dir)
+	files, err := ChangedFilesStaged()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].Path != "partial.txt" {
+		t.Fatalf("staged files = %+v, want only partial.txt", files)
+	}
+	content, err := FileContentFromIndex("partial.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "staged\n" {
+		t.Errorf("indexed content = %q, want %q", content, "staged\\n")
+	}
+	diff, err := DiffFileStaged("partial.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff == nil || !diff.ChangedLines[1] {
+		t.Fatalf("staged diff = %+v, want changed line 1", diff)
+	}
+}
+
+func TestChangedFilesStagedBeforeInitialCommit(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+	runGit(t, dir, "init", "-q")
+	writeFile(t, dir, "first.txt", []byte("first\n"))
+	runGit(t, dir, "add", "first.txt")
+	t.Chdir(dir)
+
+	files, err := ChangedFilesStaged()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].Path != "first.txt" {
+		t.Fatalf("staged files = %+v, want only first.txt", files)
+	}
+	diff, err := DiffFileStaged("first.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff == nil || !diff.ChangedLines[1] {
+		t.Fatalf("staged diff = %+v, want changed line 1", diff)
+	}
+}
+
 func TestInlineDiff(t *testing.T) {
 	before := "prefix.  `tfil` maintains a screen model of the output and enables mouse reporting.  Hovering continues."
 	after := "prefix.  When Codex starts, `tfil` begins maintaining a screen model of the output and enables mouse reporting.  Non-interactive commands stay quiet.  Hovering continues."
