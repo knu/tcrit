@@ -74,6 +74,34 @@ func TestRenderHeaderUsesTCritBrand(t *testing.T) {
 	}
 }
 
+func TestRenderHeaderShowsCodeReviewScope(t *testing.T) {
+	tests := []struct {
+		name    string
+		baseRef string
+		staged  bool
+		want    string
+	}{
+		{name: "working tree", baseRef: "HEAD", want: "[Working tree]"},
+		{name: "staged", baseRef: "HEAD", staged: true, want: "[Staged]"},
+		{name: "base ref", baseRef: "main", want: "[Base: main]"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := setupAppWithDoc(t, "first\nsecond\n")
+			app.width = 120
+			app.filePath = ""
+			app.multiFile = true
+			app.baseRef = tt.baseRef
+			app.staged = tt.staged
+
+			header := ansi.Strip(app.renderHeader())
+			if !strings.Contains(header, tt.want) {
+				t.Errorf("header = %q, want scope %q", header, tt.want)
+			}
+		})
+	}
+}
+
 func TestRenderHeaderStaysOnOneLineWithLongPath(t *testing.T) {
 	tests := []struct {
 		name  string

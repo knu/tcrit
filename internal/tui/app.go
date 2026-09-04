@@ -2875,6 +2875,19 @@ func truncateLeftToWidth(s string, width int) string {
 	return prefix + ansi.Cut(s, stringWidth-width+prefixWidth, stringWidth)
 }
 
+func (m AppModel) reviewScopeLabel() string {
+	if !m.multiFile {
+		return ""
+	}
+	if m.staged {
+		return "Staged"
+	}
+	if m.baseRef == "" || m.baseRef == "HEAD" {
+		return "Working tree"
+	}
+	return "Base: " + m.baseRef
+}
+
 func (m AppModel) renderHeader() string {
 	t := m.tab()
 	commentCount := 0
@@ -2887,6 +2900,9 @@ func (m AppModel) renderHeader() string {
 	}
 
 	prefix := " TCrit: "
+	if scope := m.reviewScopeLabel(); scope != "" {
+		prefix += "[" + scope + "] "
+	}
 	var suffix string
 	if t.selecting {
 		start, end := m.selectionRange()
