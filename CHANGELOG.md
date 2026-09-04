@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.3
+
+### Added
+
+- **Staged-only reviews** — `tcrit --staged` and `tcrit review --staged` read the file list, content, and diffs exclusively from the Git index; bundled agent integrations document the safer scope
+- **Visible review scope** — the code-review header always identifies staged changes, the working tree, or the active base ref
+
 ## 0.7.2
 
 ### Fixed
