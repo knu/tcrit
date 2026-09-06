@@ -3131,7 +3131,7 @@ func TestCommentSidebarCollapsesResolvedFileComments(t *testing.T) {
 	app, _ := newFinishTestApp(t, []review.Comment{lineComment, fileComment}, false)
 	app.commentViewport.SetWidth(40)
 	app.commentViewport.SetHeight(20)
-	app.focused = commentPane
+	app.focused = contentPane
 	app.updateCommentSidebar()
 
 	items := app.tabs[0].sidebarItems
@@ -3144,6 +3144,7 @@ func TestCommentSidebarCollapsesResolvedFileComments(t *testing.T) {
 	}
 
 	app.tabs[0].sidebarCursor = 0
+	app.focused = commentPane
 	app = pressKey(app, 'r')
 
 	if app.tabs[0].state.Comments[1].Resolved {
@@ -3152,6 +3153,44 @@ func TestCommentSidebarCollapsesResolvedFileComments(t *testing.T) {
 	rendered = ansi.Strip(app.commentViewport.View())
 	if !strings.Contains(rendered, fileComment.Body) {
 		t.Fatalf("sidebar = %q, want the reopened body", rendered)
+	}
+}
+
+func TestCommentNavigationSkipsResolvedComments(t *testing.T) {
+	app := newCommentNavigationTestApp()
+	for i := range app.tabs {
+		for j := range app.tabs[i].state.Comments {
+			app.tabs[i].state.Comments[j].Resolved = true
+		}
+		app.tabs[i].state.Comments = append(app.tabs[i].state.Comments,
+			review.Comment{ID: "resolved-file", Scope: "file", Resolved: true})
+	}
+	app.tabs[0].state.Comments[1].Resolved = false
+	app.tabs[2].state.Comments[1].Resolved = false
+	for _, step := range []struct {
+		key rune
+		tab int
+	}{{']', 0}, {']', 2}, {']', 0}, {'[', 2}, {'[', 0}, {'[', 2}} {
+		app = pressKey(app, step.key)
+		anns := app.annotationsAfterLine(app.tab().cursorLine, app.tab().cursorSide)
+		if app.activeTab != step.tab || app.focused != contentPane || !app.tab().cursorOnAnnotation {
+			t.Fatalf("key %c: tab %d, want %d with inline focus", step.key, app.activeTab, step.tab)
+		}
+		if anns[app.tab().cursorAnnoIdx].resolved {
+			t.Fatalf("key %c focused a resolved comment", step.key)
+		}
+	}
+	// Navigation from a resolved annotation preserves the order of same-line threads.
+	app.activeTab = 0
+	app.tab().cursorLine, app.tab().cursorAnnoIdx = 2, 0
+	app = pressKey(app, ']')
+	if app.activeTab != 0 || app.tab().cursorAnnoIdx != 1 {
+		t.Fatal("next from resolved annotation skipped its unresolved neighbor")
+	}
+	app.tabs[0].state.Comments[1].Resolved = true
+	app.tabs[2].state.Comments[1].Resolved = true
+	if app.jumpToComment(1) || app.jumpToComment(-1) {
+		t.Fatal("navigation found a target in an entirely resolved review")
 	}
 }
 

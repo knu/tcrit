@@ -598,6 +598,8 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				t.selecting = true
 				t.selectAnchor = t.cursorLine
 				t.selectSide = t.cursorSide
+				t.cursorOnAnnotation = false
+				t.cursorAnnoIdx = 0
 			}
 			m.rebuildContent()
 			return m, nil
@@ -691,7 +693,7 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				}
 			} else {
 				anns := m.annotationsAfterLine(t.cursorLine, t.cursorSide)
-				if len(anns) > 0 {
+				if len(anns) > 0 && !t.selecting {
 					t.cursorOnAnnotation = true
 					t.cursorAnnoIdx = 0
 				} else if next, ok := m.adjacentLine(t, 1); ok && (!t.selecting || next.side == t.selectSide) {
@@ -710,7 +712,7 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			} else {
 				if prev, ok := m.adjacentLine(t, -1); ok && (!t.selecting || prev.side == t.selectSide) {
 					anns := m.annotationsAfterLine(prev.line, prev.side)
-					if len(anns) > 0 {
+					if len(anns) > 0 && !t.selecting {
 						t.cursorLine, t.cursorSide = prev.line, prev.side
 						t.cursorOnAnnotation = true
 						t.cursorAnnoIdx = len(anns) - 1
@@ -1953,7 +1955,7 @@ func (m *AppModel) commentTargets(tabIndex int) []commentTarget {
 		}
 		line := c.EndAt()
 		ref := lineRef{side: c.Side, line: line}
-		lineTargets = append(lineTargets, commentTarget{id: c.ID, line: line, side: c.Side, annoIdx: indices[ref]})
+		lineTargets = append(lineTargets, commentTarget{id: c.ID, resolved: c.Resolved, line: line, side: c.Side, annoIdx: indices[ref]})
 		indices[ref]++
 	}
 	sort.SliceStable(fileTargets, func(i, j int) bool {
@@ -2003,15 +2005,17 @@ func (m *AppModel) currentCommentTarget(targets []commentTarget) int {
 }
 
 // jumpToComment moves to the adjacent comment in tab, line, and annotation
-// order, wrapping across the entire review and skipping tabs without comments.
+// order, wrapping across the entire review and skipping resolved comments.
 func (m *AppModel) jumpToComment(step int) bool {
 	t := m.tab()
 	targets := m.commentTargets(m.activeTab)
 	current := m.currentCommentTarget(targets)
 
 	if current >= 0 {
-		adjacent := current + step
-		if adjacent >= 0 && adjacent < len(targets) {
+		for adjacent := current + step; adjacent >= 0 && adjacent < len(targets); adjacent += step {
+			if targets[adjacent].resolved {
+				continue
+			}
 			m.selectComment(m.activeTab, targets[adjacent])
 			return true
 		}
@@ -2019,14 +2023,14 @@ func (m *AppModel) jumpToComment(step int) bool {
 		cursor := m.visualLineIndex(t, lineRef{side: t.cursorSide, line: t.cursorLine})
 		if step > 0 {
 			for _, target := range targets {
-				if m.targetPosition(t, target) >= cursor {
+				if !target.resolved && m.targetPosition(t, target) >= cursor {
 					m.selectComment(m.activeTab, target)
 					return true
 				}
 			}
 		} else {
 			for i := len(targets) - 1; i >= 0; i-- {
-				if m.targetPosition(t, targets[i]) <= cursor {
+				if !targets[i].resolved && m.targetPosition(t, targets[i]) <= cursor {
 					m.selectComment(m.activeTab, targets[i])
 					return true
 				}
@@ -2040,12 +2044,17 @@ func (m *AppModel) jumpToComment(step int) bool {
 		if len(targets) == 0 {
 			continue
 		}
-		target := targets[0]
+		start := 0
 		if step < 0 {
-			target = targets[len(targets)-1]
+			start = len(targets) - 1
 		}
-		m.selectComment(tabIndex, target)
-		return true
+		for i := start; i >= 0 && i < len(targets); i += step {
+			if targets[i].resolved {
+				continue
+			}
+			m.selectComment(tabIndex, targets[i])
+			return true
+		}
 	}
 	return false
 }
@@ -2457,6 +2466,7 @@ func (m *AppModel) rebuildContent() {
 
 // renderAnnotationBox renders a bordered annotation box indented under the gutter.
 func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused bool) string {
+	collapsed := ann.resolved && !focused
 	var lineLabel string
 	if ann.endLine > ann.line {
 		lineLabel = fmt.Sprintf("L%d-%d", ann.line, ann.endLine)
@@ -2471,17 +2481,17 @@ func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused boo
 	label := inlineLabelComment.Render("comment")
 	lineRef := commentLineStyle.Render(lineLabel)
 	header := fmt.Sprintf("%s %s", label, lineRef)
-	if !ann.resolved && len(ann.replies) > 0 {
+	if !collapsed && len(ann.replies) > 0 {
 		header += commentLineStyle.Render(fmt.Sprintf(" · %d replies", len(ann.replies)))
 	}
-	if ann.resolved && ann.author != "" {
+	if collapsed && ann.author != "" {
 		header += " " + m.commentAuthorStyle(ann.author).Render("— "+ann.author)
 	}
 	if ann.resolved {
 		header += " " + resolvedBadge.Render("✓ resolved")
 	}
 	boxContent.WriteString(header)
-	if !ann.resolved {
+	if !collapsed {
 		boxContent.WriteString("\n")
 		boxContent.WriteString(m.renderThread(threadViewKey{id: ann.id}, ann.author, ann.body, ann.replies, max(1, maxWidth-4), focused))
 	}
@@ -2951,6 +2961,7 @@ func (m *AppModel) updateCommentSidebar() {
 
 	for idx, it := range t.sidebarItems {
 		isSelected := m.focused == commentPane && idx == t.sidebarCursor
+		collapsed := it.resolved && !isSelected
 		var item strings.Builder
 
 		var lineInfo string
@@ -2965,10 +2976,10 @@ func (m *AppModel) updateCommentSidebar() {
 			lineInfo += " (deleted)"
 		}
 		lineInfo = commentLineStyle.Render(lineInfo)
-		if !it.resolved && len(it.replies) > 0 {
+		if !collapsed && len(it.replies) > 0 {
 			lineInfo += commentLineStyle.Render(fmt.Sprintf(" · %d replies", len(it.replies)))
 		}
-		if it.resolved && it.author != "" {
+		if collapsed && it.author != "" {
 			lineInfo += " " + m.commentAuthorStyle(it.author).Render(it.author)
 		}
 		if it.resolved {
@@ -2980,7 +2991,7 @@ func (m *AppModel) updateCommentSidebar() {
 			prefix = cursorCol.Render(cursorMarker.Render(">"))
 		}
 
-		if it.resolved {
+		if collapsed {
 			fmt.Fprintf(&item, "%s%s", prefix, lineInfo)
 			wrapped := lipgloss.Wrap(expandDisplayTabs(item.String()), max(m.commentViewport.Width(), 1), "")
 			for _, row := range strings.Split(wrapped, "\n") {

@@ -189,6 +189,90 @@ func TestThreadScrollingUsesSelectedSurface(t *testing.T) {
 	}
 }
 
+func TestResolvedThreadsExpandOnFocus(t *testing.T) {
+	for _, surface := range []string{"inline", "sidebar"} {
+		for _, action := range []string{"keyboard", "click", "wheel"} {
+			t.Run(surface+"/"+action, func(t *testing.T) {
+				app := setupAppWithDoc(t, "source\n")
+				app.width, app.height = 120, 40
+				app.recalculateLayout()
+				comment := review.Comment{ID: "resolved", StartLine: 1, EndLine: 1, Resolved: true,
+					Body: strings.Repeat("history\n", 20), Replies: []review.Reply{{ID: "reply", Author: "Codex", Body: "latest reply"}}}
+				if surface == "sidebar" {
+					comment.Scope = "file"
+				}
+				app.tabs[0].state.Comments = []review.Comment{comment}
+				app.tabs[0].cursorLine = 1
+				app.rebuildContent()
+				app.updateCommentSidebar()
+				view := func() string {
+					if surface == "sidebar" {
+						return ansi.Strip(app.commentViewport.View())
+					}
+					return ansi.Strip(app.contentViewport.View())
+				}
+				if got := view(); strings.Contains(got, "latest reply") || !strings.Contains(got, "resolved") {
+					t.Fatalf("unfocused resolved thread = %q", got)
+				}
+				left, top, _, _ := app.contentBounds()
+				x, y, key := left+gutterWidth+2, top+2, 'j'
+				if surface == "sidebar" {
+					left, top, _, _ = app.commentBounds()
+					x, y, key = left+2, top+1, 's'
+				}
+				switch action {
+				case "keyboard":
+					app = pressKey(app, key)
+				case "click":
+					app = clickMouse(app, x, y)
+				case "wheel":
+					app = wheelMouse(app, x, y, tea.MouseWheelUp)
+				}
+				if got := view(); !strings.Contains(got, "history") || !strings.Contains(got, "resolved") {
+					t.Fatalf("focused resolved thread = %q", got)
+				}
+				if !app.tab().state.Comments[0].Resolved {
+					t.Fatal("expanding the thread changed its resolution")
+				}
+				scroll := app.threadScrolls[threadViewKey{path: app.tab().path, id: comment.ID, sidebar: surface == "sidebar"}]
+				if action == "wheel" && (!scroll.manual || scroll.offset >= scroll.maxOffset) {
+					t.Fatalf("wheel did not scroll the expanded thread: %+v", scroll)
+				}
+				app = pressKey(app, 's')
+				if got := view(); strings.Contains(got, "history") || strings.Contains(got, "latest reply") {
+					t.Fatalf("resolved thread did not collapse after losing focus: %q", got)
+				}
+			})
+		}
+	}
+}
+
+func TestResolvedThreadFocusWithVerticalMovement(t *testing.T) {
+	for _, direction := range []rune{'j', 'k'} {
+		for _, selecting := range []bool{false, true} {
+			app := setupAppWithDoc(t, "one\ntwo\nthree\n")
+			app.tabs[0].state.Comments = []review.Comment{{ID: "resolved", StartLine: 2, EndLine: 2, Body: "resolved body", Resolved: true}}
+			app.tab().cursorLine = 2
+			if direction == 'k' {
+				app.tab().cursorLine = 3
+			}
+			if selecting {
+				app = pressKey(app, 'v')
+			}
+			app = pressKey(app, direction)
+			if app.tab().cursorOnAnnotation == selecting {
+				t.Fatalf("direction %c, selecting %t: annotation focus = %t", direction, selecting, app.tab().cursorOnAnnotation)
+			}
+			if !selecting {
+				app = pressKey(app, 'v')
+				if app.tab().cursorOnAnnotation {
+					t.Fatal("entering visual mode retained annotation focus")
+				}
+			}
+		}
+	}
+}
+
 func TestReplyModalStartsAtLatestHeaderAndKeepsFullLines(t *testing.T) {
 	app := setupAppWithDoc(t, "context\n")
 	app.width, app.height = 120, 50
