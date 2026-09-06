@@ -187,6 +187,7 @@ func (m *AppModel) tab() *FileTab {
 
 func NewApp(filePath string, cfg AppConfig) AppModel {
 	ta := textarea.New()
+	ta.SetVirtualCursor(false)
 	ta.Placeholder = "Type your comment..."
 	ta.ShowLineNumbers = false
 
@@ -213,6 +214,7 @@ func NewApp(filePath string, cfg AppConfig) AppModel {
 // NewCodeReviewApp creates a multi-file code review TUI.
 func NewCodeReviewApp(files []gitpkg.FileChange, ref string, cfg AppConfig) AppModel {
 	ta := textarea.New()
+	ta.SetVirtualCursor(false)
 	ta.Placeholder = "Type your comment..."
 	ta.ShowLineNumbers = false
 
@@ -2965,11 +2967,25 @@ func (m AppModel) View() tea.View {
 		v.AltScreen = true
 		return v
 	}
-	full, _ := m.renderReviewScreen()
+	full, layout := m.renderReviewScreen()
 
 	v := tea.NewView(full)
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeAllMotion
+	if c := m.modalTextarea.Cursor(); c != nil {
+		for _, region := range layout.modalRegions {
+			if !region.action.textarea {
+				continue
+			}
+			c.X += region.rect.left
+			c.Y += region.rect.top
+			if c.X >= max(0, region.rect.left) && c.X < min(m.width, region.rect.right) &&
+				c.Y >= max(0, region.rect.top) && c.Y < min(m.height, region.rect.bottom) {
+				v.Cursor = c
+			}
+			break
+		}
+	}
 	return v
 }
 

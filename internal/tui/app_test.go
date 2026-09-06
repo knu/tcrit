@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -842,6 +843,44 @@ func TestMouseClickCommentTextareaFocusesAndMovesCursor(t *testing.T) {
 		t.Fatalf("focused = %t, modal focus = %d, cursor = %d:%d; want textarea at 1:2",
 			app.modalTextarea.Focused(), app.modalFocus,
 			app.modalTextarea.Line(), app.modalTextarea.Column())
+	}
+}
+
+func TestCommentTerminalCursor(t *testing.T) {
+	for _, height := range []int{24, 12} {
+		for _, body := range []string{"", "日本語abc", strings.Repeat("日本語", 40), strings.Repeat("line\n", 12) + "日本語abc"} {
+			t.Run(fmt.Sprintf("height=%d/body=%q", height, body), func(t *testing.T) {
+				app := setupAppWithDoc(t, "first\nsecond\n")
+				app.width, app.height = 100, height
+				app.recalculateLayout()
+				app.openLineComment()
+				app.modalTextarea.SetValue(body)
+				_ = app.modalTextarea.View()
+				app.modalTextarea.SetHeight(app.modalTextarea.Height())
+				rect := modalTextareaRect(t, app)
+				view := app.View()
+				if view.Cursor == nil {
+					t.Fatal("focused textarea has no terminal cursor")
+				}
+				c := view.Cursor
+				if c.X < rect.left || c.X >= rect.right || c.Y < max(0, rect.top) || c.Y >= min(height, rect.bottom) {
+					t.Fatalf("cursor %v outside visible textarea %v", c, rect)
+				}
+				app = clickMouse(app, c.X, c.Y)
+				if app.modalTextarea.Column() != len([]rune(strings.Split(body, "\n")[app.modalTextarea.Line()])) {
+					t.Fatalf("clicking terminal cursor moved away from end of line: %d", app.modalTextarea.Column())
+				}
+				app.modalTextarea.Blur()
+				if app.View().Cursor != nil {
+					t.Fatal("blurred textarea still has a terminal cursor")
+				}
+				app.modalTextarea.Focus()
+				app.modal = finishModal
+				if app.View().Cursor != nil {
+					t.Fatal("dialog without textarea has a terminal cursor")
+				}
+			})
+		}
 	}
 }
 

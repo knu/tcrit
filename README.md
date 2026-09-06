@@ -14,6 +14,7 @@
 - **Explicit review scopes** — `tcrit --staged` reviews the exact index snapshot without unstaged or untracked files, records that scope in `review.json`, and keeps the active staged, working-tree, or base-ref scope visible in the TUI header.
 - **File-level comments** — reviewers can press `f` to comment on the active file, with file threads kept in the comment sidebar instead of attached to a line.
 - **Comment editing tools** — `ctrl+y` inserts GitHub-compatible suggestions for selected or anchored lines, including replies, and leaves the cursor at the end of the suggested code; `ctrl+o` edits comment and reply bodies in `$EDITOR`, while `ctrl+PgUp` / `ctrl+PgDn` scroll through code context and thread history.
+- **Native input cursor** — comment and reply editors position the real terminal cursor at the insertion point so terminal IMEs can display composition there, including after wrapping and scrolling.
 - **Deleted-line comments** — removed lines, including lines in fully deleted files, can be selected and commented on from the keyboard or gutter.
 - **Mouse-first TUI controls** — click file tabs, code lines, comment threads, sidebar items, dialog actions, and the review-finish button; use the wheel to scroll code and drag the gutter to select line ranges.
 - **Versioned plan reviews** — `tcrit plan` saves immutable revisions and carries comment threads forward as the plan changes.
