@@ -19,7 +19,6 @@ import (
 type Config struct {
 	Output           string            `json:"output,omitempty"`
 	Author           string            `json:"author,omitempty"`
-	BaseBranch       string            `json:"base_branch,omitempty"`
 	IgnorePatterns   []string          `json:"ignore_patterns,omitempty"`
 	Quiet            bool              `json:"quiet,omitempty"`
 	CleanupOnApprove bool              `json:"cleanup_on_approve,omitempty"`
@@ -36,7 +35,6 @@ type Config struct {
 type fileConfig struct {
 	Output           string            `json:"output"`
 	Author           string            `json:"author"`
-	BaseBranch       string            `json:"base_branch"`
 	IgnorePatterns   []string          `json:"ignore_patterns"`
 	Quiet            *bool             `json:"quiet"`
 	CleanupOnApprove *bool             `json:"cleanup_on_approve"`
@@ -120,9 +118,6 @@ func apply(cfg *Config, fc *fileConfig) {
 	}
 	if fc.Author != "" {
 		cfg.Author = fc.Author
-	}
-	if fc.BaseBranch != "" {
-		cfg.BaseBranch = fc.BaseBranch
 	}
 	// Pattern lists are unioned across levels, like crit.
 	cfg.IgnorePatterns = appendUnique(cfg.IgnorePatterns, fc.IgnorePatterns)

@@ -36,14 +36,14 @@ func TestResolveExplicitScopes(t *testing.T) {
 			}
 		}
 	}
-	oldScope, oldBase, oldStaged := reviewScope, reviewBase, reviewStaged
-	t.Cleanup(func() { reviewScope, reviewBase, reviewStaged = oldScope, oldBase, oldStaged })
+	oldScope, oldStaged := reviewScope, reviewStaged
+	t.Cleanup(func() { reviewScope, reviewStaged = oldScope, oldStaged })
 	for _, scope := range []string{"", "all", "staged", "unstaged"} {
-		reviewScope, reviewBase, reviewStaged = scope, "", false
+		reviewScope, reviewStaged = scope, false
 		if scope == "" {
 			scope = "all"
 		}
-		mode, err := resolveReviewMode(nil, &config.Config{BaseBranch: "missing"})
+		mode, err := resolveReviewMode(nil)
 		if err != nil || mode.source == nil || mode.source.Scope != scope || len(mode.files) != 1 {
 			t.Fatalf("%s: mode=%+v err=%v", scope, mode, err)
 		}
@@ -53,29 +53,29 @@ func TestResolveExplicitScopes(t *testing.T) {
 		}
 	}
 	reviewScope = "HEAD~1.."
-	mode, err := resolveReviewMode(nil, &config.Config{})
+	mode, err := resolveReviewMode(nil)
 	if err != nil || mode.source.Scope != "range" {
 		t.Fatalf("range mode=%+v err=%v", mode, err)
 	}
 	reviewScope = "HEAD..HEAD"
-	if _, err := resolveReviewMode(nil, &config.Config{}); err == nil {
+	if _, err := resolveReviewMode(nil); err == nil {
 		t.Fatal("empty range accepted")
 	}
 	for _, tc := range []struct {
-		scope, base string
-		staged      bool
-		args        []string
+		scope  string
+		staged bool
+		args   []string
 	}{
 		{scope: "bad"}, {scope: "HEAD"},
 		{scope: "all", staged: true}, {scope: "HEAD..HEAD", staged: true},
-		{scope: "all", base: "HEAD"}, {scope: "staged", args: []string{"README.md"}},
+		{scope: "staged", args: []string{"README.md"}},
 	} {
-		reviewScope, reviewBase, reviewStaged = tc.scope, tc.base, tc.staged
-		if _, err := resolveReviewMode(tc.args, &config.Config{}); err == nil {
+		reviewScope, reviewStaged = tc.scope, tc.staged
+		if _, err := resolveReviewMode(tc.args); err == nil {
 			t.Fatalf("accepted %+v", tc)
 		}
 	}
-	reviewScope, reviewBase, reviewStaged = "all", "", false
+	reviewScope, reviewStaged = "all", false
 	if out, err := exec.Command("git", "add", "file.txt").CombinedOutput(); err != nil {
 		t.Fatalf("%s: %v", out, err)
 	}
@@ -84,7 +84,7 @@ func TestResolveExplicitScopes(t *testing.T) {
 	}
 	for _, scope := range []string{"", "all"} {
 		reviewScope = scope
-		if _, err := resolveReviewMode(nil, &config.Config{BaseBranch: "HEAD~1"}); err == nil {
+		if _, err := resolveReviewMode(nil); err == nil {
 			t.Fatal("clean worktree fell back to committed changes")
 		}
 	}

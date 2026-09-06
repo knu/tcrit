@@ -26,7 +26,7 @@ func TestShellEscape(t *testing.T) {
 	}
 }
 
-func TestResolveStagedReviewUsesIndexAndOverridesConfigBase(t *testing.T) {
+func TestResolveStagedReviewUsesIndex(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
@@ -51,13 +51,13 @@ func TestResolveStagedReviewUsesIndexAndOverridesConfigBase(t *testing.T) {
 	}
 	run("add", "staged.txt")
 
-	originalCode, originalBase, originalStaged := reviewCode, reviewBase, reviewStaged
-	reviewCode, reviewBase, reviewStaged = true, "", true
+	originalCode, originalStaged := reviewCode, reviewStaged
+	reviewCode, reviewStaged = true, true
 	t.Cleanup(func() {
-		reviewCode, reviewBase, reviewStaged = originalCode, originalBase, originalStaged
+		reviewCode, reviewStaged = originalCode, originalStaged
 	})
 
-	mode, err := resolveReviewMode(nil, &config.Config{BaseBranch: "missing"})
+	mode, err := resolveReviewMode(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,6 @@ func TestReviewModePersistedCLIArgs(t *testing.T) {
 	}{
 		{name: "working tree", mode: reviewMode{ref: "HEAD"}},
 		{name: "staged", mode: reviewMode{ref: "HEAD", staged: true}, want: []string{"--staged"}},
-		{name: "base", mode: reviewMode{ref: "main"}, want: []string{"review", "--base", "main"}},
 		{name: "document", mode: reviewMode{docPath: "plan.md"}},
 	}
 	for _, tt := range tests {
@@ -183,7 +182,7 @@ func TestSpawnTUIPaneCodeMode(t *testing.T) {
 		t.Fatalf("expected 1 tmux call, got %d", len(*calls))
 	}
 	cmd := (*calls)[0][len((*calls)[0])-1]
-	for _, want := range []string{"TCRIT_DETACHED=1", "_tui", "--base 'HEAD'"} {
+	for _, want := range []string{"TCRIT_DETACHED=1", "_tui", "--scope=all"} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("pane command missing %q: %s", want, cmd)
 		}

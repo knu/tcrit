@@ -20,7 +20,6 @@ import (
 )
 
 var reviewCode bool
-var reviewBase string
 var reviewStaged bool
 var reviewDiff string
 var reviewScope string
@@ -122,9 +121,6 @@ func (m *reviewMode) persistedCLIArgs() []string {
 	if m.staged {
 		return []string{"--staged"}
 	}
-	if m.ref != "" && m.ref != "HEAD" {
-		return []string{"review", "--base", m.ref}
-	}
 	return nil
 }
 
@@ -136,7 +132,7 @@ func runReview(args []string) error {
 		return err
 	}
 
-	mode, err := resolveReviewMode(args, cfg)
+	mode, err := resolveReviewMode(args)
 	if err != nil {
 		return err
 	}
@@ -205,10 +201,10 @@ func reviewArgSuffix(mode *reviewMode) string {
 
 // resolveReviewMode classifies the arguments and, for code mode, detects
 // the changed files up front so failures surface before any TUI spawns.
-func resolveReviewMode(args []string, cfg *config.Config) (*reviewMode, error) {
+func resolveReviewMode(args []string) (*reviewMode, error) {
 	if reviewDiff != "" {
-		if reviewScope != "" || reviewStaged || reviewBase != "" || reviewCode {
-			return nil, fmt.Errorf("--diff cannot be combined with --scope, --code, --staged, or --base")
+		if reviewScope != "" || reviewStaged || reviewCode {
+			return nil, fmt.Errorf("--diff cannot be combined with --scope, --code, or --staged")
 		}
 		input := reviewDiff
 		if len(args) > 0 {
@@ -223,36 +219,8 @@ func resolveReviewMode(args []string, cfg *config.Config) (*reviewMode, error) {
 		}
 		return &reviewMode{patch: patch, files: patch.Changes()}, nil
 	}
-	if reviewScope != "" || (len(args) == 0 && reviewBase == "" && !reviewStaged) {
-		if len(args) > 0 || reviewBase != "" || (reviewStaged && reviewScope != "staged") {
-			return nil, fmt.Errorf("--scope cannot be combined with a file, --base, or a conflicting --staged")
-		}
-		if !git.IsGitRepo() {
-			return nil, fmt.Errorf("code review requires a git repository")
-		}
-		scope := reviewScope
-		if scope == "" {
-			scope = "all"
-		}
-		source := git.ReviewSource{Scope: scope, Base: "HEAD"}
-		var err error
-		if scope != "all" && scope != "staged" && scope != "unstaged" {
-			source, err = git.ResolveRange(scope)
-			if err != nil {
-				return nil, err
-			}
-		}
-		files, err := source.Files()
-		if err != nil {
-			return nil, err
-		}
-		if len(files) == 0 {
-			return nil, fmt.Errorf("no changes in the selected scope")
-		}
-		return &reviewMode{files: files, ref: source.Base, staged: source.Scope == "staged", source: &source}, nil
-	}
-	if reviewStaged && len(args) > 0 {
-		return nil, fmt.Errorf("--staged is only valid for code review")
+	if (reviewStaged || reviewScope != "") && len(args) > 0 {
+		return nil, fmt.Errorf("--scope and --staged are only valid for code review")
 	}
 	if len(args) == 1 && !reviewCode {
 		filePath := args[0]
@@ -266,49 +234,7 @@ func resolveReviewMode(args []string, cfg *config.Config) (*reviewMode, error) {
 		return nil, fmt.Errorf("code review requires a git repository (pass a file argument to review a document)")
 	}
 
-	if reviewStaged && reviewBase != "" {
-		return nil, fmt.Errorf("--staged cannot be combined with --base")
-	}
-	base := reviewBase
-	if base == "" && !reviewStaged {
-		base = cfg.BaseBranch
-	}
-
-	var ref string
-	var files []git.FileChange
-	var err error
-	if reviewStaged {
-		ref = "HEAD"
-		files, err = git.ChangedFilesStaged()
-		if err != nil {
-			return nil, fmt.Errorf("detecting staged files: %w", err)
-		}
-		if len(files) == 0 {
-			return nil, fmt.Errorf("no staged files found")
-		}
-	} else if base != "" {
-		ref = base
-		files, err = git.ChangedFilesFrom(ref)
-		if err != nil {
-			return nil, fmt.Errorf("detecting changed files from %s: %w", ref, err)
-		}
-		if len(files) == 0 {
-			return nil, fmt.Errorf("no changed files found relative to %s", ref)
-		}
-	} else {
-		ref = "HEAD"
-		files, err = git.ChangedFiles()
-		if err != nil {
-			return nil, fmt.Errorf("detecting changed files: %w", err)
-		}
-		if len(files) == 0 {
-			ref, files, err = fallbackRef()
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-	return &reviewMode{ref: ref, files: files, staged: reviewStaged}, nil
+	return resolveCodeScope()
 }
 
 func openReviewSession(cfg *config.Config, mode *reviewMode) (*review.Session, error) {
@@ -470,8 +396,8 @@ func buildTUICommand(mode *reviewMode) (string, error) {
 			return fmt.Sprintf("%s %s _tui --staged",
 				envPrefix, shellEscape(tcritBin)), nil
 		}
-		return fmt.Sprintf("%s %s _tui --base %s",
-			envPrefix, shellEscape(tcritBin), shellEscape(mode.ref)), nil
+		return fmt.Sprintf("%s %s _tui --scope=all",
+			envPrefix, shellEscape(tcritBin)), nil
 	default:
 		absPath, err := filepath.Abs(mode.docPath)
 		if err != nil {
@@ -480,30 +406,6 @@ func buildTUICommand(mode *reviewMode) (string, error) {
 		return fmt.Sprintf("%s %s _tui %s",
 			envPrefix, shellEscape(tcritBin), shellEscape(absPath)), nil
 	}
-}
-
-func fallbackRef() (string, []git.FileChange, error) {
-	// Try common alternatives in order
-	alternatives := []struct {
-		label string
-		ref   string
-	}{
-		{"last commit (HEAD~1)", "HEAD~1"},
-		{"base branch (main)", "main"},
-	}
-
-	for _, alt := range alternatives {
-		files, err := git.ChangedFilesFrom(alt.ref)
-		if err != nil {
-			continue
-		}
-		if len(files) > 0 {
-			fmt.Fprintf(os.Stderr, "No unstaged changes found. Using %s.\n", alt.label)
-			return alt.ref, files, nil
-		}
-	}
-
-	return "", nil, fmt.Errorf("no changed files found")
 }
 
 // resolveExecutable returns the absolute path to the currently running binary.
@@ -653,9 +555,6 @@ func init() {
 	reviewCmd.Flags().BoolVar(&reviewCode, "code", false, "review code changes (default when no file argument is given)")
 	addDiffFlag(reviewCmd)
 	reviewCmd.Flags().BoolVar(&reviewStaged, "staged", false, "review only changes staged in the index")
-	reviewCmd.Flags().StringVar(&reviewBase, "base", "", "base ref to diff against in code mode")
-	reviewCmd.Flags().StringVar(&reviewBase, "base-branch", "", "alias for --base")
-	reviewCmd.Flags().MarkHidden("base-branch")
 
 	// Deprecated no-ops: blocking on a tmux split pane is now the default.
 	var deprecatedDetach, deprecatedWait bool

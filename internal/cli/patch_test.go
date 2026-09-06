@@ -99,7 +99,7 @@ func TestDiffInputArguments(t *testing.T) {
 			cmd := &cobra.Command{
 				Args: cobra.MaximumNArgs(1), SilenceUsage: true, SilenceErrors: true,
 				RunE: func(cmd *cobra.Command, args []string) error {
-					mode, err := resolveReviewMode(args, &config.Config{})
+					mode, err := resolveReviewMode(args)
 					if err == nil && (mode.patch == nil || len(mode.files) != 1) {
 						t.Fatalf("incorrect diff mode: %+v", mode)
 					}
@@ -130,22 +130,22 @@ func TestResolveDiffFromStdin(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	stdin, diff, code, staged, base := os.Stdin, reviewDiff, reviewCode, reviewStaged, reviewBase
-	os.Stdin, reviewDiff, reviewCode, reviewStaged, reviewBase = f, "-", false, false, ""
-	t.Cleanup(func() { os.Stdin, reviewDiff, reviewCode, reviewStaged, reviewBase = stdin, diff, code, staged, base })
-	mode, err := resolveReviewMode(nil, &config.Config{BaseBranch: "ignore-me"})
+	stdin, diff, code, staged, scope := os.Stdin, reviewDiff, reviewCode, reviewStaged, reviewScope
+	os.Stdin, reviewDiff, reviewCode, reviewStaged, reviewScope = f, "-", false, false, ""
+	t.Cleanup(func() { os.Stdin, reviewDiff, reviewCode, reviewStaged, reviewScope = stdin, diff, code, staged, scope })
+	mode, err := resolveReviewMode(nil)
 	if err != nil || mode.patch == nil || len(mode.files) != 1 {
 		t.Fatalf("mode = %+v, %v", mode, err)
 	}
-	if _, err := resolveReviewMode([]string{"file"}, &config.Config{}); err == nil {
+	if _, err := resolveReviewMode([]string{"file"}); err == nil {
 		t.Fatal("accepted document with --diff")
 	}
 	reviewStaged = true
-	if _, err := resolveReviewMode(nil, &config.Config{}); err == nil {
+	if _, err := resolveReviewMode(nil); err == nil {
 		t.Fatal("accepted staged with --diff")
 	}
-	reviewStaged, reviewBase = false, "main"
-	if _, err := resolveReviewMode(nil, &config.Config{}); err == nil {
-		t.Fatal("accepted base with --diff")
+	reviewStaged, reviewScope = false, "all"
+	if _, err := resolveReviewMode(nil); err == nil {
+		t.Fatal("accepted scope with --diff")
 	}
 }

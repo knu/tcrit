@@ -147,7 +147,7 @@ Running `tcrit` with no subcommand reviews the current Git changes. Running `tcr
 |---------|---------|
 | `tcrit [file]` | Review current Git changes, or review `file` when given |
 | `tcrit --staged` | Review only changes staged in the index |
-| `tcrit review [--base <ref>\|--staged] [file]` | Explicit form of the default review command; `--staged` reviews only the index |
+| `tcrit review [--scope <scope>] [file]` | Explicit form of the default review command; `--staged` reviews only the index |
 | `tcrit plan [--name <slug>] [file]` | Create or continue a versioned plan review; reads stdin when `file` is omitted |
 | `tcrit --session <id>` | Reconnect to a running review and start its next round |
 | `tcrit comment ...` | Add comments or replies, import JSON, or clear the selected review |
@@ -162,7 +162,7 @@ Running `tcrit` with no subcommand reviews the current Git changes. Running `tcr
 
 ```bash
 tcrit
-# Equivalent explicit form; use --base <ref> to choose another diff base
+# Equivalent explicit form
 tcrit review
 # Review only changes staged in the index
 tcrit --staged
@@ -178,7 +178,7 @@ Detects changed files in your git repo and opens a tabbed TUI with syntax highli
 
 - Diffs staged, unstaged, and untracked changes against `HEAD` by default (`--scope=all`); reports no changes when the worktree is clean
 - With `--staged`, reads both the file list and displayed contents from the index, excluding unstaged and untracked work
-- With `--diff`, reads the supplied unified diff and labels the scope **Supplied diff**; it cannot be combined with `--scope`, `--code`, `--staged`, or `--base`
+- With `--diff`, reads the supplied unified diff and labels the scope **Supplied diff**; it cannot be combined with `--scope`, `--code` or `--staged`
 - Green gutter markers highlight changed lines
 - Comments are aggregated across all files in the session
 
@@ -203,6 +203,8 @@ The waiting TUI reloads the snapshot and comments. A plain `tcrit --session <id>
 
 ### How code review works
 
+`--base`, its `--base-branch` alias, and the `base_branch` configuration key have been removed. Use `--scope=A..B` or `--scope=A...B` for committed comparisons; these compare committed snapshots, whereas the old `--base` compared against the working tree.
+
 Choose an explicit scope or a committed comparison:
 
 ```bash
@@ -214,9 +216,9 @@ tcrit --scope=main...             # compare the merge base with HEAD (omitted B)
 tcrit --scope=v0.7.0..v0.7.3      # review a historical comparison
 ```
 
-`--scope` also works with `tcrit review` and cannot be combined with a document, `--diff`, or `--base`.  In `A..B` and `A...B`, endpoints are resolved by Git and an omitted endpoint means HEAD: `main..` compares main with HEAD, while `main...` compares their merge base with HEAD.  Three-dot comparisons require a unique merge base.  The displayed contents come from the right endpoint, even if the working tree differs.  Keep the dots when omitting B so the comparison method remains explicit.
+`--scope` also works with `tcrit review` and cannot be combined with a document or `--diff`.  In `A..B` and `A...B`, endpoints are resolved by Git and an omitted endpoint means HEAD: `main..` compares main with HEAD, while `main...` compares their merge base with HEAD.  Three-dot comparisons require a unique merge base.  The displayed contents come from the right endpoint, even if the working tree differs.  Keep the dots when omitting B so the comparison method remains explicit.
 
-The selected scope stays fixed for the session.  To inspect another comparison, start a separate review with a different scope; comments are isolated by working directory, branch, and scope.  `--staged` and `--scope=staged` share the same session.  Use `tcrit comments --session <id>` and `tcrit comment --session <id>` for these reviews; the finish prompt identifies the session.  Reconnecting for the next round retains the selected scope and refreshes comparison endpoints.  An empty comparison is reported without launching the TUI.  Without explicit flags, the scope is all: HEAD versus the working tree plus untracked files.  A clean working tree does not fall back to committed changes, and the base setting does not override the default.
+The selected scope stays fixed for the session.  To inspect another comparison, start a separate review with a different scope; comments are isolated by working directory, branch, and scope.  `--staged` and `--scope=staged` share the same session.  Use `tcrit comments --session <id>` and `tcrit comment --session <id>` for these reviews; the finish prompt identifies the session.  Reconnecting for the next round retains the selected scope and refreshes comparison endpoints.  An empty comparison is reported without launching the TUI.  Without explicit flags, the scope is all: HEAD versus the working tree plus untracked files.  A clean working tree does not fall back to committed changes.
 
 1. An agent (or you) runs `tcrit review --code` — the TUI opens in a Herdr tab or tmux split and the command blocks
 2. Navigate between files and leave inline comments on the changes

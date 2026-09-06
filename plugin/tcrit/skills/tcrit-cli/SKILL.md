@@ -45,7 +45,7 @@ tcrit comment --session <id> --json --file .tmp/replies.json --author 'Claude Co
 
 To start another round, regenerate and feed the diff into `tcrit --diff --session <id>` from the original directory; `tcrit --session <id>` alone cannot refresh its snapshot.  The `/tcrit` skill covers that interactive loop.
 
-Explicit `--scope`, `--staged`, and `--base` reviews use separate sessions.  `--scope` accepts all/staged/unstaged or a committed comparison such as `main..HEAD` or `main...` (omitted B means HEAD).  Pass `--session <id>` from the finish prompt on all comment operations, including listing, replies, and bulk input.  `--staged` and `--scope=staged` select the same session.  A review's scope stays fixed across rounds; another comparison does not reuse its comments.
+Different review scopes use separate sessions.  `--scope` accepts all/staged/unstaged or a committed comparison such as `main..HEAD` or `main...` (omitted B means HEAD).  Pass `--session <id>` from the finish prompt on all comment operations, including listing, replies, and bulk input.  `--staged` and `--scope=staged` select the same session.  A review's scope stays fixed across rounds; another comparison does not reuse its comments.
 
 ## Review file format
 

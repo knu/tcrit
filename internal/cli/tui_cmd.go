@@ -54,7 +54,7 @@ var tuiCmd = &cobra.Command{
 				planSlug: tuiPlan,
 			}
 		} else {
-			mode, err = resolveReviewMode(args, cfg)
+			mode, err = resolveReviewMode(args)
 			if err != nil {
 				return err
 			}
@@ -72,7 +72,6 @@ func init() {
 	tuiCmd.PreRunE = validateScopeFlags
 	tuiCmd.Flags().StringVar(&reviewScope, "scope", "", "review scope")
 	rootCmd.AddCommand(tuiCmd)
-	tuiCmd.Flags().StringVar(&reviewBase, "base", "", "base ref to diff against in code mode")
 	tuiCmd.Flags().BoolVar(&reviewStaged, "staged", false, "review only changes staged in the index")
 	tuiCmd.Flags().StringVar(&tuiPlan, "plan", "", "plan slug to review")
 	tuiCmd.Flags().StringVar(&tuiDiffSession, "diff-session", "", "saved diff session to review")
