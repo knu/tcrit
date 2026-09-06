@@ -1,0 +1,132 @@
+package cli
+
+import (
+	"os"
+	"os/exec"
+	"strings"
+	"testing"
+
+	"github.com/knu/tcrit/internal/config"
+	"github.com/knu/tcrit/internal/git"
+	"github.com/knu/tcrit/internal/review"
+)
+
+func TestResolveExplicitScopes(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+	for _, args := range [][]string{{"init", "-q"}, {"config", "user.name", "Test"}, {"config", "user.email", "test@example.com"}, {"commit", "--allow-empty", "-qm", "base"}} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("%s: %v", out, err)
+		}
+	}
+	for _, value := range []string{"committed", "staged", "working"} {
+		if err := os.WriteFile("file.txt", []byte(value), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if value != "working" {
+			if out, err := exec.Command("git", "add", "file.txt").CombinedOutput(); err != nil {
+				t.Fatalf("%s: %v", out, err)
+			}
+		}
+		if value == "committed" {
+			if out, err := exec.Command("git", "commit", "-qm", "next").CombinedOutput(); err != nil {
+				t.Fatalf("%s: %v", out, err)
+			}
+		}
+	}
+	oldScope, oldBase, oldStaged := reviewScope, reviewBase, reviewStaged
+	t.Cleanup(func() { reviewScope, reviewBase, reviewStaged = oldScope, oldBase, oldStaged })
+	for _, scope := range []string{"", "all", "staged", "unstaged"} {
+		reviewScope, reviewBase, reviewStaged = scope, "", false
+		if scope == "" {
+			scope = "all"
+		}
+		mode, err := resolveReviewMode(nil, &config.Config{BaseBranch: "missing"})
+		if err != nil || mode.source == nil || mode.source.Scope != scope || len(mode.files) != 1 {
+			t.Fatalf("%s: mode=%+v err=%v", scope, mode, err)
+		}
+		cmd, err := buildTUICommand(mode)
+		if err != nil || !strings.Contains(cmd, "--scope '"+scope+"'") {
+			t.Fatalf("command=%q err=%v", cmd, err)
+		}
+	}
+	reviewScope = "HEAD~1.."
+	mode, err := resolveReviewMode(nil, &config.Config{})
+	if err != nil || mode.source.Scope != "range" {
+		t.Fatalf("range mode=%+v err=%v", mode, err)
+	}
+	reviewScope = "HEAD..HEAD"
+	if _, err := resolveReviewMode(nil, &config.Config{}); err == nil {
+		t.Fatal("empty range accepted")
+	}
+	for _, tc := range []struct {
+		scope, base string
+		staged      bool
+		args        []string
+	}{
+		{scope: "bad"}, {scope: "HEAD"},
+		{scope: "all", staged: true}, {scope: "HEAD..HEAD", staged: true},
+		{scope: "all", base: "HEAD"}, {scope: "staged", args: []string{"README.md"}},
+	} {
+		reviewScope, reviewBase, reviewStaged = tc.scope, tc.base, tc.staged
+		if _, err := resolveReviewMode(tc.args, &config.Config{}); err == nil {
+			t.Fatalf("accepted %+v", tc)
+		}
+	}
+	reviewScope, reviewBase, reviewStaged = "all", "", false
+	if out, err := exec.Command("git", "add", "file.txt").CombinedOutput(); err != nil {
+		t.Fatalf("%s: %v", out, err)
+	}
+	if out, err := exec.Command("git", "commit", "-qm", "clean").CombinedOutput(); err != nil {
+		t.Fatalf("%s: %v", out, err)
+	}
+	for _, scope := range []string{"", "all"} {
+		reviewScope = scope
+		if _, err := resolveReviewMode(nil, &config.Config{BaseBranch: "HEAD~1"}); err == nil {
+			t.Fatal("clean worktree fell back to committed changes")
+		}
+	}
+}
+
+func TestReviewSourceSessionIsolation(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	cfg := &config.Config{Output: t.TempDir()}
+	modes := []reviewMode{
+		{ref: "HEAD", source: &git.ReviewSource{Scope: "all"}},
+		{ref: "HEAD", staged: true, source: &git.ReviewSource{Scope: "staged"}},
+		{ref: "HEAD", source: &git.ReviewSource{Scope: "unstaged"}},
+		{ref: "HEAD~1", source: &git.ReviewSource{Scope: "range", Range: "HEAD~1..HEAD"}},
+	}
+	keys := map[string]bool{}
+	stagedKey := ""
+	for i := range modes {
+		sess, err := openReviewSession(cfg, &modes[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if keys[sess.Key] {
+			t.Fatal("different scopes share a session")
+		}
+		keys[sess.Key] = true
+		if modes[i].staged {
+			stagedKey = sess.Key
+		}
+		sess.SetFileComments("file.txt", "modified", []review.Comment{{ID: "c_isolated", Body: "separate"}})
+		if err := sess.Save(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	alias, err := openReviewSession(cfg, &reviewMode{ref: "HEAD", staged: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if alias.Key != stagedKey || len(alias.FileComments("file.txt")) != 1 {
+		t.Fatal("staged alias does not reuse staged scope")
+	}
+	all, err := review.OpenCodeSession(cfg.Output)
+	if err != nil || !keys[all.Key] {
+		t.Fatalf("default session does not match all scope: %v", err)
+	}
+}

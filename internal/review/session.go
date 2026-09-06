@@ -11,6 +11,11 @@ import (
 // OpenCodeSession opens the git-mode review session for the current working
 // directory and branch.
 func OpenCodeSession(dataRoot string) (*Session, error) {
+	return OpenCodeSessionWithArgs(dataRoot, []string{"--scope", "all"})
+}
+
+// OpenCodeSessionWithArgs isolates comments by the selected review source.
+func OpenCodeSessionWithArgs(dataRoot string, args []string) (*Session, error) {
 	branch, err := git.CurrentBranch()
 	if err != nil {
 		branch = ""
@@ -19,13 +24,13 @@ func OpenCodeSession(dataRoot string) (*Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolving cwd: %w", err)
 	}
-	key := SessionKey(cwd, branch, nil)
+	key := SessionKey(cwd, branch, args)
 	s, err := OpenSession(dataRoot, key)
 	if err != nil {
 		return nil, err
 	}
 	s.CJ.Branch = branch
-	s.Meta = SessionEntry{Key: key, CWD: cwd, Branch: branch}
+	s.Meta = SessionEntry{Key: key, CWD: cwd, Branch: branch, Args: args}
 	return s, nil
 }
 

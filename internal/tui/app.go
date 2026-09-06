@@ -60,6 +60,7 @@ type AppConfig struct {
 	Staged    bool
 	Patch     *gitpkg.Patch
 	PatchPath string
+	Source    *gitpkg.ReviewSource
 	// Serving is true when an agent client may be blocked on this review;
 	// an unresolved finish then parks the TUI in a waiting state instead
 	// of quitting.
@@ -100,6 +101,7 @@ type AppModel struct {
 	staged    bool
 	patch     *gitpkg.Patch
 	patchPath string
+	source    *gitpkg.ReviewSource
 
 	detached bool
 
@@ -237,7 +239,11 @@ func NewCodeReviewApp(files []gitpkg.FileChange, ref string, cfg AppConfig) AppM
 				diff = pf.Diff
 			}
 		} else if f.Status != gitpkg.StatusBinary {
-			diff, _ = codeDiff(f.Path, ref, cfg.Staged)
+			if cfg.Source != nil {
+				diff, _ = cfg.Source.Diff(f.Path)
+			} else {
+				diff, _ = codeDiff(f.Path, ref, cfg.Staged)
+			}
 		}
 		ft := newFileTab(f.Path, diff)
 		if f.Status == gitpkg.StatusBinary {
@@ -261,6 +267,7 @@ func NewCodeReviewApp(files []gitpkg.FileChange, ref string, cfg AppConfig) AppM
 		staged:          cfg.Staged,
 		patch:           cfg.Patch,
 		patchPath:       cfg.PatchPath,
+		source:          cfg.Source,
 		detached:        os.Getenv("TCRIT_DETACHED") == "1",
 		contentViewport: viewport.New(),
 		commentViewport: viewport.New(),
@@ -287,6 +294,13 @@ func (m AppModel) loadDocuments() tea.Cmd {
 }
 
 func (m AppModel) loadDocument(path string) (*document.Document, error) {
+	if m.source != nil {
+		content, err := m.source.Content(path)
+		if err != nil {
+			return nil, err
+		}
+		return document.FromContent(path, content), nil
+	}
 	if m.patch != nil {
 		if f := m.patch.File(path); f != nil {
 			doc := document.FromContent(path, []byte(f.Content))
@@ -520,6 +534,12 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Tab search input mode
 	if m.tabSearching {
 		return m.handleTabSearch(msg)
+	}
+	if len(m.tabs) == 0 {
+		if key.Matches(msg, keys.Quit) {
+			m.openFinishModal()
+		}
+		return m, nil
 	}
 
 	t := m.tab()
@@ -1437,7 +1457,18 @@ func (m *AppModel) startNextRound() {
 	} else if m.multiFile && m.baseRef != "" {
 		var files []gitpkg.FileChange
 		var err error
-		if m.staged {
+		if m.source != nil {
+			if m.source.Scope == "range" {
+				source, resolveErr := gitpkg.ResolveRange(m.source.Range)
+				if resolveErr != nil {
+					m.err = resolveErr
+					return
+				}
+				m.source = &source
+				m.baseRef = source.Base
+			}
+			files, err = m.source.Files()
+		} else if m.staged {
 			files, err = gitpkg.ChangedFilesStaged()
 		} else {
 			files, err = gitpkg.ChangedFilesFrom(m.baseRef)
@@ -1494,6 +1525,8 @@ func (m *AppModel) startNextRound() {
 				if f := m.patch.File(t.path); f != nil {
 					diff = f.Diff
 				}
+			} else if m.source != nil {
+				diff, _ = m.source.Diff(t.path)
 			} else {
 				diff, _ = codeDiff(t.path, m.baseRef, m.staged)
 			}
@@ -2130,6 +2163,10 @@ func documentDisplayLine(t *FileTab, index int, fallback string) string {
 // rebuildContent renders the document line-by-line with cursor, selection,
 // line numbers, and bordered inline annotations.
 func (m *AppModel) rebuildContent() {
+	if len(m.tabs) == 0 {
+		m.contentViewport.SetContent("")
+		return
+	}
 	t := m.tab()
 	m.contentLayout = newRenderedContentLayout()
 
@@ -2826,6 +2863,10 @@ func (m *AppModel) contentRenderedRange(side string, startLine, endLine int) (re
 }
 
 func (m *AppModel) updateCommentSidebar() {
+	if len(m.tabs) == 0 {
+		m.commentViewport.SetContent("")
+		return
+	}
 	t := m.tab()
 	if t.state == nil {
 		return
@@ -2993,6 +3034,18 @@ func (m AppModel) reviewScopeLabel() string {
 	if m.patch != nil {
 		return "Supplied diff"
 	}
+	if m.source != nil {
+		switch m.source.Scope {
+		case "all":
+			return "All"
+		case "staged":
+			return "Staged"
+		case "unstaged":
+			return "Unstaged"
+		case "range":
+			return "Range: " + m.source.Range
+		}
+	}
 	if m.staged {
 		return "Staged"
 	}
@@ -3074,6 +3127,13 @@ func (m AppModel) View() tea.View {
 		return v
 	}
 
+	if m.multiFile && len(m.tabs) == 0 && m.width > 0 {
+		body, _ := m.renderEmptyReview()
+		v := tea.NewView(body)
+		v.AltScreen = true
+		v.MouseMode = tea.MouseModeAllMotion
+		return v
+	}
 	if m.width == 0 || len(m.tabs) == 0 || m.tab().state == nil {
 		v := tea.NewView("Loading...")
 		v.AltScreen = true
@@ -3290,6 +3350,9 @@ func (m *AppModel) visibleTabWindow(labels []tabLabel) (int, int) {
 }
 
 func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
+	if len(m.tabs) == 0 {
+		return m.handleEmptyReviewClick(msg)
+	}
 	mouse := msg.Mouse()
 	if mouse.Button != tea.MouseLeft || m.waiting {
 		return m, nil
@@ -3545,6 +3608,9 @@ func (m *AppModel) handleDeleteConfirmModalMouse(mouse tea.Mouse) (tea.Model, te
 }
 
 func (m *AppModel) handleMouseMotion(msg tea.MouseMotionMsg) (tea.Model, tea.Cmd) {
+	if len(m.tabs) == 0 {
+		return m, nil
+	}
 	if !m.mouseSelecting {
 		m.updateGutterHover(msg.Mouse())
 		return m, nil
@@ -3577,6 +3643,9 @@ func (m *AppModel) updateGutterHover(mouse tea.Mouse) {
 }
 
 func (m *AppModel) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) {
+	if len(m.tabs) == 0 {
+		return m, nil
+	}
 	if !m.mouseSelecting || msg.Mouse().Button != tea.MouseLeft {
 		return m, nil
 	}
@@ -3714,6 +3783,9 @@ func (m *AppModel) footerFinishRect() (mouseRect, bool) {
 }
 
 func (m *AppModel) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
+	if len(m.tabs) == 0 {
+		return m, nil
+	}
 	if m.isTextModal() {
 		return m.handleTextModalWheel(msg.Mouse())
 	}

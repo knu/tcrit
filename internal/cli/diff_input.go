@@ -13,12 +13,7 @@ import (
 func addDiffFlag(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&reviewDiff, "diff", "", "read a Git unified diff from FILE or stdin (-)")
 	cmd.Flags().Lookup("diff").NoOptDefVal = "-"
-	cmd.PreRunE = func(cmd *cobra.Command, args []string) error {
-		if cmd.Flags().Changed("diff") && reviewDiff == "" {
-			return fmt.Errorf("--diff requires a file path or -")
-		}
-		return nil
-	}
+	cmd.PreRunE = validateScopeFlags
 }
 
 func readDiff(path string) (*git.Patch, error) {

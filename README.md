@@ -13,6 +13,8 @@
 - **CritJSON review state and CLI** — comments use [Crit](https://crit.md/)-compatible `review.json` data, with `tcrit comment` and `tcrit comments` for automation.
 - **Explicit review scopes** — `tcrit --staged` reviews the exact index snapshot without unstaged or untracked files, records that scope in `review.json`, and keeps the active staged, working-tree, or base-ref scope visible in the TUI header.
 - **Supplied diff reviews** — `git diff <base> <head> | tcrit --diff` reviews arbitrary Git unified diffs, including outside a repository. Input snapshots survive Herdr/tmux launches and can be replaced for the next review round.
+
+- **Fixed review scopes** — choose `--scope=all|staged|unstaged` or a committed comparison such as `--scope=main..HEAD` / `--scope=main...`.  Each scope keeps its comments in a separate session.
 - **File-level comments** — reviewers can press `f` to comment on the active file, with file threads kept in the comment sidebar instead of attached to a line.
 - **Comment editing tools** — `ctrl+y` inserts GitHub-compatible suggestions for selected or anchored lines, including replies, and leaves the cursor at the end of the suggested code; `ctrl+o` edits comment and reply bodies in `$EDITOR`, while `ctrl+PgUp` / `ctrl+PgDn` scroll through code context and thread history.
 - **Native input cursor** — comment and reply editors position the real terminal cursor at the insertion point so terminal IMEs can display composition there, including after wrapping and scrolling.
@@ -174,9 +176,9 @@ git diff main feature | tcrit review --diff
 
 Detects changed files in your git repo and opens a tabbed TUI with syntax highlighting, diff markers, and inline commenting across all changed files.
 
-- Diffs staged, unstaged, and untracked changes against `HEAD` by default; falls back to `HEAD~1` or `main` when the worktree is clean
+- Diffs staged, unstaged, and untracked changes against `HEAD` by default (`--scope=all`); reports no changes when the worktree is clean
 - With `--staged`, reads both the file list and displayed contents from the index, excluding unstaged and untracked work
-- With `--diff`, reads the supplied unified diff and labels the scope **Supplied diff**; it cannot be combined with `--code`, `--staged`, or `--base`
+- With `--diff`, reads the supplied unified diff and labels the scope **Supplied diff**; it cannot be combined with `--scope`, `--code`, `--staged`, or `--base`
 - Green gutter markers highlight changed lines
 - Comments are aggregated across all files in the session
 
@@ -200,6 +202,21 @@ git diff main feature | tcrit --diff --session <id>
 The waiting TUI reloads the snapshot and comments. A plain `tcrit --session <id>` cannot refresh a diff review without new input. When incomplete context prevents reliable comment relocation, changed snapshots preserve the original coordinates and mark the comments as drifted for inspection.
 
 ### How code review works
+
+Choose an explicit scope or a committed comparison:
+
+```bash
+tcrit --scope=all                 # HEAD versus working tree, including untracked files
+tcrit --scope=staged              # HEAD versus index (--staged remains an alias)
+tcrit --scope=unstaged            # index versus working tree, including untracked files
+tcrit --scope=main..HEAD          # compare the two committed snapshots
+tcrit --scope=main...             # compare the merge base with HEAD (omitted B)
+tcrit --scope=v0.7.0..v0.7.3      # review a historical comparison
+```
+
+`--scope` also works with `tcrit review` and cannot be combined with a document, `--diff`, or `--base`.  In `A..B` and `A...B`, endpoints are resolved by Git and an omitted endpoint means HEAD: `main..` compares main with HEAD, while `main...` compares their merge base with HEAD.  Three-dot comparisons require a unique merge base.  The displayed contents come from the right endpoint, even if the working tree differs.  Keep the dots when omitting B so the comparison method remains explicit.
+
+The selected scope stays fixed for the session.  To inspect another comparison, start a separate review with a different scope; comments are isolated by working directory, branch, and scope.  `--staged` and `--scope=staged` share the same session.  Use `tcrit comments --session <id>` and `tcrit comment --session <id>` for these reviews; the finish prompt identifies the session.  Reconnecting for the next round retains the selected scope and refreshes comparison endpoints.  An empty comparison is reported without launching the TUI.  Without explicit flags, the scope is all: HEAD versus the working tree plus untracked files.  A clean working tree does not fall back to committed changes, and the base setting does not override the default.
 
 1. An agent (or you) runs `tcrit review --code` — the TUI opens in a Herdr tab or tmux split and the command blocks
 2. Navigate between files and leave inline comments on the changes

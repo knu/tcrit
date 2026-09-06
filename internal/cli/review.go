@@ -23,6 +23,7 @@ var reviewCode bool
 var reviewBase string
 var reviewStaged bool
 var reviewDiff string
+var reviewScope string
 
 // The following function variables allow tests to replace shell interactions
 // without actually shelling out.
@@ -75,6 +76,7 @@ type reviewMode struct {
 	planFile    string // original plan path ("" when read from stdin)
 	patch       *git.Patch
 	diffSession string // persisted snapshot to open in the multiplexer
+	source      *git.ReviewSource
 }
 
 func (m *reviewMode) code() bool { return m.docPath == "" }
@@ -110,6 +112,12 @@ func (m *reviewMode) persistedCLIArgs() []string {
 	}
 	if m.patch != nil {
 		return []string{"--diff"}
+	}
+	if m.source != nil {
+		if m.source.Scope == "range" {
+			return []string{"--scope", m.source.Range}
+		}
+		return []string{"--scope", m.source.Scope}
 	}
 	if m.staged {
 		return []string{"--staged"}
@@ -182,6 +190,10 @@ func runReviewFlow(cfg *config.Config, sess *review.Session, mode *reviewMode) e
 }
 
 func reviewArgSuffix(mode *reviewMode) string {
+	if mode.source != nil {
+		args := mode.persistedCLIArgs()
+		return " " + args[0] + " " + shellEscape(args[1])
+	}
 	if mode.code() {
 		if mode.staged {
 			return " --staged"
@@ -195,8 +207,8 @@ func reviewArgSuffix(mode *reviewMode) string {
 // the changed files up front so failures surface before any TUI spawns.
 func resolveReviewMode(args []string, cfg *config.Config) (*reviewMode, error) {
 	if reviewDiff != "" {
-		if reviewStaged || reviewBase != "" || reviewCode {
-			return nil, fmt.Errorf("--diff cannot be combined with --code, --staged, or --base")
+		if reviewScope != "" || reviewStaged || reviewBase != "" || reviewCode {
+			return nil, fmt.Errorf("--diff cannot be combined with --scope, --code, --staged, or --base")
 		}
 		input := reviewDiff
 		if len(args) > 0 {
@@ -210,6 +222,34 @@ func resolveReviewMode(args []string, cfg *config.Config) (*reviewMode, error) {
 			return nil, err
 		}
 		return &reviewMode{patch: patch, files: patch.Changes()}, nil
+	}
+	if reviewScope != "" || (len(args) == 0 && reviewBase == "" && !reviewStaged) {
+		if len(args) > 0 || reviewBase != "" || (reviewStaged && reviewScope != "staged") {
+			return nil, fmt.Errorf("--scope cannot be combined with a file, --base, or a conflicting --staged")
+		}
+		if !git.IsGitRepo() {
+			return nil, fmt.Errorf("code review requires a git repository")
+		}
+		scope := reviewScope
+		if scope == "" {
+			scope = "all"
+		}
+		source := git.ReviewSource{Scope: scope, Base: "HEAD"}
+		var err error
+		if scope != "all" && scope != "staged" && scope != "unstaged" {
+			source, err = git.ResolveRange(scope)
+			if err != nil {
+				return nil, err
+			}
+		}
+		files, err := source.Files()
+		if err != nil {
+			return nil, err
+		}
+		if len(files) == 0 {
+			return nil, fmt.Errorf("no changes in the selected scope")
+		}
+		return &reviewMode{files: files, ref: source.Base, staged: source.Scope == "staged", source: &source}, nil
 	}
 	if reviewStaged && len(args) > 0 {
 		return nil, fmt.Errorf("--staged is only valid for code review")
@@ -315,7 +355,11 @@ func openReviewSession(cfg *config.Config, mode *reviewMode) (*review.Session, e
 		return sess, nil
 	}
 
-	sess, err := review.OpenCodeSession(cfg.Output)
+	args := mode.persistedCLIArgs()
+	if mode.staged {
+		args = []string{"--scope", "staged"}
+	}
+	sess, err := review.OpenCodeSessionWithArgs(cfg.Output, args)
 	if err != nil {
 		return nil, fmt.Errorf("loading review state: %w", err)
 	}
@@ -418,6 +462,10 @@ func buildTUICommand(mode *reviewMode) (string, error) {
 		return fmt.Sprintf("%s %s _tui --plan %s",
 			envPrefix, shellEscape(tcritBin), shellEscape(mode.planSlug)), nil
 	case mode.code():
+		if mode.source != nil {
+			args := mode.persistedCLIArgs()
+			return fmt.Sprintf("%s %s _tui %s %s", envPrefix, shellEscape(tcritBin), args[0], shellEscape(args[1])), nil
+		}
 		if mode.staged {
 			return fmt.Sprintf("%s %s _tui --staged",
 				envPrefix, shellEscape(tcritBin)), nil
@@ -599,6 +647,8 @@ func shellEscape(s string) string {
 }
 
 func init() {
+	reviewCmd.PreRunE = validateScopeFlags
+	reviewCmd.Flags().StringVar(&reviewScope, "scope", "", "review scope: all (default), staged, unstaged, A..B, or A...B (omitted B means HEAD)")
 	rootCmd.AddCommand(reviewCmd)
 	reviewCmd.Flags().BoolVar(&reviewCode, "code", false, "review code changes (default when no file argument is given)")
 	addDiffFlag(reviewCmd)

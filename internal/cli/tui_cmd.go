@@ -69,6 +69,8 @@ var tuiCmd = &cobra.Command{
 }
 
 func init() {
+	tuiCmd.PreRunE = validateScopeFlags
+	tuiCmd.Flags().StringVar(&reviewScope, "scope", "", "review scope")
 	rootCmd.AddCommand(tuiCmd)
 	tuiCmd.Flags().StringVar(&reviewBase, "base", "", "base ref to diff against in code mode")
 	tuiCmd.Flags().BoolVar(&reviewStaged, "staged", false, "review only changes staged in the index")

@@ -24,6 +24,9 @@ The CLI picks the review mode from its arguments, so do not ask the user which m
 ```bash
 tcrit $ARGUMENTS            # a file reviews that document; no argument reviews the git changes
 tcrit --staged              # review only changes staged in the index
+tcrit --scope=all           # HEAD versus working tree, including untracked files
+tcrit --scope=unstaged      # index versus working tree, including untracked files
+tcrit --scope=main...       # merge base with main versus HEAD, using committed contents
 tcrit plan <file>           # a plan written in this conversation: each round is saved as a new version
 tcrit review --base <ref>   # git changes against another base
 git diff <base> <head> | tcrit --diff  # review a supplied Git unified diff
@@ -31,7 +34,9 @@ git diff <base> <head> | tcrit --diff  # review a supplied Git unified diff
 
 With no argument, review a plan file written earlier in this conversation with `tcrit plan <file>`; otherwise run bare `tcrit` for the git changes.
 
-For a supplied diff, use `tcrit --diff=changes.diff` or `tcrit --diff changes.diff`, or pipe the producer into `tcrit --diff` (`tcrit review --diff` is equivalent).  Relative and absolute paths are accepted; bare `--diff` and `-` as its input read stdin.  This works outside a Git repository.  Do not combine `--diff` with `--code`, `--staged`, or `--base`.  Keep the producer command and working directory for later rounds: TCrit reviews a saved snapshot, not the current working-tree files.
+For a supplied diff, use `tcrit --diff=changes.diff` or `tcrit --diff changes.diff`, or pipe the producer into `tcrit --diff` (`tcrit review --diff` is equivalent).  Relative and absolute paths are accepted; bare `--diff` and `-` as its input read stdin.  This works outside a Git repository.  Do not combine `--diff` with `--scope`, `--code`, `--staged`, or `--base`.  Keep the producer command and working directory for later rounds: TCrit reviews a saved snapshot, not the current working-tree files.
+
+`--scope=staged` is equivalent to `--staged`.  `--scope=A..B` compares two committed snapshots; `--scope=A...B` compares their merge base with B.  B can be omitted to mean HEAD (`--scope=main..` or `--scope=main...`).  `--scope` cannot be combined with a document, `--diff`, or `--base`.  It stays fixed for that session; different scopes have separate comment storage.  Use the session ID from the finish prompt on comment commands (`tcrit comments --session <id>` and `tcrit comment --session <id>`, including replies and bulk input).  Reconnecting with `--session <id>` retains the selected scope.  Committed comparisons read the right endpoint, which may differ from files on disk.  Without explicit flags, the scope is all; a clean working tree does not fall back to committed changes.
 
 ## Step 2: Launch the review and block
 

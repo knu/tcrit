@@ -27,6 +27,7 @@ func runTUISession(cfg *config.Config, sess *review.Session, mode *reviewMode, s
 		Session:  sess,
 		Author:   cfg.Author,
 		Staged:   mode.staged,
+		Source:   mode.source,
 		Serving:  serving,
 		FinishCh: finishCh,
 		Patch:    mode.patch,

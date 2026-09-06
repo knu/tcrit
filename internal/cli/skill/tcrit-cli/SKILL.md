@@ -45,6 +45,8 @@ tcrit comment --session <id> --json --file .tmp/replies.json --author 'Claude Co
 
 To start another round, regenerate and feed the diff into `tcrit --diff --session <id>` from the original directory; `tcrit --session <id>` alone cannot refresh its snapshot.  The `/tcrit` skill covers that interactive loop.
 
+Explicit `--scope`, `--staged`, and `--base` reviews use separate sessions.  `--scope` accepts all/staged/unstaged or a committed comparison such as `main..HEAD` or `main...` (omitted B means HEAD).  Pass `--session <id>` from the finish prompt on all comment operations, including listing, replies, and bulk input.  `--staged` and `--scope=staged` select the same session.  A review's scope stays fixed across rounds; another comparison does not reuse its comments.
+
 ## Review file format
 
 TCrit stores each review as a `review.json` that follows crit's CritJSON layout, so tooling written for either works on both.
@@ -108,7 +110,7 @@ Rules:
 
 - Always pass `--author` with your agent name so the thread shows who wrote what.
 - Single-quote the body.  Double quotes let the shell interpret backticks and `$`.
-- Line numbers are 1-indexed source coordinates, not positions in the diff text.  For supplied diffs, use the saved snapshot and comment anchors; the file on disk may differ or be absent.
+- Line numbers are 1-indexed source coordinates, not positions in the diff text.  Staged reviews use index contents, committed comparisons use the right endpoint, and supplied diffs use the saved snapshot.  Files on disk may differ or be absent.  Use comment anchors when content changes between rounds.
 - Bodies are Markdown; code fences and inline code render in the TUI.
 - Do not pass `--resolve` unless the user explicitly asks for it.  The same applies to the `resolve` field in bulk JSON.
 

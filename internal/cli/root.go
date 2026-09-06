@@ -28,8 +28,8 @@ var rootCmd = &cobra.Command{
 			if len(args) > 0 && reviewDiff == "" {
 				return fmt.Errorf("--session cannot be combined with a file argument")
 			}
-			if reviewStaged {
-				return fmt.Errorf("--session cannot be combined with --staged")
+			if reviewStaged || reviewScope != "" {
+				return fmt.Errorf("--session cannot be combined with --staged or --scope")
 			}
 			if reviewDiff != "" {
 				return runReview(args)
@@ -78,6 +78,8 @@ func Execute() int {
 }
 
 func init() {
+	rootCmd.PreRunE = validateScopeFlags
+	rootCmd.Flags().StringVar(&reviewScope, "scope", "", "review scope: all (default), staged, unstaged, A..B, or A...B (omitted B means HEAD)")
 	rootCmd.Flags().StringVar(&rootSession, "session", "", "reconnect to a running review session by ID")
 	rootCmd.Flags().BoolVar(&reviewStaged, "staged", false, "review only changes staged in the index")
 	addDiffFlag(rootCmd)
