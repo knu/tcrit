@@ -247,6 +247,81 @@ func TestResolvedThreadsExpandOnFocus(t *testing.T) {
 	}
 }
 
+func TestToggleResolvedFolding(t *testing.T) {
+	for _, focus := range []pane{contentPane, commentPane} {
+		app := newCommentNavigationTestApp()
+		app.width, app.height = 120, 50
+		app.recalculateLayout()
+		app.focused = focus
+		app.tabs[0].state.Comments = []review.Comment{
+			{ID: "resolved", StartLine: 1, EndLine: 1, Body: "resolved body", Resolved: true},
+			{ID: "open", StartLine: 3, EndLine: 3, Body: "open body"},
+			{ID: "file", Scope: "file", Body: "filebody", Resolved: true},
+		}
+		app.updateCommentSidebar()
+		app.tab().sidebarCursor = 1 // Keep the open line thread selected as rows appear and disappear.
+		app.updateCommentSidebar()
+		app.rebuildContent()
+		for _, expanded := range []bool{true, false} {
+			app = pressKey(app, 'h')
+			if app.showResolved != expanded {
+				t.Fatalf("focus %v: showResolved = %t", focus, app.showResolved)
+			}
+			if got := strings.Contains(ansi.Strip(app.contentViewport.View()), "resolved body"); got != expanded {
+				t.Fatalf("focus %v: inline body visibility = %t, want %t", focus, got, expanded)
+			}
+			if got := strings.Contains(ansi.Strip(app.commentViewport.View()), "filebody"); got != expanded {
+				t.Fatalf("focus %v: file body visibility = %t, want %t", focus, got, expanded)
+			}
+			wantItems := 2
+			if expanded {
+				wantItems = 3
+			}
+			if len(app.tab().sidebarItems) != wantItems || app.tab().sidebarItems[app.tab().sidebarCursor].id != "open" {
+				t.Fatalf("sidebar lost selection or has wrong items: %+v", app.tab().sidebarItems)
+			}
+			if !app.tab().state.Comments[0].Resolved || !app.tab().state.Comments[2].Resolved {
+				t.Fatal("folding changed resolution")
+			}
+		}
+		app = pressKey(app, 'h')
+		app.focused = contentPane
+		app = pressKey(app, '3')
+		if app.activeTab != 2 || !app.showResolved {
+			t.Fatal("folding preference did not survive tab switch")
+		}
+	}
+}
+
+func TestFoldShortcutPreservesInputAndDialogs(t *testing.T) {
+	for _, modal := range []modalType{commentModal, fileCommentModal, replyModal, editModal, finishModal, discardChangesModal, deleteConfirmModal, helpModal} {
+		app := setupAppWithDoc(t, "source\n")
+		app.modal = modal
+		app.modalTextarea.Focus()
+		updated, _ := app.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
+		app = *updated.(*AppModel)
+		if app.showResolved {
+			t.Fatalf("modal %v toggled folding", modal)
+		}
+		if modal == commentModal || modal == fileCommentModal || modal == replyModal || modal == editModal {
+			if app.modalTextarea.Value() != "h" {
+				t.Fatalf("modal %v swallowed input", modal)
+			}
+		}
+		if modal == finishModal || modal == discardChangesModal || modal == deleteConfirmModal {
+			if app.modalFocus != 1 {
+				t.Fatalf("modal %v did not move button focus", modal)
+			}
+		}
+	}
+	app := newCommentNavigationTestApp()
+	app = pressKey(app, '/')
+	app = pressKey(app, 'h')
+	if app.tabSearch != "h" || app.showResolved {
+		t.Fatal("fold shortcut intercepted tab search")
+	}
+}
+
 func TestResolvedThreadFocusWithVerticalMovement(t *testing.T) {
 	for _, direction := range []rune{'j', 'k'} {
 		for _, selecting := range []bool{false, true} {

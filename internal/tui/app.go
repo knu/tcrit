@@ -94,6 +94,7 @@ type AppModel struct {
 	author        string
 	authorColors  map[string]int
 	threadScrolls map[threadViewKey]threadScroll
+	showResolved  bool
 
 	// Finish-flow state (see AppConfig).
 	serving   bool
@@ -576,6 +577,28 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, keys.Help):
 		m.modal = helpModal
+		return m, nil
+
+	case key.Matches(msg, keys.FoldResolved):
+		selectedID := ""
+		if t.sidebarCursor < len(t.sidebarItems) {
+			selectedID = t.sidebarItems[t.sidebarCursor].id
+		}
+		m.showResolved = !m.showResolved
+		m.updateCommentSidebar()
+		for i, item := range t.sidebarItems {
+			if item.id == selectedID {
+				t.sidebarCursor = i
+				break
+			}
+		}
+		m.updateCommentSidebar()
+		m.rebuildContent()
+		if m.focused == commentPane {
+			m.scrollToSidebarCursor()
+		} else {
+			m.scrollToCursor()
+		}
 		return m, nil
 
 	case key.Matches(msg, keys.Tab):
@@ -2466,7 +2489,7 @@ func (m *AppModel) rebuildContent() {
 
 // renderAnnotationBox renders a bordered annotation box indented under the gutter.
 func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused bool) string {
-	collapsed := ann.resolved && !focused
+	collapsed := ann.resolved && !m.showResolved && !focused
 	var lineLabel string
 	if ann.endLine > ann.line {
 		lineLabel = fmt.Sprintf("L%d-%d", ann.line, ann.endLine)
@@ -2915,10 +2938,9 @@ func (m *AppModel) updateCommentSidebar() {
 
 	t.sidebarItems = nil
 	for _, c := range t.state.Comments {
-		// Resolved line comments stay reachable as collapsed inline
-		// annotations; file comments have no inline box, so keep them
-		// listed here in collapsed form.
-		if c.Resolved && c.Scope != "file" {
+		// Folded line comments remain reachable inline; file comments
+		// have no inline box, so keep their headers in the sidebar.
+		if c.Resolved && !m.showResolved && c.Scope != "file" {
 			continue
 		}
 		t.sidebarItems = append(t.sidebarItems, sidebarItem{
@@ -2961,7 +2983,7 @@ func (m *AppModel) updateCommentSidebar() {
 
 	for idx, it := range t.sidebarItems {
 		isSelected := m.focused == commentPane && idx == t.sidebarCursor
-		collapsed := it.resolved && !isSelected
+		collapsed := it.resolved && !m.showResolved && !isSelected
 		var item strings.Builder
 
 		var lineInfo string
@@ -4044,6 +4066,7 @@ func (m AppModel) renderHelp(innerWidth int) string {
 		{keys: "v", desc: "select"},
 		{keys: "s", desc: "sidebar"},
 		{keys: "r", desc: "resolve"},
+		{keys: "h", desc: "fold resolved"},
 		{keys: "d", desc: "delete comment"},
 		{keys: "q/ctrl+c", desc: "finish"},
 		{keys: "?", desc: "help"},
