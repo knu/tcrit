@@ -289,8 +289,14 @@ Tcrit resolves the Herdr workspace, tab, and pane or the tmux server and pane fr
 |----------|---------------------------------------------------------------|
 | `ctrl+s` | Save the comment or reply                                     |
 | `ctrl+o` | Edit the comment or reply in `$EDITOR`                         |
-| `ctrl+y` | Insert a suggestion block for the selected or anchored lines  |
+| `ctrl+y` | Insert a suggestion block and select its code for replacement |
+| `ctrl+v` | Paste text from the clipboard on the machine running TCrit    |
+| `ctrl+k` | Delete the selection, or delete from the cursor to line end; at line end, join the next line |
+| `ctrl+u` | Delete the selection, or delete back to line start; at line start, join the previous line |
+| `Delete` / `Backspace` | Delete the selected text, or the next / previous character |
 | `ctrl+PgUp` / `ctrl+PgDn` | Scroll code context and thread history             |
+
+`ctrl+v` uses the host's clipboard (`pbpaste` on macOS).  When TCrit runs over SSH, this is the remote host's clipboard.  Deletion shortcuts do not save text to a clipboard or kill ring, and the input box has no undo/redo.  Use `ctrl+o` to edit in your external editor when you need its editing commands.  `ctrl+y` inserts a suggestion; it does not yank deleted text.
 
 **Code review only:**
 
