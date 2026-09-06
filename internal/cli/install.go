@@ -18,9 +18,6 @@ import (
 //go:embed skill/tcrit/SKILL.md skill/tcrit-cli/SKILL.md
 var skillContent embed.FS
 
-//go:embed agent/gemini/tcrit.md
-var geminiContent embed.FS
-
 var installForce bool
 
 // integrationFile is one installable asset with its project- and
@@ -67,16 +64,12 @@ var skillVariants = map[string]skillVariant{
 	"gemini": {
 		author:         "Gemini",
 		skillRef:       func(name string) string { return name },
-		argumentsToken: "$ARGUMENTS",
+		argumentsToken: "<arguments>",
 		dropKeys:       []string{"allowed-tools", "argument-hint", "user-invocable"},
 	},
 }
 
 var skillNames = []string{"tcrit", "tcrit-cli"}
-
-func embeddedFile(fs embed.FS, path string) func() ([]byte, error) {
-	return func() ([]byte, error) { return fs.ReadFile(path) }
-}
 
 // renderSkill returns the embedded skill rewritten for the named agent.
 func renderSkill(name, agent string) ([]byte, error) {
@@ -177,13 +170,8 @@ func integrations() map[string][]integrationFile {
 		openCodeCLI,
 	}
 
-	geminiAgent := filepath.Join(".gemini", "agents", "tcrit.md")
 	m["gemini"] = []integrationFile{
-		{
-			content:    embeddedFile(geminiContent, "agent/gemini/tcrit.md"),
-			dest:       geminiAgent,
-			globalDest: geminiAgent,
-		},
+		skillFile("tcrit", "gemini", ".gemini"),
 		skillFile("tcrit-cli", "gemini", ".gemini"),
 	}
 
@@ -238,7 +226,7 @@ Targets:
   claude-code  Claude Code skills (tcrit, tcrit-cli)
   codex        Codex skills (tcrit, tcrit-cli)
   opencode     OpenCode command (/tcrit) and skill (tcrit-cli)
-  gemini       Gemini CLI agent (@tcrit) and skill (tcrit-cli)
+  gemini       Gemini CLI skills (tcrit, tcrit-cli)
   prompts      Stock finish prompt templates (customize after copying)
   all          claude-code + codex + opencode + gemini`,
 	Args: cobra.ExactArgs(1),

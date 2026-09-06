@@ -23,7 +23,7 @@
 - **Versioned plan reviews** — `tcrit plan` saves immutable revisions and carries comment threads forward as the plan changes.
 - **Richer review lifecycle** — comment threads can be replied to, resolved, reopened, and approved together; agent replies are visually distinct, complete code context and thread history remain scrollable while editing, and `[` / `]` and `n` / `N` navigate comments (including file comments) and changes across files.
 - **Improved diffs and Git handling** — inline replacements preserve whitespace, long syntax-highlighted lines wrap instead of being truncated, comment anchors survive edited rounds, and paths with spaces or special characters work correctly.
-- **Agent integrations** — one command installs the `tcrit` review loop and the `tcrit-cli` reference for Claude Code, Codex, OpenCode, and Gemini CLI; the loop picks code, document, or plan review from its arguments instead of asking.
+- **Agent integrations** — one command installs the shared `tcrit` review loop and `tcrit-cli` reference for Claude Code, Codex, OpenCode, and Gemini CLI. The current agent handles review rounds with the original task context; the loop picks code, document, or plan review from its arguments instead of asking.
 - **[Crit](https://crit.md/) CLI alignment** — customizable finish prompts, unified integration installers, and `tcrit check` were added as part of adopting the Crit CLI workflow.
 
 TUI for reviewing AI-generated code and plans — built for human-in-the-loop agentic coding workflows.
@@ -106,11 +106,13 @@ Then use `/tcrit [file]`.
 #### Gemini CLI
 
 ```bash
-cd ~ && tcrit install gemini        # ~/.gemini/agents/tcrit.md and ~/.gemini/skills/tcrit-cli/
+cd ~ && tcrit install gemini        # ~/.gemini/skills/tcrit/ and ~/.gemini/skills/tcrit-cli/
 tcrit install gemini                # From a repo root: install for that project
 ```
 
-Then use `@tcrit` to start a review in Gemini CLI.
+Ask Gemini to use the `tcrit` skill to review your changes or a document. The current agent runs the review loop using the same instructions as the other integrations. Use `/skills reload` if Gemini CLI is already running, and `/skills list` to check discovery.
+
+When upgrading from the previous `@tcrit` subagent integration, remove the old `.gemini/agents/tcrit.md` (or `~/.gemini/agents/tcrit.md` for a global install) after preserving any customizations. The installer does not delete existing agent definitions.
 
 #### Prompt templates
 

@@ -68,7 +68,7 @@ func TestIntegrationLayouts(t *testing.T) {
 			filepath.Join(".opencode", "skills", "tcrit-cli", "SKILL.md"),
 		},
 		"gemini": {
-			filepath.Join(".gemini", "agents", "tcrit.md"),
+			filepath.Join(".gemini", "skills", "tcrit", "SKILL.md"),
 			filepath.Join(".gemini", "skills", "tcrit-cli", "SKILL.md"),
 		},
 	}
@@ -166,20 +166,24 @@ func TestOpenCodeCommandKeepsArgumentsAndDropsClaudeKeys(t *testing.T) {
 }
 
 func TestGeminiIntegration(t *testing.T) {
-	agent := integrationContent(t, "gemini", filepath.Join(".gemini", "agents", "tcrit.md"))
+	skill := integrationContent(t, "gemini", filepath.Join(".gemini", "skills", "tcrit", "SKILL.md"))
 	cli := integrationContent(t, "gemini", filepath.Join(".gemini", "skills", "tcrit-cli", "SKILL.md"))
 
-	if !strings.HasPrefix(agent, "---\nname: tcrit\n") {
-		t.Error("Gemini agent frontmatter is malformed")
+	if !strings.HasPrefix(skill, "---\nname: tcrit\n") {
+		t.Error("Gemini skill frontmatter is malformed")
 	}
-	if !strings.Contains(agent, "--author 'Gemini'") {
-		t.Error("Gemini agent is not attributed to Gemini")
+	for _, content := range []string{skill, cli} {
+		for _, unwanted := range []string{"Claude Code", "$ARGUMENTS", "allowed-tools:", "argument-hint:", "user-invocable:", "kind: local", "subagent"} {
+			if strings.Contains(content, unwanted) {
+				t.Errorf("Gemini skill still contains %q", unwanted)
+			}
+		}
+		if !strings.Contains(content, "'Gemini'") {
+			t.Error("Gemini skill is not attributed to Gemini")
+		}
 	}
-	if !strings.Contains(agent, "tcrit --staged") {
-		t.Error("Gemini agent does not document staged-only review")
-	}
-	if !strings.Contains(cli, "'Gemini'") || strings.Contains(cli, "user-invocable:") {
-		t.Error("Gemini tcrit-cli skill is not rewritten for Gemini")
+	if !strings.Contains(skill, "tcrit <arguments>") || strings.Contains(skill, "`/tcrit`") {
+		t.Error("Gemini skill invocation is not rewritten")
 	}
 }
 
