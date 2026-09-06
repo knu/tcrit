@@ -1256,6 +1256,7 @@ func TestOldSideCommentRendersAfterDeletedLine(t *testing.T) {
 	app := setupAppWithDoc(t, "first\nthird\n")
 	app.width = 100
 	app.contentViewport.SetWidth(75)
+	app.contentViewport.SetHeight(12)
 	app.commentViewport.SetWidth(25)
 	app.commentViewport.SetHeight(10)
 	app.tabs[0].deletedAfter = map[int][]gitpkg.DeletedLine{
@@ -1364,6 +1365,9 @@ func TestMouseClickSelectsSidebarComment(t *testing.T) {
 	app := setupAppWithDoc(t, "first\nsecond\nthird\n")
 	app.width = 100
 	app.contentViewport.SetWidth(75)
+	app.contentViewport.SetHeight(20)
+	app.commentViewport.SetWidth(25)
+	app.commentViewport.SetHeight(20)
 	app.tabs[0].state.Comments = []review.Comment{
 		{ID: "c_first", StartLine: 1, EndLine: 1, Body: "first comment"},
 		{ID: "c_second", StartLine: 3, EndLine: 3, Body: "second comment"},
@@ -1372,7 +1376,14 @@ func TestMouseClickSelectsSidebarComment(t *testing.T) {
 	app.rebuildContent()
 
 	left, top, _, _ := app.commentBounds()
-	app = clickMouse(app, left+1, top+4)
+	row := 0
+	for i, target := range app.sidebarTargets {
+		if target == 1 {
+			row = i
+			break
+		}
+	}
+	app = clickMouse(app, left+1, top+1+row)
 
 	if app.focused != commentPane || app.tab().sidebarCursor != 1 || app.tab().cursorLine != 3 {
 		t.Fatalf("focus = %v, sidebar = %d, line = %d; want second comment at line 3",
@@ -2727,7 +2738,7 @@ func TestKeyboardScrollsModalReferenceByPage(t *testing.T) {
 	pageSize := max(1, scrollRegion.rect.bottom-scrollRegion.rect.top-2)
 	updated, _ := app.Update(tea.KeyPressMsg{Code: tea.KeyPgUp, Mod: tea.ModCtrl})
 	app = *updated.(*AppModel)
-	want := max(0, scrollRegion.action.scrollMaxOffset-pageSize)
+	want := max(0, scrollRegion.action.scrollOffset-pageSize)
 	if app.modalReferenceOffset != want {
 		t.Fatalf("Ctrl-PgUp offset = %d, want %d", app.modalReferenceOffset, want)
 	}
@@ -2737,9 +2748,9 @@ func TestKeyboardScrollsModalReferenceByPage(t *testing.T) {
 
 	updated, _ = app.Update(tea.KeyPressMsg{Code: tea.KeyPgDown, Mod: tea.ModCtrl})
 	app = *updated.(*AppModel)
-	if app.modalReferenceOffset != scrollRegion.action.scrollMaxOffset {
-		t.Fatalf("Ctrl-PgDown offset = %d, want %d",
-			app.modalReferenceOffset, scrollRegion.action.scrollMaxOffset)
+	want = min(scrollRegion.action.scrollMaxOffset, want+pageSize)
+	if app.modalReferenceOffset != want {
+		t.Fatalf("Ctrl-PgDown offset = %d, want %d", app.modalReferenceOffset, want)
 	}
 }
 

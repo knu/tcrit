@@ -90,8 +90,10 @@ type AppModel struct {
 	filePath string
 
 	// Review session backing all tabs, and the author stamped on new comments.
-	session *review.Session
-	author  string
+	session       *review.Session
+	author        string
+	authorColors  map[string]int
+	threadScrolls map[threadViewKey]threadScroll
 
 	// Finish-flow state (see AppConfig).
 	serving   bool
@@ -208,6 +210,7 @@ func NewApp(filePath string, cfg AppConfig) AppModel {
 		activeTab:       0,
 		session:         cfg.Session,
 		author:          cfg.Author,
+		authorColors:    make(map[string]int),
 		serving:         cfg.Serving,
 		finishCh:        cfg.FinishCh,
 		detached:        os.Getenv("TCRIT_DETACHED") == "1",
@@ -261,6 +264,7 @@ func NewCodeReviewApp(files []gitpkg.FileChange, ref string, cfg AppConfig) AppM
 		multiFile:       true,
 		session:         cfg.Session,
 		author:          cfg.Author,
+		authorColors:    make(map[string]int),
 		serving:         cfg.Serving,
 		finishCh:        cfg.FinishCh,
 		baseRef:         ref,
@@ -544,6 +548,17 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	t := m.tab()
 
+	if msg.String() == "ctrl+pgup" || msg.String() == "ctrl+pgdown" {
+		direction := 1
+		if msg.String() == "ctrl+pgup" {
+			direction = -1
+		}
+		if id := m.selectedCommentID(); id != "" {
+			m.scrollThread(threadViewKey{id: id, sidebar: m.focused == commentPane}, direction, true)
+		}
+		return m, nil
+	}
+
 	switch {
 	case key.Matches(msg, keys.Quit):
 		// Finishing is an explicit act: q opens the Approve/Finish modal.
@@ -794,6 +809,7 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		if sidebarMoved {
 			m.updateCommentSidebar()
+			m.scrollToSidebarCursor()
 			m.rebuildContent()
 			sel := t.sidebarItems[t.sidebarCursor]
 			if sel.scope != "file" {
@@ -2051,6 +2067,7 @@ func (m *AppModel) selectComment(tabIndex int, target commentTarget) {
 		}
 		m.updateCommentSidebar()
 		m.rebuildContent()
+		m.scrollToSidebarCursor()
 		return
 	}
 	m.focused = contentPane
@@ -2454,8 +2471,11 @@ func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused boo
 	label := inlineLabelComment.Render("comment")
 	lineRef := commentLineStyle.Render(lineLabel)
 	header := fmt.Sprintf("%s %s", label, lineRef)
-	if ann.author != "" {
-		header += " " + commentLineStyle.Render("— "+ann.author)
+	if !ann.resolved && len(ann.replies) > 0 {
+		header += commentLineStyle.Render(fmt.Sprintf(" · %d replies", len(ann.replies)))
+	}
+	if ann.resolved && ann.author != "" {
+		header += " " + m.commentAuthorStyle(ann.author).Render("— "+ann.author)
 	}
 	if ann.resolved {
 		header += " " + resolvedBadge.Render("✓ resolved")
@@ -2463,18 +2483,7 @@ func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused boo
 	boxContent.WriteString(header)
 	if !ann.resolved {
 		boxContent.WriteString("\n")
-		boxContent.WriteString(clampLines(ann.body, 3))
-		for _, r := range ann.replies {
-			reply := r.Body
-			if i := strings.IndexByte(reply, '\n'); i >= 0 {
-				reply = reply[:i] + "…"
-			}
-			who := r.Author
-			if who == "" {
-				who = "reply"
-			}
-			boxContent.WriteString("\n" + replyStyle.Render(fmt.Sprintf("↳ %s: %s", who, reply)))
-		}
+		boxContent.WriteString(m.renderThread(threadViewKey{id: ann.id}, ann.author, ann.body, ann.replies, max(1, maxWidth-4), focused))
 	}
 	boxStyle := inlineCommentBox
 
@@ -2862,6 +2871,27 @@ func (m *AppModel) contentRenderedRange(side string, startLine, endLine int) (re
 	return renderedRange{start: start.start, end: end.end}, true
 }
 
+func (m *AppModel) scrollToSidebarCursor() {
+	start, end := -1, 0
+	for row, index := range m.sidebarTargets {
+		if index == m.tab().sidebarCursor {
+			if start < 0 {
+				start = row
+			}
+			end = row + 1
+		}
+	}
+	if start < 0 {
+		return
+	}
+	height, offset := m.commentViewport.Height(), m.commentViewport.YOffset()
+	if start < offset {
+		m.commentViewport.SetYOffset(start)
+	} else if end > offset+height {
+		m.commentViewport.SetYOffset(min(start, end-height))
+	}
+}
+
 func (m *AppModel) updateCommentSidebar() {
 	if len(m.tabs) == 0 {
 		m.commentViewport.SetContent("")
@@ -2935,8 +2965,11 @@ func (m *AppModel) updateCommentSidebar() {
 			lineInfo += " (deleted)"
 		}
 		lineInfo = commentLineStyle.Render(lineInfo)
-		if it.author != "" {
-			lineInfo += " " + commentLineStyle.Render(it.author)
+		if !it.resolved && len(it.replies) > 0 {
+			lineInfo += commentLineStyle.Render(fmt.Sprintf(" · %d replies", len(it.replies)))
+		}
+		if it.resolved && it.author != "" {
+			lineInfo += " " + m.commentAuthorStyle(it.author).Render(it.author)
 		}
 		if it.resolved {
 			lineInfo += " " + resolvedBadge.Render("✓ resolved")
@@ -2962,31 +2995,9 @@ func (m *AppModel) updateCommentSidebar() {
 
 		fmt.Fprintf(&item, "%s%s\n", prefix, lineInfo)
 
-		clamped := clampLines(it.body, 3)
-		bodyLines := strings.Split(clamped, "\n")
-		for i, bl := range bodyLines {
-			styled := bl
-			if isSelected {
-				styled = sidebarSelectedText.Render(bl)
-			} else {
-				styled = commentStyle.Render(bl)
-			}
-			item.WriteString(" " + styled)
-			if i < len(bodyLines)-1 {
-				item.WriteString("\n")
-			}
-		}
-		for _, r := range it.replies {
-			reply := r.Body
-			if i := strings.IndexByte(reply, '\n'); i >= 0 {
-				reply = reply[:i] + "…"
-			}
-			who := r.Author
-			if who == "" {
-				who = "reply"
-			}
-			item.WriteString("\n " + replyStyle.Render(fmt.Sprintf("↳ %s: %s", who, reply)))
-		}
+		thread := m.renderThread(threadViewKey{id: it.id, sidebar: true}, it.author, it.body, it.replies,
+			max(1, m.commentViewport.Width()-1), isSelected)
+		item.WriteString(" " + strings.ReplaceAll(thread, "\n", "\n "))
 
 		wrapped := lipgloss.Wrap(expandDisplayTabs(item.String()), max(m.commentViewport.Width(), 1), "")
 		for _, row := range strings.Split(wrapped, "\n") {
@@ -3469,6 +3480,7 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 		}
 		m.updateCommentSidebar()
 		m.rebuildContent()
+		m.scrollToSidebarCursor()
 	}
 	return m, nil
 }
@@ -3793,9 +3805,47 @@ func (m *AppModel) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) 
 		return m, nil
 	}
 	mouse := msg.Mouse()
-	left, top, right, bottom := m.contentBounds()
+	direction := 1
+	if mouse.Button == tea.MouseWheelUp {
+		direction = -1
+	} else if mouse.Button != tea.MouseWheelDown {
+		return m, nil
+	}
+	left, top, right, bottom := m.commentBounds()
+	if mouse.X >= left && mouse.X < right && mouse.Y >= top && mouse.Y < bottom {
+		if i, ok := m.sidebarMouseTarget(mouse.Y - top - 1 + m.commentViewport.YOffset()); ok && mouse.Y > top {
+			m.focused = commentPane
+			m.tab().sidebarCursor = i
+			m.updateCommentSidebar()
+			m.rebuildContent()
+			if m.scrollThread(threadViewKey{id: m.tab().sidebarItems[i].id, sidebar: true}, direction, false) {
+				return m, nil
+			}
+		}
+		if direction < 0 {
+			m.commentViewport.ScrollUp(3)
+		} else {
+			m.commentViewport.ScrollDown(3)
+		}
+		return m, nil
+	}
+	left, top, right, bottom = m.contentBounds()
 	if mouse.X < left || mouse.X >= right || mouse.Y < top || mouse.Y >= bottom {
 		return m, nil
+	}
+	if target, ok := m.contentMouseTarget(mouse.Y - top + m.contentViewport.YOffset()); ok && target.annotation && mouse.X >= left+gutterWidth {
+		annotations := m.annotationsAfterLine(target.line, target.side)
+		if target.annotationIndex < len(annotations) {
+			m.focused = contentPane
+			t := m.tab()
+			t.cursorLine, t.cursorSide = target.line, target.side
+			t.cursorOnAnnotation, t.cursorAnnoIdx = true, target.annotationIndex
+			m.rebuildContent()
+			m.updateCommentSidebar()
+			if m.scrollThread(threadViewKey{id: annotations[target.annotationIndex].id}, direction, false) {
+				return m, nil
+			}
+		}
 	}
 
 	switch mouse.Button {
@@ -4081,6 +4131,10 @@ func layoutModalTextarea(before, textareaView string, width int) (string, modalM
 }
 
 func renderScrollableModalBox(content string, width, maxHeight, offset int) (string, int, int) {
+	return renderModalBoxAt(content, width, maxHeight, offset, -1)
+}
+
+func renderModalBoxAt(content string, width, maxHeight, offset, initialOffset int) (string, int, int) {
 	if content == "" || maxHeight < 3 {
 		return "", 0, 0
 	}
@@ -4090,23 +4144,26 @@ func renderScrollableModalBox(content string, width, maxHeight, offset int) (str
 	lines := strings.Split(wrapped, "\n")
 	maxContentHeight := maxHeight - 2
 	maxOffset := max(0, len(lines)-maxContentHeight)
+	if initialOffset < 0 {
+		initialOffset = maxOffset
+	}
 	if offset < 0 {
-		offset = maxOffset
-	} else {
-		offset = min(offset, maxOffset)
+		offset = initialOffset
 	}
+	offset = min(offset, maxOffset)
+	moreBelow := offset+maxContentHeight < len(lines)
 	lines = lines[offset:min(len(lines), offset+maxContentHeight)]
-	if offset > 0 {
-		lines[0] = footerStyle.Render("↑ ") + ansi.Truncate(lines[0], max(0, contentWidth-2), "")
-	}
-	if offset < maxOffset {
-		last := len(lines) - 1
-		lines[last] = ansi.Truncate(lines[last], max(0, contentWidth-2), "") + footerStyle.Render(" ↓")
-	}
 
 	borderStyle := lipgloss.NewStyle().Foreground(subtle)
-	top := borderStyle.Render("╭" + strings.Repeat("─", contentWidth) + "╮")
-	bottom := borderStyle.Render("╰" + strings.Repeat("─", contentWidth) + "╯")
+	topBorder, bottomBorder := strings.Repeat("─", contentWidth), strings.Repeat("─", contentWidth)
+	if offset > 0 {
+		topBorder = "↑" + strings.Repeat("─", contentWidth-1)
+	}
+	if moreBelow {
+		bottomBorder = "↓" + strings.Repeat("─", contentWidth-1)
+	}
+	top := borderStyle.Render("╭" + topBorder + "╮")
+	bottom := borderStyle.Render("╰" + bottomBorder + "╯")
 	rows := make([]string, 0, len(lines)+2)
 	rows = append(rows, top)
 	for _, line := range lines {
@@ -4275,6 +4332,8 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		}
 		title := modalTitleStyle.Render(titleText)
 		var referenceContent string
+		var thread threadLayout
+		var threadStart int
 		for _, c := range m.tabs[m.activeTab].state.Comments {
 			if c.ID == m.editingID {
 				if c.Scope == "file" {
@@ -4285,29 +4344,13 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 					referenceContent = m.renderContextPreview(c.Side, start, end, innerWidth-4, 0)
 				}
 				if m.modal == replyModal || m.editingReplyID != "" {
-					var thread strings.Builder
-					author := c.Author
-					if author == "" {
-						author = "comment"
-					}
-					thread.WriteString(commentLineStyle.Render("Comment — "+author) + "\n")
-					thread.WriteString(c.Body)
-					for i, reply := range c.Replies {
-						replyAuthor := reply.Author
-						if replyAuthor == "" {
-							replyAuthor = "reply"
-						}
-						prefix := "  "
-						if reply.ID == m.editingReplyID {
-							prefix = "> "
-						}
-						thread.WriteString("\n" + replyStyle.Render(
-							fmt.Sprintf("%s%d. %s: %s", prefix, i+1, replyAuthor, reply.Body)))
-					}
+					thread = m.layoutThread(c.Author, c.Body, c.Replies, m.editingReplyID, innerWidth-4)
 					if referenceContent != "" {
+						referenceContent = lipgloss.Wrap(referenceContent, max(1, innerWidth-4), "")
+						threadStart = strings.Count(referenceContent, "\n") + 2
 						referenceContent += "\n\n"
 					}
-					referenceContent += thread.String()
+					referenceContent += strings.Join(thread.lines, "\n")
 				}
 				break
 			}
@@ -4362,9 +4405,13 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 
 		fixedContent, _ := buildContent("", 0, 0)
 		fixedHeight := lipgloss.Height(modalStyle.Width(modalWidth).Render(fixedContent))
-		referenceHeight := max(3, bgH-fixedHeight-3)
-		referenceSection, scrollOffset, scrollMaxOffset := renderScrollableModalBox(
-			referenceContent, innerWidth-2, referenceHeight, m.modalReferenceOffset)
+		referenceHeight := max(3, min(18, bgH-fixedHeight-3))
+		initialOffset := -1
+		if len(thread.starts) > 0 {
+			initialOffset = threadStart + thread.initialOffset(referenceHeight-2)
+		}
+		referenceSection, scrollOffset, scrollMaxOffset := renderModalBoxAt(
+			referenceContent, innerWidth-2, referenceHeight, m.modalReferenceOffset, initialOffset)
 		content, contentRegions := buildContent(referenceSection, scrollOffset, scrollMaxOffset)
 		modalContent = modalStyle.Width(modalWidth).Render(content)
 		regions = append(regions, contentRegions...)
@@ -4466,13 +4513,4 @@ func dimRendered(s string, w, h int) string {
 		}
 	}
 	return canvas.Render()
-}
-
-// clampLines truncates text to maxLines and appends "…" if truncated.
-func clampLines(text string, maxLines int) string {
-	lines := strings.Split(text, "\n")
-	if len(lines) <= maxLines {
-		return text
-	}
-	return strings.Join(lines[:maxLines], "\n") + "…"
 }

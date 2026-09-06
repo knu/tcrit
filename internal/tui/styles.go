@@ -7,6 +7,22 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
+func (m *AppModel) commentAuthorStyle(author string) lipgloss.Style {
+	if author == m.author {
+		return lipgloss.NewStyle().Foreground(lipgloss.BrightWhite)
+	}
+	colors := [...]color.Color{lipgloss.Cyan, lipgloss.Green, lipgloss.Color("208"), lipgloss.Magenta, lipgloss.Yellow}
+	if m.authorColors == nil {
+		m.authorColors = make(map[string]int)
+	}
+	index, ok := m.authorColors[author]
+	if !ok {
+		index = len(m.authorColors)
+		m.authorColors[author] = index
+	}
+	return lipgloss.NewStyle().Foreground(colors[index%len(colors)])
+}
+
 func tabBorderWithBottom(left, middle, right string) lipgloss.Border {
 	border := lipgloss.RoundedBorder()
 	border.BottomLeft = left
@@ -118,9 +134,6 @@ var (
 			Foreground(lipgloss.Green).
 			Bold(true)
 
-	replyStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Cyan)
-
 	// Annotation gutter marker
 	annotationGutter = lipgloss.NewStyle().
 				Foreground(lipgloss.BrightCyan).
@@ -208,10 +221,6 @@ var (
 
 	mdTableCellStyle = lipgloss.NewStyle().
 				Foreground(muted)
-
-	// Sidebar selected text (bright for contrast against highlight bg)
-	sidebarSelectedText = lipgloss.NewStyle().
-				Foreground(lipgloss.BrightWhite)
 
 	// Modal button styles
 	modalBtnLabel = lipgloss.NewStyle().

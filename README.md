@@ -16,12 +16,13 @@
 
 - **Fixed review scopes** — choose `--scope=all|staged|unstaged` or a committed comparison such as `--scope=main..HEAD` / `--scope=main...`.  Each scope keeps its comments in a separate session.
 - **File-level comments** — reviewers can press `f` to comment on the active file, with file threads kept in the comment sidebar instead of attached to a line.
+- **Readable comment threads** — your comments and replies appear in white; other authors use cyan, green, orange, purple, then yellow.  Unfocused inline and sidebar threads shrink to the latest message, down to one row.  Focus expands the history to at most 10 wrapped rows; reply dialogs show up to 16, shrinking on small terminals.  Expanded threads show the latest message at the bottom with earlier history above, or start at its first line when it exceeds the available height.  No blank padding follows the latest message; older messages and long bodies remain available by scrolling.
 - **Comment editing tools** — `ctrl+y` inserts GitHub-compatible suggestions for selected or anchored lines, including replies, and leaves the cursor at the end of the suggested code; `ctrl+o` edits comment and reply bodies in `$EDITOR`, while `ctrl+PgUp` / `ctrl+PgDn` scroll through code context and thread history.
 - **Native input cursor** — comment and reply editors position the real terminal cursor at the insertion point so terminal IMEs can display composition there, including after wrapping and scrolling.
 - **Deleted-line comments** — removed lines, including lines in fully deleted files, can be selected and commented on from the keyboard or gutter.
 - **Mouse-first TUI controls** — click file tabs, code lines, comment threads, sidebar items, dialog actions, and the review-finish button; use the wheel to scroll code and drag the gutter to select line ranges.
 - **Versioned plan reviews** — `tcrit plan` saves immutable revisions and carries comment threads forward as the plan changes.
-- **Richer review lifecycle** — comment threads can be replied to, resolved, reopened, and approved together; agent replies are visually distinct, complete code context and thread history remain scrollable while editing, and `[` / `]` and `n` / `N` navigate comments (including file comments) and changes across files.
+- **Richer review lifecycle** — comment threads can be replied to, resolved, reopened, and approved together; complete code context and thread history remain scrollable while editing, and `[` / `]` and `n` / `N` navigate comments (including file comments) and changes across files.
 - **Improved diffs and Git handling** — inline replacements preserve whitespace, long syntax-highlighted lines wrap instead of being truncated, comment anchors survive edited rounds, and paths with spaces or special characters work correctly.
 - **Agent integrations** — one command installs the shared `tcrit` review loop and `tcrit-cli` reference for Claude Code, Codex, OpenCode, and Gemini CLI. The current agent handles review rounds with the original task context; the loop picks code, document, or plan review from its arguments instead of asking.
 - **[Crit](https://crit.md/) CLI alignment** — customizable finish prompts, unified integration installers, and `tcrit check` were added as part of adopting the Crit CLI workflow.
@@ -279,6 +280,7 @@ Tcrit resolves the Herdr workspace, tab, and pane or the tmux server and pane fr
 | `[` / `]`                             | Jump to prev / next comment              |
 | `r`                                   | Resolve / unresolve the focused comment  |
 | `d`                                   | Delete the selected comment after confirmation |
+| `ctrl+PgUp` / `ctrl+PgDn`               | Scroll the selected inline or sidebar thread |
 | `?`                                   | Show all keyboard shortcuts              |
 | `q`                                   | Finish review (Approve when no unresolved comments remain) |
 
@@ -302,7 +304,7 @@ Tcrit resolves the Herdr workspace, tab, and pane or the tmux server and pane fr
 ## Mouse controls
 
 - Click a file tab, code line, inline comment, sidebar, or sidebar comment to focus it.
-- Scroll code with the mouse wheel.
+- Scroll code with the mouse wheel.  Over an inline or sidebar thread, the wheel focuses it and scrolls its full history; at the thread's limit, scrolling continues through the surrounding pane.
 - Hover over the `+`/`-` gutter to reveal a yellow `>` comment marker, then click to comment on a current or deleted line, or drag to select multiple lines on the same diff side.  Dragging to the top or bottom edge scrolls one line at a time.
 - Click inside a comment text box to focus it and position the cursor, or use the mouse wheel to move through longer comments.
 - Click actions in comment and finish dialogs, including **Close**.  The footer **Approve** / **Finish Review** button opens the finish dialog.
