@@ -2297,6 +2297,9 @@ func TestSuggestionButtonInsertsSelectedCodeAndPersistsComment(t *testing.T) {
 	if app.modalFocus != 0 || !app.modalTextarea.Focused() {
 		t.Fatalf("suggestion left focus at %d, focused=%t; want textarea", app.modalFocus, app.modalTextarea.Focused())
 	}
+	if got := app.modalTextarea.SelectedText(); got != "first\nsecond" {
+		t.Fatalf("suggestion selection = %q", got)
+	}
 
 	app.modalSubmit()
 	comments := app.session.FileComments(app.tab().path)
@@ -2398,6 +2401,38 @@ func TestSuggestionIsAvailableWhenReplyingToLineComment(t *testing.T) {
 	background := lipgloss.NewStyle().Width(app.width).Height(app.height).Render("")
 	if rendered := app.renderWithModal(background); !strings.Contains(rendered, "Suggest") {
 		t.Fatalf("reply modal does not contain Suggest button: %q", rendered)
+	}
+}
+
+func TestSuggestionCodeCanBeDeletedOrReplaced(t *testing.T) {
+	for _, code := range []string{"one", "日本語\n\n\t" + strings.Repeat("長い行", 30)} {
+		for _, replace := range []bool{false, true} {
+			app := setupAppWithDoc(t, code+"\n")
+			app.tab().selecting = true
+			app.tab().selectAnchor = 1
+			app.tab().cursorLine = strings.Count(code, "\n") + 1
+			app.modal = commentModal
+			app.modalTextarea.SetWidth(12)
+			app.modalTextarea.SetHeight(3)
+			app.modalTextarea.SetValue("説明\n\n以前の本文")
+			app.insertSuggestion()
+			wantCode := strings.ReplaceAll(code, "\t", "    ")
+			if got := app.modalTextarea.SelectedText(); got != wantCode {
+				t.Fatalf("selected code = %q, want %q", got, wantCode)
+			}
+			replacement := ""
+			if replace {
+				replacement = "変更"
+				updated, _ := app.Update(tea.KeyPressMsg{Code: '変', Text: replacement})
+				app = *updated.(*AppModel)
+			} else {
+				app = pressKey(app, tea.KeyDelete)
+			}
+			want := "説明\n\n以前の本文\n\n```suggestion\n" + replacement + "\n```"
+			if got := app.modalTextarea.Value(); got != want {
+				t.Fatalf("edited suggestion = %q, want %q", got, want)
+			}
+		}
 	}
 }
 

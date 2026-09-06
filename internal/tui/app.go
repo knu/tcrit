@@ -1296,14 +1296,24 @@ func (m *AppModel) insertSuggestion() {
 		body += "\n\n"
 	}
 	m.modalTextarea.SetValue(body + "```suggestion\n" + code + "\n```")
+	m.modalFocus = 0
+	m.modalTextarea.Focus()
 	m.modalTextarea.CursorStart()
 	m.modalTextarea.CursorUp()
-	m.modalTextarea.CursorEnd()
+	firstLine := strings.Count(body, "\n") + 1
+	for m.modalTextarea.Line() > firstLine {
+		m.modalTextarea.CursorUp()
+	}
+	m.modalTextarea.CursorStart()
+	// Anchor the selection at the code start, then extend it back from the
+	// closing fence to the code end without selecting either fence.
+	m.modalTextarea, _ = m.modalTextarea.Update(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModShift})
+	m.modalTextarea.MoveToEnd()
+	m.modalTextarea.CursorStart()
+	m.modalTextarea, _ = m.modalTextarea.Update(tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModShift})
 	// Populate the internal viewport before repositioning it around the cursor.
 	_ = m.modalTextarea.View()
 	m.modalTextarea.SetHeight(m.modalTextarea.Height())
-	m.modalFocus = 0
-	m.modalTextarea.Focus()
 }
 
 func (m *AppModel) suggestionRange() (int, int, bool) {
