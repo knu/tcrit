@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.1
+
+### Fixed
+
+- `[` / `]` now visit resolved line and file comments when unfolded with `h`, while continuing to skip them when folded
+
+### Documentation
+
+- Clarified comment editing shortcuts, suggestion replacement, and scrolling through code context and thread history
+
 ## 0.8.0
 
 ### Added
