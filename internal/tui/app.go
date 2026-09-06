@@ -2038,7 +2038,7 @@ func (m *AppModel) currentCommentTarget(targets []commentTarget) int {
 }
 
 // jumpToComment moves to the adjacent comment in tab, line, and annotation
-// order, wrapping across the entire review and skipping resolved comments.
+// order, wrapping across the entire review and skipping folded resolved comments.
 func (m *AppModel) jumpToComment(step int) bool {
 	t := m.tab()
 	targets := m.commentTargets(m.activeTab)
@@ -2046,7 +2046,7 @@ func (m *AppModel) jumpToComment(step int) bool {
 
 	if current >= 0 {
 		for adjacent := current + step; adjacent >= 0 && adjacent < len(targets); adjacent += step {
-			if targets[adjacent].resolved {
+			if targets[adjacent].resolved && !m.showResolved {
 				continue
 			}
 			m.selectComment(m.activeTab, targets[adjacent])
@@ -2056,14 +2056,14 @@ func (m *AppModel) jumpToComment(step int) bool {
 		cursor := m.visualLineIndex(t, lineRef{side: t.cursorSide, line: t.cursorLine})
 		if step > 0 {
 			for _, target := range targets {
-				if !target.resolved && m.targetPosition(t, target) >= cursor {
+				if (m.showResolved || !target.resolved) && m.targetPosition(t, target) >= cursor {
 					m.selectComment(m.activeTab, target)
 					return true
 				}
 			}
 		} else {
 			for i := len(targets) - 1; i >= 0; i-- {
-				if !targets[i].resolved && m.targetPosition(t, targets[i]) <= cursor {
+				if (m.showResolved || !targets[i].resolved) && m.targetPosition(t, targets[i]) <= cursor {
 					m.selectComment(m.activeTab, targets[i])
 					return true
 				}
@@ -2082,7 +2082,7 @@ func (m *AppModel) jumpToComment(step int) bool {
 			start = len(targets) - 1
 		}
 		for i := start; i >= 0 && i < len(targets); i += step {
-			if targets[i].resolved {
+			if targets[i].resolved && !m.showResolved {
 				continue
 			}
 			m.selectComment(tabIndex, targets[i])

@@ -3229,6 +3229,44 @@ func TestCommentNavigationSkipsResolvedComments(t *testing.T) {
 	}
 }
 
+func TestCommentNavigationVisitsUnfoldedResolvedComments(t *testing.T) {
+	app := newCommentNavigationTestApp()
+	for i := range app.tabs {
+		for j := range app.tabs[i].state.Comments {
+			app.tabs[i].state.Comments[j].Resolved = true
+		}
+	}
+	app.tabs[1].state.Comments = []review.Comment{{ID: "file", Scope: "file", Body: "file comment", Resolved: true}}
+	app = pressKey(app, 'h')
+	for _, step := range []struct {
+		key rune
+		id  string
+	}{
+		{']', "first-a"}, {']', "first-b"}, {']', "first-c"},
+		{']', "file"}, {']', "last-a"}, {']', "last-b"}, {']', "first-a"},
+		{'[', "last-b"}, {'[', "last-a"}, {'[', "file"},
+		{'[', "first-c"}, {'[', "first-b"}, {'[', "first-a"},
+	} {
+		app = pressKey(app, step.key)
+		targets := app.commentTargets(app.activeTab)
+		current := app.currentCommentTarget(targets)
+		if current < 0 || targets[current].id != step.id {
+			t.Fatalf("key %c: selected target %d in %+v, want %s", step.key, current, targets, step.id)
+		}
+	}
+	// Backward navigation from a source line also includes unfolded threads.
+	app.tab().cursorOnAnnotation = false
+	app.tab().cursorLine = 3
+	app = pressKey(app, '[')
+	if app.activeTab != 0 || app.tab().cursorAnnoIdx != 1 || !app.tab().cursorOnAnnotation {
+		t.Fatal("previous from source skipped an unfolded resolved thread")
+	}
+	app = pressKey(app, 'h')
+	if app.jumpToComment(1) || app.jumpToComment(-1) {
+		t.Fatal("refolding did not exclude resolved threads from navigation")
+	}
+}
+
 func TestCommentNavigationVisitsFileComments(t *testing.T) {
 	app := newCommentNavigationTestApp()
 	app.commentViewport.SetWidth(40)
