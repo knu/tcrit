@@ -148,4 +148,10 @@ func TestResolveDiffFromStdin(t *testing.T) {
 	if _, err := resolveReviewMode(nil); err == nil {
 		t.Fatal("accepted scope with --diff")
 	}
+	unstaged := reviewUnstaged
+	t.Cleanup(func() { reviewUnstaged = unstaged })
+	reviewScope, reviewUnstaged = "", true
+	if _, err := resolveReviewMode(nil); err == nil {
+		t.Fatal("accepted unstaged with --diff")
+	}
 }

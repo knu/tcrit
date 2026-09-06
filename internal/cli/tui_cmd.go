@@ -72,7 +72,8 @@ func init() {
 	tuiCmd.PreRunE = validateScopeFlags
 	tuiCmd.Flags().StringVar(&reviewScope, "scope", "", "review scope")
 	rootCmd.AddCommand(tuiCmd)
-	tuiCmd.Flags().BoolVar(&reviewStaged, "staged", false, "review only changes staged in the index")
+	tuiCmd.Flags().BoolVar(&reviewStaged, "staged", false, "review only changes staged in the index (alias for --scope=staged)")
+	tuiCmd.Flags().BoolVar(&reviewUnstaged, "unstaged", false, "review unstaged and untracked changes (alias for --scope=unstaged)")
 	tuiCmd.Flags().StringVar(&tuiPlan, "plan", "", "plan slug to review")
 	tuiCmd.Flags().StringVar(&tuiDiffSession, "diff-session", "", "saved diff session to review")
 }

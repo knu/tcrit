@@ -19,12 +19,21 @@ func validateScopeFlags(cmd *cobra.Command, _ []string) error {
 }
 
 func resolveCodeScope() (*reviewMode, error) {
+	if reviewStaged && reviewUnstaged {
+		return nil, fmt.Errorf("--staged cannot be combined with --unstaged")
+	}
 	scope := reviewScope
+	alias := ""
 	if reviewStaged {
-		if scope != "" && scope != "staged" {
-			return nil, fmt.Errorf("--staged conflicts with --scope=%s", scope)
+		alias = "staged"
+	} else if reviewUnstaged {
+		alias = "unstaged"
+	}
+	if alias != "" {
+		if scope != "" && scope != alias {
+			return nil, fmt.Errorf("--%s conflicts with --scope=%s", alias, scope)
 		}
-		scope = "staged"
+		scope = alias
 	}
 	if scope == "" {
 		scope = "all"

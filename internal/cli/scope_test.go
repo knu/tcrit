@@ -36,13 +36,20 @@ func TestResolveExplicitScopes(t *testing.T) {
 			}
 		}
 	}
-	oldScope, oldStaged := reviewScope, reviewStaged
-	t.Cleanup(func() { reviewScope, reviewStaged = oldScope, oldStaged })
-	for _, scope := range []string{"", "all", "staged", "unstaged"} {
-		reviewScope, reviewStaged = scope, false
-		if scope == "" {
-			scope = "all"
-		}
+	oldScope, oldStaged, oldUnstaged := reviewScope, reviewStaged, reviewUnstaged
+	t.Cleanup(func() { reviewScope, reviewStaged, reviewUnstaged = oldScope, oldStaged, oldUnstaged })
+	for _, tc := range []struct {
+		scope, want      string
+		staged, unstaged bool
+	}{
+		{want: "all"}, {scope: "all", want: "all"},
+		{scope: "staged", want: "staged"}, {scope: "unstaged", want: "unstaged"},
+		{staged: true, want: "staged"}, {unstaged: true, want: "unstaged"},
+		{scope: "staged", staged: true, want: "staged"},
+		{scope: "unstaged", unstaged: true, want: "unstaged"},
+	} {
+		reviewScope, reviewStaged, reviewUnstaged = tc.scope, tc.staged, tc.unstaged
+		scope := tc.want
 		mode, err := resolveReviewMode(nil)
 		if err != nil || mode.source == nil || mode.source.Scope != scope || len(mode.files) != 1 {
 			t.Fatalf("%s: mode=%+v err=%v", scope, mode, err)
@@ -52,6 +59,7 @@ func TestResolveExplicitScopes(t *testing.T) {
 			t.Fatalf("command=%q err=%v", cmd, err)
 		}
 	}
+	reviewStaged, reviewUnstaged = false, false
 	reviewScope = "HEAD~1.."
 	mode, err := resolveReviewMode(nil)
 	if err != nil || mode.source.Scope != "range" {
@@ -62,20 +70,25 @@ func TestResolveExplicitScopes(t *testing.T) {
 		t.Fatal("empty range accepted")
 	}
 	for _, tc := range []struct {
-		scope  string
-		staged bool
-		args   []string
+		scope    string
+		staged   bool
+		unstaged bool
+		args     []string
 	}{
 		{scope: "bad"}, {scope: "HEAD"},
 		{scope: "all", staged: true}, {scope: "HEAD..HEAD", staged: true},
 		{scope: "staged", args: []string{"README.md"}},
+		{staged: true, unstaged: true},
+		{scope: "all", unstaged: true}, {scope: "staged", unstaged: true},
+		{scope: "HEAD~1..", unstaged: true},
+		{unstaged: true, args: []string{"README.md"}},
 	} {
-		reviewScope, reviewStaged = tc.scope, tc.staged
+		reviewScope, reviewStaged, reviewUnstaged = tc.scope, tc.staged, tc.unstaged
 		if _, err := resolveReviewMode(tc.args); err == nil {
 			t.Fatalf("accepted %+v", tc)
 		}
 	}
-	reviewScope, reviewStaged = "all", false
+	reviewScope, reviewStaged, reviewUnstaged = "all", false, false
 	if out, err := exec.Command("git", "add", "file.txt").CombinedOutput(); err != nil {
 		t.Fatalf("%s: %v", out, err)
 	}

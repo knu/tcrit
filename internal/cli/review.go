@@ -21,6 +21,7 @@ import (
 
 var reviewCode bool
 var reviewStaged bool
+var reviewUnstaged bool
 var reviewDiff string
 var reviewScope string
 
@@ -203,8 +204,8 @@ func reviewArgSuffix(mode *reviewMode) string {
 // the changed files up front so failures surface before any TUI spawns.
 func resolveReviewMode(args []string) (*reviewMode, error) {
 	if reviewDiff != "" {
-		if reviewScope != "" || reviewStaged || reviewCode {
-			return nil, fmt.Errorf("--diff cannot be combined with --scope, --code, or --staged")
+		if reviewScope != "" || reviewStaged || reviewUnstaged || reviewCode {
+			return nil, fmt.Errorf("--diff cannot be combined with --scope, --code, --staged, or --unstaged")
 		}
 		input := reviewDiff
 		if len(args) > 0 {
@@ -219,8 +220,8 @@ func resolveReviewMode(args []string) (*reviewMode, error) {
 		}
 		return &reviewMode{patch: patch, files: patch.Changes()}, nil
 	}
-	if (reviewStaged || reviewScope != "") && len(args) > 0 {
-		return nil, fmt.Errorf("--scope and --staged are only valid for code review")
+	if (reviewStaged || reviewUnstaged || reviewScope != "") && len(args) > 0 {
+		return nil, fmt.Errorf("--scope, --staged, and --unstaged are only valid for code review")
 	}
 	if len(args) == 1 && !reviewCode {
 		filePath := args[0]
@@ -554,7 +555,8 @@ func init() {
 	rootCmd.AddCommand(reviewCmd)
 	reviewCmd.Flags().BoolVar(&reviewCode, "code", false, "review code changes (default when no file argument is given)")
 	addDiffFlag(reviewCmd)
-	reviewCmd.Flags().BoolVar(&reviewStaged, "staged", false, "review only changes staged in the index")
+	reviewCmd.Flags().BoolVar(&reviewStaged, "staged", false, "review only changes staged in the index (alias for --scope=staged)")
+	reviewCmd.Flags().BoolVar(&reviewUnstaged, "unstaged", false, "review unstaged and untracked changes (alias for --scope=unstaged)")
 
 	// Deprecated no-ops: blocking on a tmux split pane is now the default.
 	var deprecatedDetach, deprecatedWait bool
