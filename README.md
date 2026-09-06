@@ -12,6 +12,7 @@
 - **Native Herdr and tmux workflows** — reviews open in a full-width Herdr tab or a tmux split; tcrit finds the invoking context from process ancestry even when tools such as Codex do not inherit multiplexer environment variables.
 - **CritJSON review state and CLI** — comments use [Crit](https://crit.md/)-compatible `review.json` data, with `tcrit comment` and `tcrit comments` for automation.
 - **Explicit review scopes** — `tcrit --staged` reviews the exact index snapshot without unstaged or untracked files, records that scope in `review.json`, and keeps the active staged, working-tree, or base-ref scope visible in the TUI header.
+- **Supplied diff reviews** — `git diff <base> <head> | tcrit --diff` reviews arbitrary Git unified diffs, including outside a repository. Input snapshots survive Herdr/tmux launches and can be replaced for the next review round.
 - **File-level comments** — reviewers can press `f` to comment on the active file, with file threads kept in the comment sidebar instead of attached to a line.
 - **Comment editing tools** — `ctrl+y` inserts GitHub-compatible suggestions for selected or anchored lines, including replies, and leaves the cursor at the end of the suggested code; `ctrl+o` edits comment and reply bodies in `$EDITOR`, while `ctrl+PgUp` / `ctrl+PgDn` scroll through code context and thread history.
 - **Native input cursor** — comment and reply editors position the real terminal cursor at the insertion point so terminal IMEs can display composition there, including after wrapping and scrolling.
@@ -165,12 +166,17 @@ tcrit review
 tcrit --staged
 # Equivalent explicit form
 tcrit review --staged
+# Review an arbitrary commit range from stdin
+git diff main feature | tcrit --diff
+# Equivalent explicit form
+git diff main feature | tcrit review --diff
 ```
 
 Detects changed files in your git repo and opens a tabbed TUI with syntax highlighting, diff markers, and inline commenting across all changed files.
 
 - Diffs staged, unstaged, and untracked changes against `HEAD` by default; falls back to `HEAD~1` or `main` when the worktree is clean
 - With `--staged`, reads both the file list and displayed contents from the index, excluding unstaged and untracked work
+- With `--diff`, reads the supplied unified diff and labels the scope **Supplied diff**; it cannot be combined with `--code`, `--staged`, or `--base`
 - Green gutter markers highlight changed lines
 - Comments are aggregated across all files in the session
 
@@ -178,6 +184,20 @@ Detects changed files in your git repo and opens a tabbed TUI with syntax highli
 # Get unresolved comments in the agent-facing format
 tcrit comments --json
 ```
+
+### Supplied diffs
+
+`tcrit --diff=changes.diff` or `tcrit --diff changes.diff` accepts one Git unified diff, with additions, deletions, renames, and binary-file placeholders. Relative and absolute paths are accepted; bare `--diff`, `--diff=-`, and `--diff -` read standard input. It works without a Git repository and uses the controlling terminal for keyboard input when stdin is a pipe. TCrit saves the input diff and the file content prepared for display in the review session directory. The separate TUI process launched in Herdr or tmux reads this saved data, so it shows the same changes without needing access to the original input.
+
+When the diff identifies the pre-change file content stored in the local Git object database, TCrit reads that content and applies the diff in memory to reconstruct the complete changed file. Otherwise it shows only the supplied context and changes at their original line numbers, marking omitted context explicitly. It never fills missing context from the working tree. Suggestions cannot span omitted lines. Input is limited to 64 MiB; when only partial file content is available, line numbers up to 1,000,000 are supported.
+
+Diff reviews use a separate session per working directory. For another round, regenerate the diff and pipe it into `tcrit --diff` from the same directory, or target the session explicitly:
+
+```bash
+git diff main feature | tcrit --diff --session <id>
+```
+
+The waiting TUI reloads the snapshot and comments. A plain `tcrit --session <id>` cannot refresh a diff review without new input. When incomplete context prevents reliable comment relocation, changed snapshots preserve the original coordinates and mark the comments as drifted for inspection.
 
 ### How code review works
 

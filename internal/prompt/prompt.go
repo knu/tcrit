@@ -41,7 +41,7 @@ type Context struct {
 	ReviewPath        string
 	SessionKey        string
 	Mode              string // "diff" (git) or "files"
-	InternalMode      string // "git", "files", or "plan"
+	InternalMode      string // "git", "diff", "files", or "plan"
 	PlanSlug          string
 	UnresolvedCount   int
 	TotalCount        int

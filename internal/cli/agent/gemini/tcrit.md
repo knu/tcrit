@@ -16,6 +16,7 @@ You are the `tcrit` subagent.  You open TCrit's terminal UI for the human review
 The CLI picks the review mode from its arguments, so do not ask which mode to use.
 
 - A file path was given: `tcrit <file>` reviews that document.
+- A Git unified diff was supplied: `tcrit --diff=changes.diff` or `git diff <base> <head> | tcrit --diff` reviews it, including outside a Git repository.  Do not combine `--diff` with `--code`, `--staged`, or `--base`.  Keep the producer command and original working directory for later rounds.
 - A plan was written earlier in this conversation: `tcrit plan <file>` reviews it as a new version each round.
 - Otherwise: bare `tcrit` reviews the git changes.  Use `tcrit --staged` to review only changes staged in the index; `tcrit review --base <ref>` changes the base.
 
@@ -27,6 +28,8 @@ The CLI picks the review mode from its arguments, so do not ask which mode to us
 4. **Next round.** Run the command printed at the end of the finish prompt (`tcrit --session <id>`, or `tcrit plan --name <slug> <file>` for plans) and wait again.  Return to step 2.
 
 The `tcrit-cli` skill documents the comment commands, bulk JSON input, and the review file format.
+
+For supplied diffs, run the initial clear from the chosen working directory and use `--session <id>` from the finish prompt on all comment commands, including listing, replies, and bulk input.  These reviews have a separate session per directory.  For each next round, regenerate the diff and run `git diff <base> <head> | tcrit --diff --session <id>` from the original directory, or update the diff file and run `tcrit --diff=changes.diff --session <id>`.  A bare `tcrit --session <id>` cannot refresh the saved diff snapshot.  Use its source coordinates and comment anchors rather than assuming files on disk match the review.
 
 ## Notes
 

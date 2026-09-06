@@ -25,11 +25,14 @@ var rootCmd = &cobra.Command{
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if rootSession != "" {
-			if len(args) > 0 {
+			if len(args) > 0 && reviewDiff == "" {
 				return fmt.Errorf("--session cannot be combined with a file argument")
 			}
 			if reviewStaged {
 				return fmt.Errorf("--session cannot be combined with --staged")
+			}
+			if reviewDiff != "" {
+				return runReview(args)
 			}
 			return reconnectSession(rootSession)
 		}
@@ -54,6 +57,9 @@ func reconnectSession(key string) error {
 	if err != nil {
 		return err
 	}
+	if len(sess.CJ.CliArgs) == 1 && sess.CJ.CliArgs[0] == "--diff" {
+		return fmt.Errorf("diff reviews require updated input; run `tcrit --diff --session %s < updated.diff` from the original directory", key)
+	}
 	sock := review.SocketPathFor(key)
 	if !ipc.Alive(sock) {
 		return fmt.Errorf("review session %s is not running; start a new review with `tcrit`", key)
@@ -74,4 +80,5 @@ func Execute() int {
 func init() {
 	rootCmd.Flags().StringVar(&rootSession, "session", "", "reconnect to a running review session by ID")
 	rootCmd.Flags().BoolVar(&reviewStaged, "staged", false, "review only changes staged in the index")
+	addDiffFlag(rootCmd)
 }

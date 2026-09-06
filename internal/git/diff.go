@@ -149,6 +149,10 @@ func diffFile(path, ref string, staged bool) (*DiffInfo, error) {
 		return nil, fmt.Errorf("parsing diff for %s: %w", path, err)
 	}
 
+	return diffInfo(files), nil
+}
+
+func diffInfo(files []*gitdiff.File) *DiffInfo {
 	info := &DiffInfo{
 		ChangedLines:  make(map[int]bool),
 		InlineChanges: make(map[int][]InlineSegment),
@@ -163,6 +167,9 @@ func diffFile(path, ref string, staged bool) (*DiffInfo, error) {
 			// A hunk with no new-side lines (a deleted file) starts at
 			// position 0, which still anchors before line 1.
 			lastNewLine := max(int(newLine)-1, 0)
+			if frag.NewLines == 0 {
+				lastNewLine = int(newLine)
+			}
 
 			for _, line := range frag.Lines {
 				switch line.Op {
@@ -187,7 +194,7 @@ func diffFile(path, ref string, staged bool) (*DiffInfo, error) {
 		}
 	}
 
-	return info, nil
+	return info
 }
 
 func annotateInlineChanges(info *DiffInfo, frag *gitdiff.TextFragment) {

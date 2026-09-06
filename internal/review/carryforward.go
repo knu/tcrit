@@ -52,10 +52,22 @@ func CarryForwardFile(comments []Comment, prevContent, newContent, now string) [
 	return out
 }
 
-// carryForwardComment re-mints a comment for the next round: a fresh ID,
-// CarriedForward forced true, UpdatedAt restamped, and everything else —
-// including the original authoring round, resolution state, and replies —
-// preserved.
+// CarryForwardPartial preserves coordinates when missing context prevents a
+// reliable line mapping.  Changed snapshots flag line anchors for inspection.
+func CarryForwardPartial(comments []Comment, changed bool, now string) []Comment {
+	out := make([]Comment, 0, len(comments))
+	for _, c := range comments {
+		carried := carryForwardComment(c, now)
+		if changed && c.Scope != "file" {
+			carried.Drifted = true
+		}
+		out = append(out, carried)
+	}
+	return out
+}
+
+// carryForwardComment re-mints a comment for the next round while retaining
+// its original authoring round, resolution state, and replies.
 func carryForwardComment(old Comment, now string) Comment {
 	return Comment{
 		ID:             RandomCommentID(),

@@ -22,6 +22,7 @@ import (
 var reviewCode bool
 var reviewBase string
 var reviewStaged bool
+var reviewDiff string
 
 // The following function variables allow tests to replace shell interactions
 // without actually shelling out.
@@ -50,6 +51,8 @@ var reviewCmd = &cobra.Command{
 
 With no file argument, reviews the current git changes (multi-file mode).
 With a file argument, reviews that document.
+With --diff[=FILE], reads a Git unified diff from a file or stdin (-), without
+requiring a repository.  A file argument after --diff is also accepted.
 
 Inside Herdr the TUI opens in a dedicated tab; inside tmux it opens in a
 split pane. This command blocks until the reviewer approves or finishes
@@ -64,12 +67,14 @@ the current terminal.`,
 
 // reviewMode describes what is being reviewed.
 type reviewMode struct {
-	docPath  string // non-empty for single-document and plan modes
-	ref      string // diff base for code mode
-	files    []git.FileChange
-	staged   bool
-	planSlug string // non-empty for plan mode
-	planFile string // original plan path ("" when read from stdin)
+	docPath     string // non-empty for single-document and plan modes
+	ref         string // diff base for code mode
+	files       []git.FileChange
+	staged      bool
+	planSlug    string // non-empty for plan mode
+	planFile    string // original plan path ("" when read from stdin)
+	patch       *git.Patch
+	diffSession string // persisted snapshot to open in the multiplexer
 }
 
 func (m *reviewMode) code() bool { return m.docPath == "" }
@@ -85,6 +90,8 @@ func (m *reviewMode) promptMode() string {
 
 func (m *reviewMode) internalMode() string {
 	switch {
+	case m.patch != nil:
+		return "diff"
 	case m.plan():
 		return "plan"
 	case m.code():
@@ -100,6 +107,9 @@ func (m *reviewMode) internalMode() string {
 func (m *reviewMode) persistedCLIArgs() []string {
 	if !m.code() {
 		return nil
+	}
+	if m.patch != nil {
+		return []string{"--diff"}
 	}
 	if m.staged {
 		return []string{"--staged"}
@@ -152,7 +162,7 @@ func runReviewFlow(cfg *config.Config, sess *review.Session, mode *reviewMode) e
 		return runReviewCycle(cfg, sess, sock)
 	}
 
-	if term.IsTerminal(int(os.Stdin.Fd())) {
+	if term.IsTerminal(int(os.Stdin.Fd())) || mode.patch != nil {
 		payload, err := runTUISession(cfg, sess, mode, false)
 		if err != nil {
 			return err
@@ -184,6 +194,23 @@ func reviewArgSuffix(mode *reviewMode) string {
 // resolveReviewMode classifies the arguments and, for code mode, detects
 // the changed files up front so failures surface before any TUI spawns.
 func resolveReviewMode(args []string, cfg *config.Config) (*reviewMode, error) {
+	if reviewDiff != "" {
+		if reviewStaged || reviewBase != "" || reviewCode {
+			return nil, fmt.Errorf("--diff cannot be combined with --code, --staged, or --base")
+		}
+		input := reviewDiff
+		if len(args) > 0 {
+			if input != "-" {
+				return nil, fmt.Errorf("--diff accepts only one input file")
+			}
+			input = args[0]
+		}
+		patch, err := readDiff(input)
+		if err != nil {
+			return nil, err
+		}
+		return &reviewMode{patch: patch, files: patch.Changes()}, nil
+	}
 	if reviewStaged && len(args) > 0 {
 		return nil, fmt.Errorf("--staged is only valid for code review")
 	}
@@ -245,6 +272,41 @@ func resolveReviewMode(args []string, cfg *config.Config) (*reviewMode, error) {
 }
 
 func openReviewSession(cfg *config.Config, mode *reviewMode) (*review.Session, error) {
+	if mode.patch != nil {
+		sess, err := review.OpenDiffSession(cfg.Output)
+		if err != nil {
+			return nil, err
+		}
+		if rootSession != "" {
+			if !review.ValidSessionKey(rootSession) {
+				return nil, fmt.Errorf("invalid session ID %q", rootSession)
+			}
+			entry, err := review.ReadSessionEntry(rootSession)
+			if err != nil {
+				return nil, err
+			}
+			if entry.CWD != sess.Meta.CWD || len(entry.Args) != 1 || entry.Args[0] != "--diff" {
+				return nil, fmt.Errorf("--diff requires a diff session in the current directory")
+			}
+			sess, err = review.OpenSessionFromEntry(*entry)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if err := sess.SaveDiff(mode.patch); err != nil {
+			return nil, err
+		}
+		sess.CJ.BaseRef = ""
+		sess.CJ.CliArgs = mode.persistedCLIArgs()
+		for _, f := range mode.files {
+			sess.SetFileComments(f.Path, f.Status.String(), sess.FileComments(f.Path))
+		}
+		if err := sess.Save(); err != nil {
+			return nil, err
+		}
+		mode.diffSession = sess.Key
+		return sess, nil
+	}
 	if !mode.code() {
 		sess, err := review.OpenDocSession(cfg.Output, mode.docPath)
 		if err != nil {
@@ -349,6 +411,9 @@ func buildTUICommand(mode *reviewMode) (string, error) {
 	}
 
 	switch {
+	case mode.patch != nil:
+		return fmt.Sprintf("%s %s _tui --diff-session %s",
+			envPrefix, shellEscape(tcritBin), shellEscape(mode.diffSession)), nil
 	case mode.plan():
 		return fmt.Sprintf("%s %s _tui --plan %s",
 			envPrefix, shellEscape(tcritBin), shellEscape(mode.planSlug)), nil
@@ -536,6 +601,7 @@ func shellEscape(s string) string {
 func init() {
 	rootCmd.AddCommand(reviewCmd)
 	reviewCmd.Flags().BoolVar(&reviewCode, "code", false, "review code changes (default when no file argument is given)")
+	addDiffFlag(reviewCmd)
 	reviewCmd.Flags().BoolVar(&reviewStaged, "staged", false, "review only changes staged in the index")
 	reviewCmd.Flags().StringVar(&reviewBase, "base", "", "base ref to diff against in code mode")
 	reviewCmd.Flags().StringVar(&reviewBase, "base-branch", "", "alias for --base")

@@ -35,6 +35,16 @@ The finish prompt printed by a review round already contains the unresolved comm
 
 `tcrit status --code` prints the files and comments of the current code review session as JSON, and `tcrit status <file>` does the same for a document review.
 
+Supplied diff reviews (`tcrit --diff`) use a separate session per working directory, including outside Git repositories.  Pass the ID from the finish prompt for every comment operation against that review:
+
+```bash
+tcrit comments --session <id> --json
+tcrit comment --session <id> --reply-to <comment-id> --author 'Claude Code' '<what you did>'
+tcrit comment --session <id> --json --file .tmp/replies.json --author 'Claude Code'
+```
+
+To start another round, regenerate and feed the diff into `tcrit --diff --session <id>` from the original directory; `tcrit --session <id>` alone cannot refresh its snapshot.  The `/tcrit` skill covers that interactive loop.
+
 ## Review file format
 
 TCrit stores each review as a `review.json` that follows crit's CritJSON layout, so tooling written for either works on both.
@@ -98,7 +108,7 @@ Rules:
 
 - Always pass `--author` with your agent name so the thread shows who wrote what.
 - Single-quote the body.  Double quotes let the shell interpret backticks and `$`.
-- Line numbers refer to the file on disk, 1-indexed, not to diff line numbers.
+- Line numbers are 1-indexed source coordinates, not positions in the diff text.  For supplied diffs, use the saved snapshot and comment anchors; the file on disk may differ or be absent.
 - Bodies are Markdown; code fences and inline code render in the TUI.
 - Do not pass `--resolve` unless the user explicitly asks for it.  The same applies to the `resolve` field in bulk JSON.
 

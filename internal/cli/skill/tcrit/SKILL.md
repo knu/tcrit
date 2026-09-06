@@ -26,13 +26,16 @@ tcrit $ARGUMENTS            # a file reviews that document; no argument reviews 
 tcrit --staged              # review only changes staged in the index
 tcrit plan <file>           # a plan written in this conversation: each round is saved as a new version
 tcrit review --base <ref>   # git changes against another base
+git diff <base> <head> | tcrit --diff  # review a supplied Git unified diff
 ```
 
 With no argument, review a plan file written earlier in this conversation with `tcrit plan <file>`; otherwise run bare `tcrit` for the git changes.
 
+For a supplied diff, use `tcrit --diff=changes.diff` or `tcrit --diff changes.diff`, or pipe the producer into `tcrit --diff` (`tcrit review --diff` is equivalent).  Relative and absolute paths are accepted; bare `--diff` and `-` as its input read stdin.  This works outside a Git repository.  Do not combine `--diff` with `--code`, `--staged`, or `--base`.  Keep the producer command and working directory for later rounds: TCrit reviews a saved snapshot, not the current working-tree files.
+
 ## Step 2: Launch the review and block
 
-When a new review task starts (not a later round of the same task), discard state left by earlier tasks once, from the project root:
+When a new review task starts (not a later round of the same task), discard state left by earlier tasks once, from the project root (or the chosen working directory for a diff outside a repository):
 
 ```bash
 tcrit clear --all
@@ -56,6 +59,8 @@ When the command returns, stdout holds the finish prompt and stderr reports `app
 Each comment carries `scope`, `path`, `start_line`, `end_line`, `body`, and `anchor`.  Use `anchor`, the text of the commented lines at the time the comment was written, to find the spot even after line numbers have moved.  A comment marked `drifted: true` no longer matches its original text, so treat its line numbers as approximate.  When `quote` is present, the reviewer selected that specific text; focus on it rather than the whole range.
 
 If you need the comments outside this flow, `tcrit comments --json` lists the unresolved ones.
+
+Supplied diffs have a separate session per working directory.  Use `--session <id>` on `tcrit comments` and `tcrit comment`, including replies and bulk input, to target that diff review.  Use the session ID from the finish prompt.
 
 ## Step 4: Address each comment
 
@@ -82,5 +87,13 @@ The `/tcrit-cli` skill documents the JSON format and the other comment commands.
 ## Step 5: Start the next round
 
 Run the command printed at the end of the finish prompt, again with a long timeout.  For git changes and documents it is `tcrit --session <id>`, which reconnects to the waiting TUI and reloads your edits and replies.  For plans it is `tcrit plan --name <slug> <file>`, which saves the revised file as a new version.
+
+For a supplied diff, regenerate the diff with the same producer and feed it in again from the original working directory:
+
+```bash
+git diff <base> <head> | tcrit --diff --session <id>
+```
+
+For file input, update the diff file first, then run `tcrit --diff=changes.diff --session <id>`.  A bare `tcrit --session <id>` cannot refresh a supplied diff.  Omitting `--session` reuses the diff session for the current directory; keep the explicit ID when following an existing review.  Inspect comments marked `drifted` against their anchors when the supplied context is incomplete.
 
 The command blocks until the reviewer finishes the next round.  Return to Step 3.  Stop when a round ends with `approved: true`.

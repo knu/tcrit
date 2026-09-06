@@ -29,6 +29,10 @@ func runTUISession(cfg *config.Config, sess *review.Session, mode *reviewMode, s
 		Staged:   mode.staged,
 		Serving:  serving,
 		FinishCh: finishCh,
+		Patch:    mode.patch,
+	}
+	if mode.patch != nil {
+		appCfg.PatchPath = sess.DiffPath()
 	}
 
 	var model tui.AppModel
@@ -37,7 +41,20 @@ func runTUISession(cfg *config.Config, sess *review.Session, mode *reviewMode, s
 	} else {
 		model = tui.NewApp(mode.docPath, appCfg)
 	}
-	p := tea.NewProgram(model)
+	var options []tea.ProgramOption
+	if mode.patch != nil && !serving {
+		tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+		if err != nil {
+			return nil, fmt.Errorf("opening review terminal: %w", err)
+		}
+		defer func() {
+			if err := tty.Close(); err != nil {
+				fmt.Fprintf(os.Stderr, "tcrit: closing review terminal: %v\n", err)
+			}
+		}()
+		options = append(options, tea.WithInput(tty), tea.WithOutput(tty))
+	}
+	p := tea.NewProgram(model, options...)
 
 	srv := &tuiServer{cfg: cfg, sess: sess, mode: mode, program: p}
 
@@ -215,6 +232,9 @@ func buildFinishPayload(cfg *config.Config, sess *review.Session, mode *reviewMo
 // content is versioned; the original file path is recovered from the
 // session's recorded cli_args when this process was spawned without it.
 func nextRoundCommand(sess *review.Session, mode *reviewMode) string {
+	if mode.patch != nil {
+		return "tcrit --diff --session " + sess.Key + " < updated.diff"
+	}
 	if !mode.plan() {
 		return "tcrit --session " + sess.Key
 	}

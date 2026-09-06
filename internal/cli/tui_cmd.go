@@ -1,13 +1,16 @@
 package cli
 
 import (
+	"fmt"
 	"github.com/spf13/cobra"
 
 	"github.com/knu/tcrit/internal/config"
+	"github.com/knu/tcrit/internal/git"
 	"github.com/knu/tcrit/internal/review"
 )
 
 var tuiPlan string
+var tuiDiffSession string
 
 // tuiCmd is the internal command run in the multiplexer surface: it owns the
 // review session, serves the session socket, and stays across rounds.
@@ -24,7 +27,24 @@ var tuiCmd = &cobra.Command{
 
 		var mode *reviewMode
 		var sess *review.Session
-		if tuiPlan != "" {
+		if tuiDiffSession != "" {
+			if !review.ValidSessionKey(tuiDiffSession) {
+				return fmt.Errorf("invalid diff session ID %q", tuiDiffSession)
+			}
+			entry, err := review.ReadSessionEntry(tuiDiffSession)
+			if err != nil {
+				return err
+			}
+			sess, err = review.OpenSessionFromEntry(*entry)
+			if err != nil {
+				return err
+			}
+			patch, err := git.LoadPatch(sess.DiffPath())
+			if err != nil {
+				return err
+			}
+			mode = &reviewMode{patch: patch, files: patch.Changes(), diffSession: sess.Key}
+		} else if tuiPlan != "" {
 			sess, err = review.OpenPlanSession(tuiPlan)
 			if err != nil {
 				return err
@@ -53,4 +73,5 @@ func init() {
 	tuiCmd.Flags().StringVar(&reviewBase, "base", "", "base ref to diff against in code mode")
 	tuiCmd.Flags().BoolVar(&reviewStaged, "staged", false, "review only changes staged in the index")
 	tuiCmd.Flags().StringVar(&tuiPlan, "plan", "", "plan slug to review")
+	tuiCmd.Flags().StringVar(&tuiDiffSession, "diff-session", "", "saved diff session to review")
 }

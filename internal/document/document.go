@@ -12,6 +12,11 @@ type Document struct {
 	Content string
 	Lines   []string
 	Hash    string
+	Known   map[int]bool // nil for complete documents
+}
+
+func (d *Document) HasLine(n int) bool {
+	return n >= 1 && n <= len(d.Lines) && (d.Known == nil || d.Known[n])
 }
 
 func Load(path string) (*Document, error) {

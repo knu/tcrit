@@ -57,7 +57,9 @@ type AppConfig struct {
 	Session *review.Session
 	Author  string
 	// Staged reads code-review files and diffs from the Git index.
-	Staged bool
+	Staged    bool
+	Patch     *gitpkg.Patch
+	PatchPath string
 	// Serving is true when an agent client may be blocked on this review;
 	// an unresolved finish then parks the TUI in a waiting state instead
 	// of quitting.
@@ -91,11 +93,13 @@ type AppModel struct {
 	author  string
 
 	// Finish-flow state (see AppConfig).
-	serving  bool
-	finishCh chan<- FinishEvent
-	waiting  bool
-	baseRef  string
-	staged   bool
+	serving   bool
+	finishCh  chan<- FinishEvent
+	waiting   bool
+	baseRef   string
+	staged    bool
+	patch     *gitpkg.Patch
+	patchPath string
 
 	detached bool
 
@@ -228,7 +232,11 @@ func NewCodeReviewApp(files []gitpkg.FileChange, ref string, cfg AppConfig) AppM
 	tabs := make([]FileTab, 0, len(sortedFiles))
 	for _, f := range sortedFiles {
 		var diff *gitpkg.DiffInfo
-		if f.Status != gitpkg.StatusBinary {
+		if cfg.Patch != nil {
+			if pf := cfg.Patch.File(f.Path); pf != nil {
+				diff = pf.Diff
+			}
+		} else if f.Status != gitpkg.StatusBinary {
 			diff, _ = codeDiff(f.Path, ref, cfg.Staged)
 		}
 		ft := newFileTab(f.Path, diff)
@@ -251,6 +259,8 @@ func NewCodeReviewApp(files []gitpkg.FileChange, ref string, cfg AppConfig) AppM
 		finishCh:        cfg.FinishCh,
 		baseRef:         ref,
 		staged:          cfg.Staged,
+		patch:           cfg.Patch,
+		patchPath:       cfg.PatchPath,
 		detached:        os.Getenv("TCRIT_DETACHED") == "1",
 		contentViewport: viewport.New(),
 		commentViewport: viewport.New(),
@@ -277,6 +287,14 @@ func (m AppModel) loadDocuments() tea.Cmd {
 }
 
 func (m AppModel) loadDocument(path string) (*document.Document, error) {
+	if m.patch != nil {
+		if f := m.patch.File(path); f != nil {
+			doc := document.FromContent(path, []byte(f.Content))
+			doc.Known = f.Known
+			return doc, nil
+		}
+		return nil, fmt.Errorf("file absent from diff: %s", path)
+	}
 	if !m.staged {
 		return document.Load(path)
 	}
@@ -330,7 +348,9 @@ func (m *AppModel) visualLines(t *FileTab) []lineRef {
 		for _, del := range t.deletedAfter[line-1] {
 			lines = append(lines, lineRef{side: "old", line: del.OldLineNum})
 		}
-		lines = append(lines, lineRef{line: line})
+		if t.doc.HasLine(line) {
+			lines = append(lines, lineRef{line: line})
+		}
 	}
 	for _, del := range t.deletedAfter[t.doc.LineCount()] {
 		lines = append(lines, lineRef{side: "old", line: del.OldLineNum})
@@ -411,6 +431,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			doc, _ := m.loadDocument(t.path)
 			t.doc = doc
 			t.ensureHighlightCache()
+			if m.patch != nil {
+				if lines := m.visualLines(t); len(lines) > 0 {
+					t.cursorLine, t.cursorSide = lines[0].line, lines[0].side
+				}
+			}
 		}
 
 		m.recalculateLayout()
@@ -843,6 +868,9 @@ func (m *AppModel) openSelectedCommentDelete() {
 }
 
 func (m *AppModel) openLineComment() {
+	if m.patch != nil && len(m.visualLines(m.tab())) == 0 {
+		return
+	}
 	if m.tab().state == nil {
 		return
 	}
@@ -1185,6 +1213,9 @@ func (m *AppModel) anchorText(t *FileTab, side string, start, end int) string {
 		return strings.Join(lines, "\n")
 	}
 	for l := start; l <= end && l <= t.doc.LineCount(); l++ {
+		if !t.doc.HasLine(l) {
+			return ""
+		}
 		lines = append(lines, t.doc.LineAt(l))
 	}
 	return strings.Join(lines, "\n")
@@ -1238,8 +1269,18 @@ func (m *AppModel) suggestionRange() (int, int, bool) {
 }
 
 func (m *AppModel) canSuggest() bool {
-	_, _, ok := m.suggestionRange()
-	return ok
+	start, end, ok := m.suggestionRange()
+	if !ok {
+		return false
+	}
+	if doc := m.tab().doc; doc != nil && doc.Known != nil {
+		for line := start; line <= end; line++ {
+			if !doc.HasLine(line) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (m *AppModel) modalDeleteStartFocus() int {
@@ -1366,6 +1407,15 @@ func (m *AppModel) doFinish() (tea.Model, tea.Cmd) {
 // carries comments forward onto the agent's edits with drift correction,
 // advances the round counter, and refreshes documents and diffs.
 func (m *AppModel) startNextRound() {
+	var nextPatch *gitpkg.Patch
+	if m.patch != nil {
+		var err error
+		nextPatch, err = gitpkg.LoadPatch(m.patchPath)
+		if err != nil {
+			m.err = err
+			return
+		}
+	}
 	// Capture the content the current comments were authored against
 	// before reloading, then reload the session so agent-side replies and
 	// resolutions written to review.json are picked up.
@@ -1380,7 +1430,11 @@ func (m *AppModel) startNextRound() {
 			m.session.CJ = fresh.CJ
 		}
 	}
-	if m.multiFile && m.baseRef != "" {
+	prevPatch := m.patch
+	if nextPatch != nil {
+		m.patch = nextPatch
+		m.syncCodeReviewTabs(nextPatch.Changes())
+	} else if m.multiFile && m.baseRef != "" {
 		var files []gitpkg.FileChange
 		var err error
 		if m.staged {
@@ -1410,15 +1464,40 @@ func (m *AppModel) startNextRound() {
 		t.chromaLines = nil
 		t.deletedLineCache = nil
 		if prev, ok := prevContents[t.path]; ok && t.doc != nil && !t.isDeleted {
-			comments = review.CarryForwardFile(comments, prev, t.doc.Content, now)
+			partial := t.doc.Known != nil
+			if prevPatch != nil {
+				if f := prevPatch.File(t.path); f != nil && f.Known != nil {
+					partial = true
+				}
+			}
+			if partial {
+				comments = review.CarryForwardPartial(comments, prev != t.doc.Content, now)
+			} else {
+				comments = review.CarryForwardFile(comments, prev, t.doc.Content, now)
+			}
+		}
+		if prevPatch != nil && prevPatch.Raw != m.patch.Raw {
+			for i := range comments {
+				if comments[i].Side == "old" {
+					comments[i].Drifted = true
+				}
+			}
 		}
 		t.state = &fileReview{Comments: comments}
-		if m.multiFile && m.baseRef != "" {
+		if m.multiFile && (m.baseRef != "" || m.patch != nil) {
 			t.changedLines = nil
 			t.inlineChanges = nil
 			t.deletedAfter = nil
 			t.changeChunks = nil
-			if diff, err := codeDiff(t.path, m.baseRef, m.staged); err == nil && diff != nil {
+			var diff *gitpkg.DiffInfo
+			if m.patch != nil {
+				if f := m.patch.File(t.path); f != nil {
+					diff = f.Diff
+				}
+			} else {
+				diff, _ = codeDiff(t.path, m.baseRef, m.staged)
+			}
+			if diff != nil {
 				t.changedLines = diff.ChangedLines
 				t.inlineChanges = diff.InlineChanges
 				t.deletedAfter = diff.DeletedAfter
@@ -1426,6 +1505,19 @@ func (m *AppModel) startNextRound() {
 			}
 		}
 		t.ensureHighlightCache()
+		if m.patch != nil {
+			lines := m.visualLines(t)
+			valid := false
+			for _, line := range lines {
+				if line.line == t.cursorLine && line.side == t.cursorSide {
+					valid = true
+					break
+				}
+			}
+			if !valid && len(lines) > 0 {
+				t.cursorLine, t.cursorSide = lines[0].line, lines[0].side
+			}
+		}
 	}
 
 	// Advance the round only after carry-forward, mirroring crit's ordering.
@@ -1976,11 +2068,19 @@ func (m *AppModel) selectChange(tabIndex int, chunk changeChunk) {
 	m.activeTab = tabIndex
 	t := m.tab()
 	t.cursorLine, t.cursorSide = chunk.startLine, ""
+	if m.patch != nil && t.doc != nil && !t.doc.HasLine(chunk.startLine) {
+		if dels := t.deletedAfter[chunk.startLine-1]; len(dels) > 0 {
+			t.cursorLine, t.cursorSide = dels[0].OldLineNum, "old"
+		}
+	}
 	t.cursorOnAnnotation = false
 	t.cursorAnnoIdx = 0
 	m.rebuildContent()
 	m.updateCommentSidebar()
 	m.scrollToChunk(chunk)
+	if t.cursorSide == "old" {
+		m.scrollToCursor()
+	}
 }
 
 // sidebarItem represents a comment in the sidebar list.
@@ -2175,6 +2275,12 @@ func (m *AppModel) rebuildContent() {
 
 		// Render deleted lines that appear before this line
 		renderDeleted(lineNum - 1)
+		if !t.doc.HasLine(lineNum) {
+			if lineNum == 1 || t.doc.HasLine(lineNum-1) {
+				layout.appendBlock(&b, "       ⋯ context not included in diff", contentMouseTarget{})
+			}
+			continue
+		}
 
 		isCursor := t.cursorSide == "" && lineNum == t.cursorLine
 		isSelected := t.selecting && selSide == "" && lineNum >= selStart && lineNum <= selEnd
@@ -2287,6 +2393,9 @@ func (m *AppModel) rebuildContent() {
 		}
 	}
 	renderDeleted(t.doc.LineCount())
+	if t.doc.Known != nil {
+		layout.appendBlock(&b, "       ⋯ remaining context not included in diff", contentMouseTarget{})
+	}
 
 	m.contentLayout = layout
 	m.contentViewport.SetContent(b.String())
@@ -2880,6 +2989,9 @@ func truncateLeftToWidth(s string, width int) string {
 func (m AppModel) reviewScopeLabel() string {
 	if !m.multiFile {
 		return ""
+	}
+	if m.patch != nil {
+		return "Supplied diff"
 	}
 	if m.staged {
 		return "Staged"

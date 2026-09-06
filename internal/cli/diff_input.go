@@ -1,0 +1,41 @@
+package cli
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/spf13/cobra"
+	"golang.org/x/term"
+
+	"github.com/knu/tcrit/internal/git"
+)
+
+func addDiffFlag(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&reviewDiff, "diff", "", "read a Git unified diff from FILE or stdin (-)")
+	cmd.Flags().Lookup("diff").NoOptDefVal = "-"
+	cmd.PreRunE = func(cmd *cobra.Command, args []string) error {
+		if cmd.Flags().Changed("diff") && reviewDiff == "" {
+			return fmt.Errorf("--diff requires a file path or -")
+		}
+		return nil
+	}
+}
+
+func readDiff(path string) (*git.Patch, error) {
+	if path == "-" {
+		if term.IsTerminal(int(os.Stdin.Fd())) {
+			return nil, fmt.Errorf("--diff requires a unified diff on stdin")
+		}
+		return git.ParsePatch(os.Stdin)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	patch, parseErr := git.ParsePatch(f)
+	closeErr := f.Close()
+	if parseErr != nil {
+		return nil, parseErr
+	}
+	return patch, closeErr
+}
