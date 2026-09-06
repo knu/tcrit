@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.8.0
+
+### Added
+
+- **Supplied diff reviews** — `tcrit --diff[=FILE]` accepts Git unified diffs from a file or stdin, including outside a repository; snapshots survive Herdr/tmux launches and can be replaced for another review round
+- **Fixed review scopes** — `--scope=all|staged|unstaged|A..B|A...B` keeps each comparison and its comments in a separate session; `--staged` and `--unstaged` are aliases, and committed comparisons display the right-hand commit's content
+- **Native input cursor** — comment and reply editors expose the real terminal cursor so IME composition follows the insertion point after wrapping and scrolling
+- **Resolved-thread display toggle** — `h` folds or unfolds resolved comments across all files, including their visibility in the sidebar
+
+### Changed
+
+- **Author-based comment colors** — comments and replies share a color per author, with your own messages in white
+- Unfocused threads show only the latest message; focused histories use at most 10 wrapped rows, and reply dialogs use up to 16, with older or longer content accessible by scrolling
+- The mouse wheel focuses and scrolls comment threads; resolved threads expand on focus and fold again on blur unless folding is disabled
+- `[` / `]` skip resolved comments; vertical movement still visits them, while visual range selection skips comment boxes
+- Suggest selects the inserted code for immediate deletion or replacement while preserving the fences and existing comment
+- Gemini installs the same shared `tcrit` and `tcrit-cli` skills as the other integrations, with review rounds handled by the original agent
+
+### Breaking changes
+
+- Git review defaults to `--scope=all` (staged, unstaged, and untracked changes).  To review against a branch, specify a comparison such as `--scope=main...HEAD`
+- Removed `--base`, `--base-branch`, the `base_branch` setting, and automatic base-branch fallback; use `--scope` instead
+- Existing installations of the old Gemini subagent may retain `.gemini/agents/tcrit.md`; check for customizations before removing it and reinstall the shared skills with `tcrit install gemini`
+
 ## 0.7.3
 
 ### Added
