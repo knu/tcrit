@@ -277,7 +277,7 @@ Tcrit resolves the Herdr workspace, tab, and pane or the tmux server and pane fr
 | `s`                                   | Toggle comment sidebar                   |
 | `[` / `]`                             | Jump to prev / next comment; skip resolved comments unless unfolded with `h` |
 | `h`                                   | Toggle folding resolved comments across all files |
-| `r`                                   | Resolve / unresolve the focused comment  |
+| `r`                                   | Resolve / unresolve the focused comment; resolving jumps to the next unresolved thread, or returns focus to the source if none remain |
 | `d`                                   | Delete the selected comment after confirmation |
 | `ctrl+PgUp` / `ctrl+PgDn`               | Scroll the selected inline or sidebar thread |
 | `?`                                   | Show all keyboard shortcuts              |

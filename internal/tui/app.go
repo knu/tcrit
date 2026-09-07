@@ -1180,6 +1180,8 @@ func (m *AppModel) toggleResolve(id string) {
 	if m.session != nil {
 		round = m.session.CJ.ReviewRound
 	}
+	nextTab, next, hasNext := m.adjacentComment(1, false)
+	resolved := false
 	for i := range t.state.Comments {
 		if t.state.Comments[i].ID != id {
 			continue
@@ -1191,13 +1193,24 @@ func (m *AppModel) toggleResolve(id string) {
 		} else {
 			c.Resolved = true
 			c.ResolvedRound = round
+			resolved = true
+			m.focused = contentPane
+			t.cursorOnAnnotation = false
+			t.cursorAnnoIdx = 0
 		}
 		c.UpdatedAt = review.Now()
 		break
 	}
 	m.persist()
+	if resolved && hasNext && (nextTab != m.activeTab || next.id != id) {
+		m.selectComment(nextTab, next)
+		return
+	}
 	m.rebuildContent()
 	m.updateCommentSidebar()
+	if m.focused == contentPane && !t.cursorOnAnnotation {
+		m.scrollToCursor()
+	}
 }
 
 // resolveAll marks every comment thread resolved in the current round.
@@ -2040,32 +2053,37 @@ func (m *AppModel) currentCommentTarget(targets []commentTarget) int {
 // jumpToComment moves to the adjacent comment in tab, line, and annotation
 // order, wrapping across the entire review and skipping folded resolved comments.
 func (m *AppModel) jumpToComment(step int) bool {
+	tabIndex, target, ok := m.adjacentComment(step, m.showResolved)
+	if ok {
+		m.selectComment(tabIndex, target)
+	}
+	return ok
+}
+
+func (m *AppModel) adjacentComment(step int, includeResolved bool) (int, commentTarget, bool) {
 	t := m.tab()
 	targets := m.commentTargets(m.activeTab)
 	current := m.currentCommentTarget(targets)
 
 	if current >= 0 {
 		for adjacent := current + step; adjacent >= 0 && adjacent < len(targets); adjacent += step {
-			if targets[adjacent].resolved && !m.showResolved {
+			if targets[adjacent].resolved && !includeResolved {
 				continue
 			}
-			m.selectComment(m.activeTab, targets[adjacent])
-			return true
+			return m.activeTab, targets[adjacent], true
 		}
 	} else {
 		cursor := m.visualLineIndex(t, lineRef{side: t.cursorSide, line: t.cursorLine})
 		if step > 0 {
 			for _, target := range targets {
-				if (m.showResolved || !target.resolved) && m.targetPosition(t, target) >= cursor {
-					m.selectComment(m.activeTab, target)
-					return true
+				if (includeResolved || !target.resolved) && m.targetPosition(t, target) >= cursor {
+					return m.activeTab, target, true
 				}
 			}
 		} else {
 			for i := len(targets) - 1; i >= 0; i-- {
-				if (m.showResolved || !targets[i].resolved) && m.targetPosition(t, targets[i]) <= cursor {
-					m.selectComment(m.activeTab, targets[i])
-					return true
+				if (includeResolved || !targets[i].resolved) && m.targetPosition(t, targets[i]) <= cursor {
+					return m.activeTab, targets[i], true
 				}
 			}
 		}
@@ -2082,14 +2100,13 @@ func (m *AppModel) jumpToComment(step int) bool {
 			start = len(targets) - 1
 		}
 		for i := start; i >= 0 && i < len(targets); i += step {
-			if targets[i].resolved && !m.showResolved {
+			if targets[i].resolved && !includeResolved {
 				continue
 			}
-			m.selectComment(tabIndex, targets[i])
-			return true
+			return tabIndex, targets[i], true
 		}
 	}
-	return false
+	return 0, commentTarget{}, false
 }
 
 func (m *AppModel) selectComment(tabIndex int, target commentTarget) {

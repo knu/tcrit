@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -241,6 +242,90 @@ func TestResolvedThreadsExpandOnFocus(t *testing.T) {
 				app = pressKey(app, 's')
 				if got := view(); strings.Contains(got, "history") || strings.Contains(got, "latest reply") {
 					t.Fatalf("resolved thread did not collapse after losing focus: %q", got)
+				}
+			})
+		}
+	}
+}
+
+func TestResolveThreadAdvancesToUnresolved(t *testing.T) {
+	for _, expanded := range []bool{false, true} {
+		for _, sidebar := range []bool{false, true} {
+			t.Run(fmt.Sprintf("expanded=%t/sidebar=%t", expanded, sidebar), func(t *testing.T) {
+				app := newCommentNavigationTestApp()
+				app.showResolved = expanded
+				app.tabs[0].state.Comments[2].Resolved = true
+				app.tabs[2].state.Comments[1].Resolved = true
+				app.tabs[0].state.Comments = append(app.tabs[0].state.Comments,
+					review.Comment{ID: "first-file", Scope: "file"})
+				app.tabs[2].state.Comments = append(app.tabs[2].state.Comments,
+					review.Comment{ID: "last-file-a", Scope: "file"},
+					review.Comment{ID: "last-file-b", Scope: "file"})
+				app.selectComment(0, app.commentTargets(0)[1])
+				if sidebar {
+					app.focused = commentPane
+					app.tab().sidebarCursor = 1
+					app.updateCommentSidebar()
+				}
+				for _, want := range []string{"first-b", "last-file-a", "last-file-b", "last-a", "first-file", ""} {
+					app = pressKey(app, 'r')
+					targets := app.commentTargets(app.activeTab)
+					current := app.currentCommentTarget(targets)
+					if want == "" {
+						if current >= 0 || app.focused != contentPane || app.unresolvedTotal() != 0 {
+							t.Fatal("final resolution did not release focus with all threads resolved")
+						}
+					} else if current < 0 || targets[current].id != want || targets[current].resolved {
+						t.Fatalf("selected target %d in %+v, want unresolved %s", current, targets, want)
+					}
+					if app.showResolved != expanded {
+						t.Fatal("resolving changed the global folding preference")
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestResolveThreadReleasesFocus(t *testing.T) {
+	for _, surface := range []string{"inline", "sidebar-line", "sidebar-file"} {
+		for _, expanded := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/expanded=%t", surface, expanded), func(t *testing.T) {
+				app := setupAppWithDoc(t, "source\n")
+				app.width, app.height = 120, 40
+				app.recalculateLayout()
+				comment := review.Comment{ID: "thread", StartLine: 1, EndLine: 1, Body: "thread body"}
+				if surface == "sidebar-file" {
+					comment.Scope = "file"
+				}
+				app.tab().state.Comments = []review.Comment{comment}
+				app.tab().cursorLine = 1
+				app.tab().cursorOnAnnotation = true
+				app.showResolved = expanded
+				app.focused = contentPane
+				if surface != "inline" {
+					app.focused = commentPane
+				}
+				app.rebuildContent()
+				app.updateCommentSidebar()
+
+				app = pressKey(app, 'r')
+
+				if !app.tab().state.Comments[0].Resolved {
+					t.Fatal("r did not resolve the thread")
+				}
+				if app.focused != contentPane || app.tab().cursorOnAnnotation {
+					t.Fatal("resolved thread retained focus")
+				}
+				if app.showResolved != expanded {
+					t.Fatal("resolving changed the global folding preference")
+				}
+				view := app.contentViewport.View()
+				if surface == "sidebar-file" {
+					view = app.commentViewport.View()
+				}
+				if strings.Contains(ansi.Strip(view), comment.Body) != expanded {
+					t.Fatalf("resolved thread did not follow the folding preference: %q", view)
 				}
 			})
 		}
