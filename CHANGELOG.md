@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.2
+
+### Changed
+
+- Resolving a thread with `r` now moves focus to the next unresolved thread, wrapping across files and skipping resolved threads even when unfolded with `h`.  When none remain, focus returns to the source.  Reopening a thread keeps its focus.
+
 ## 0.8.1
 
 ### Fixed
