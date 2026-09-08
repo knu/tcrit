@@ -32,8 +32,6 @@ review round.`,
 }
 
 func runPlan(args []string) error {
-	review.WarnLegacyState()
-
 	cfg, err := config.LoadCurrent()
 	if err != nil {
 		return err

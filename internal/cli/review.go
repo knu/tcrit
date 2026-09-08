@@ -126,8 +126,6 @@ func (m *reviewMode) persistedCLIArgs() []string {
 }
 
 func runReview(args []string) error {
-	review.WarnLegacyState()
-
 	cfg, err := config.LoadCurrent()
 	if err != nil {
 		return err
