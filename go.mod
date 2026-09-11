@@ -1,6 +1,6 @@
 module github.com/knu/tcrit
 
-go 1.25.0
+go 1.26.0
 
 require (
 	charm.land/bubbles/v2 v2.2.1
@@ -10,11 +10,11 @@ require (
 	github.com/aymanbagabas/go-udiff v0.4.1
 	github.com/bluekeyes/go-gitdiff v0.9.0
 	github.com/charmbracelet/x/ansi v0.11.8
-	github.com/gofrs/flock v0.13.0
+	github.com/gofrs/flock v0.13.1
 	github.com/mattn/go-shellwords v1.0.14
 	github.com/spf13/cobra v1.10.2
 	github.com/tklauser/ps v0.0.4
-	golang.org/x/term v0.45.0
+	golang.org/x/term v0.46.0
 )
 
 require (
@@ -35,5 +35,5 @@ require (
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
 )
