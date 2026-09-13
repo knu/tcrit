@@ -49,7 +49,7 @@ func TestRangeReviewUsesCommittedContentAcrossRounds(t *testing.T) {
 		if app.tab().doc.Content != "committed\n" || app.reviewScopeLabel() != "Range: HEAD~1..HEAD" {
 			t.Fatal("range source changed")
 		}
-		app.startNextRound()
+		app = restartRound(t, app)
 	}
 }
 

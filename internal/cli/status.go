@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/knu/tcrit/internal/config"
+	"github.com/knu/tcrit/internal/ipc"
 	"github.com/knu/tcrit/internal/review"
 )
 
@@ -34,12 +35,12 @@ var statusCmd = &cobra.Command{
 		}
 
 		if len(args) == 0 {
-			return fmt.Errorf("file argument required (use --code for aggregate code review status)")
+			return listReviewSessions()
 		}
 
 		filePath := args[0]
 
-		sess, err := review.OpenDocSession(cfg.Output, filePath)
+		sess, err := review.ResolveDocument(cfg.Output, filePath)
 		if err != nil {
 			return fmt.Errorf("loading review state: %w", err)
 		}
@@ -72,4 +73,26 @@ func printJSON(v any) error {
 func init() {
 	rootCmd.AddCommand(statusCmd)
 	statusCmd.Flags().BoolVar(&statusCode, "code", false, "show aggregate status for the code review session")
+}
+
+func listReviewSessions() error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	entries, err := review.ListSessionEntries()
+	if err != nil {
+		return err
+	}
+	type savedSession struct {
+		review.SessionEntry
+		Running bool `json:"running"`
+	}
+	result := []savedSession{}
+	for _, entry := range entries {
+		if entry.CWD == cwd {
+			result = append(result, savedSession{entry, ipc.Alive(review.SocketPathFor(entry.Key))})
+		}
+	}
+	return printJSON(result)
 }

@@ -1,67 +1,25 @@
 package cli
 
 import (
-	"fmt"
-	"github.com/spf13/cobra"
-
 	"github.com/knu/tcrit/internal/config"
-	"github.com/knu/tcrit/internal/git"
-	"github.com/knu/tcrit/internal/review"
+	"github.com/spf13/cobra"
 )
 
-var tuiPlan string
-var tuiDiffSession string
+var tuiSession string
 
-// tuiCmd is the internal command run in the multiplexer surface: it owns the
-// review session, serves the session socket, and stays across rounds.
 var tuiCmd = &cobra.Command{
-	Use:    "_tui [file]",
-	Short:  "Run the internal review TUI server",
+	Use:    "_tui --session <id>",
+	Short:  "Run one internal review round",
 	Hidden: true,
-	Args:   cobra.MaximumNArgs(1),
+	Args:   cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.LoadCurrent()
 		if err != nil {
 			return err
 		}
-
-		var mode *reviewMode
-		var sess *review.Session
-		if tuiDiffSession != "" {
-			if !review.ValidSessionKey(tuiDiffSession) {
-				return fmt.Errorf("invalid diff session ID %q", tuiDiffSession)
-			}
-			entry, err := review.ReadSessionEntry(tuiDiffSession)
-			if err != nil {
-				return err
-			}
-			sess, err = review.OpenSessionFromEntry(*entry)
-			if err != nil {
-				return err
-			}
-			patch, err := git.LoadPatch(sess.DiffPath())
-			if err != nil {
-				return err
-			}
-			mode = &reviewMode{patch: patch, files: patch.Changes(), diffSession: sess.Key}
-		} else if tuiPlan != "" {
-			sess, err = review.OpenPlanSession(tuiPlan)
-			if err != nil {
-				return err
-			}
-			mode = &reviewMode{
-				docPath:  review.PlanCurrentPath(tuiPlan),
-				planSlug: tuiPlan,
-			}
-		} else {
-			mode, err = resolveReviewMode(args)
-			if err != nil {
-				return err
-			}
-			sess, err = openReviewSession(cfg, mode)
-			if err != nil {
-				return err
-			}
+		sess, mode, err := loadReviewSession(tuiSession)
+		if err != nil {
+			return err
 		}
 		_, err = runTUISession(cfg, sess, mode, true)
 		return err
@@ -69,11 +27,6 @@ var tuiCmd = &cobra.Command{
 }
 
 func init() {
-	tuiCmd.PreRunE = validateScopeFlags
-	tuiCmd.Flags().StringVar(&reviewScope, "scope", "", "review scope")
 	rootCmd.AddCommand(tuiCmd)
-	tuiCmd.Flags().BoolVar(&reviewStaged, "staged", false, "review only changes staged in the index (alias for --scope=staged)")
-	tuiCmd.Flags().BoolVar(&reviewUnstaged, "unstaged", false, "review unstaged and untracked changes (alias for --scope=unstaged)")
-	tuiCmd.Flags().StringVar(&tuiPlan, "plan", "", "plan slug to review")
-	tuiCmd.Flags().StringVar(&tuiDiffSession, "diff-session", "", "saved diff session to review")
+	tuiCmd.Flags().StringVar(&tuiSession, "session", "", "saved review session")
 }

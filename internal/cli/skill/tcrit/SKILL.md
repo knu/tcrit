@@ -36,27 +36,17 @@ With no argument, review a plan file written earlier in this conversation with `
 
 For a supplied diff, use `tcrit --diff=changes.diff` or `tcrit --diff changes.diff`, or pipe the producer into `tcrit --diff` (`tcrit review --diff` is equivalent).  Relative and absolute paths are accepted; bare `--diff` and `-` as its input read stdin.  This works outside a Git repository.  Do not combine `--diff` with `--scope`, `--code`, `--staged`, or `--unstaged`.  Keep the producer command and working directory for later rounds: TCrit reviews a saved snapshot, not the current working-tree files.
 
-`--scope=staged` is equivalent to `--staged`; `--scope=unstaged` is equivalent to `--unstaged`.  Conflicting scope flags are rejected.  `--scope=A..B` compares two committed snapshots; `--scope=A...B` compares their merge base with B.  B can be omitted to mean HEAD (`--scope=main..` or `--scope=main...`).  `--scope` cannot be combined with a document or `--diff`.  It stays fixed for that session; different scopes have separate comment storage.  Use the session ID from the finish prompt on comment commands (`tcrit comments --session <id>` and `tcrit comment --session <id>`, including replies and bulk input).  Reconnecting with `--session <id>` retains the selected scope.  Committed comparisons read the right endpoint, which may differ from files on disk.  Without explicit flags, the scope is all; a clean working tree does not fall back to committed changes.
+`--scope=staged` is equivalent to `--staged`; `--scope=unstaged` is equivalent to `--unstaged`.  Conflicting scope flags are rejected.  `--scope=A..B` compares two committed snapshots; `--scope=A...B` compares their merge base with B.  B can be omitted to mean HEAD (`--scope=main..` or `--scope=main...`).  `--scope` cannot be combined with a document or `--diff`.  It stays fixed for that session; each new review has independent comment storage, even with identical scope arguments.  Use the session ID from the finish prompt on comment commands (`tcrit comments --session <id>` and `tcrit comment --session <id>`, including replies and bulk input).  Reconnecting with `--session <id>` retains the selected scope.  Committed comparisons read the right endpoint, which may differ from files on disk.  Without explicit flags, the scope is all; a clean working tree does not fall back to committed changes.
 
 ## Step 2: Launch the review and block
 
-Keep one live TCrit TUI per working directory.  For later rounds, reuse its session and comments; `approved: false` leaves the TUI waiting.
+Run the command from Step 1 and wait for it to finish.  Each new invocation creates an independent saved session.  Record the working directory, session ID printed at startup, and command-runner handle.  `tcrit status` lists saved sessions in the current directory.
 
-On cancellation or a task switch, follow `/tcrit-cli`'s "Stopping an abandoned review" before editing for the replacement task.  Use that procedure before every new review to check existing sessions and confirm the old TUI and review pane or tab have closed.  Cancellation is not approval.
+TCrit opens a Herdr tab or tmux pane and closes it at the end of each round, including rounds with unresolved comments.  Give the blocking command a long timeout (at least 10 minutes).  If the runner returns an execution handle, poll it until completion.  Wait for the reviewer to finish before editing.
 
-After that check, clear old state once for a fresh task.  Skip this reset when resuming a review or retaining saved reviews:
+When the user cancels or replaces the task, run `tcrit stop --session <id>` and collect the original command's result before continuing.  This preserves saved comments and round context; cancellation is not approval.  Use `tcrit --session <id>` to resume later from the original directory.  Keep earlier review data when starting a different task; `clear` is only for explicitly requested deletion.
 
-```bash
-tcrit clear --all
-```
-
-Then run the command from Step 1.  It blocks until the reviewer finishes, so give it a long timeout (at least 10 minutes).  TCrit finds the invoking Herdr or tmux context on its own, even when their environment variables were not inherited, and opens the TUI in a dedicated Herdr tab or a tmux split pane.
-
-If the command runner hands back an execution session instead of waiting, keep polling that execution session until the process exits.  A quick exit is a completed review; do not enforce a minimum wait or replace polling with a fixed sleep.
-
-Without a supported multiplexer, ask the user to run the same command in their own terminal and tell you when they are done, then read the comments with `tcrit comments --json` instead of the output described below.
-
-While the reviewer is reviewing, wait for the command to return before editing files.  A cancellation or task switch takes the stopping path above instead of starting another round.
+Without a supported multiplexer, ask the user to run the command in their terminal.  Record its session ID, then read that session's comments after they finish.
 
 ## Step 3: Read the result
 
@@ -69,7 +59,7 @@ Each comment carries `scope`, `path`, `start_line`, `end_line`, `body`, and `anc
 
 If you need the comments outside this flow, `tcrit comments --json` lists the unresolved ones.
 
-Supplied diffs have a separate session per working directory.  Use `--session <id>` on `tcrit comments` and `tcrit comment`, including replies and bulk input, to target that diff review.  Use the session ID from the finish prompt.
+Supplied diffs also receive a new session ID on each new invocation.  Use `--session <id>` on `tcrit comments` and `tcrit comment`, including replies and bulk input, to target that diff review.  Use the session ID from the finish prompt.
 
 ## Step 4: Address new feedback
 
@@ -83,7 +73,7 @@ For feedback that needs action:
 
 1. Locate the target from `path`, the line range, and `anchor`.
 2. Change the file as the `body` asks.  Apply a `suggestion` block verbatim when the comment contains one.
-3. Reply once with the change or answer, using the reply form shown in the finish prompt and the session ID.  Plan reviews use `--plan <slug>`:
+3. Reply once with the change or answer, using the reply form shown in the finish prompt and the session ID.  Plan reviews use the same `--session <id>` form:
 
 ```bash
 tcrit comment --session <session-id> --reply-to <id> --author 'Claude Code' '<what you did>'
@@ -101,14 +91,16 @@ The `/tcrit-cli` skill documents the JSON format and the other comment commands.
 
 ## Step 5: Start the next round
 
-Run the command printed at the end of the finish prompt, again with a long timeout.  For git changes and documents it is `tcrit --session <id>`, which reconnects to the waiting TUI and reloads your edits and replies.  For plans it is `tcrit plan --name <slug> <file>`, which saves the revised file as a new version.
+Run the command printed in the finish prompt from the original working directory.  `tcrit --session <id>` opens a new TUI from saved comments and round context; it retains the scope and refreshes code or document contents.  After an interrupted round it resumes that round; after a submitted round it advances to the next one.
 
-For a supplied diff, regenerate the diff with the same producer and feed it in again from the original working directory:
+For a revised plan, use `tcrit plan --session <id> <file>` (or pipe the plan to it) to save a new version.  Plain `tcrit --session <id>` opens the saved plan without replacing its content.
+
+For a revised supplied diff, regenerate the input with the original producer:
 
 ```bash
 git diff <base> <head> | tcrit --diff --session <id>
 ```
 
-For file input, update the diff file first, then run `tcrit --diff=changes.diff --session <id>`.  A bare `tcrit --session <id>` cannot refresh a supplied diff.  Omitting `--session` reuses the diff session for the current directory; keep the explicit ID when following an existing review.  Inspect comments marked `drifted` against their anchors when the supplied context is incomplete.
+For file input, update it first, then run `tcrit --diff=changes.diff --session <id>`.  Plain `tcrit --session <id>` opens the saved diff without replacing it.  Keep the explicit session ID; omitting it creates an independent review.  Inspect drifted comments against their anchors when the supplied context is incomplete.
 
-The command blocks until the reviewer finishes the next round.  Return to Step 3.  Stop when a round ends with `approved: true`.
+Wait for the command to finish, then return to Step 3.  Stop when the result is `approved: true`, or follow the stopping procedure when the user cancels or replaces the task.

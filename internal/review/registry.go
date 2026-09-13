@@ -14,6 +14,8 @@ import (
 // later (status, clear, comment) can find review folders belonging to a
 // working directory without re-deriving every possible key.
 type SessionEntry struct {
+	Mode       string   `json:"mode,omitempty"`
+	PlanSlug   string   `json:"plan_slug,omitempty"`
 	Key        string   `json:"key"`
 	CWD        string   `json:"cwd"`
 	Args       []string `json:"args,omitempty"`

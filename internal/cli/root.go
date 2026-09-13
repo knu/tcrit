@@ -20,7 +20,7 @@ var rootCmd = &cobra.Command{
 		"It provides an interactive TUI for humans and scriptable CLI commands for agents.\n\n" +
 		"Run `tcrit` to review the current git changes, `tcrit --staged` to review only the index, " +
 		"`tcrit <file>` to review a document, " +
-		"or `tcrit --session <id>` to reconnect to a running review and start the next round.",
+		"or `tcrit --session <id>` to resume a saved review.",
 	Args:         cobra.MaximumNArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -32,7 +32,7 @@ var rootCmd = &cobra.Command{
 				return fmt.Errorf("--session cannot be combined with --staged, --unstaged, or --scope")
 			}
 			if reviewDiff != "" {
-				return runReview(args)
+				return resumeDiff(rootSession, args)
 			}
 			return reconnectSession(rootSession)
 		}
@@ -40,34 +40,20 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-// reconnectSession starts the next review round against a running session.
+// reconnectSession restores a saved review in its original working directory.
 func reconnectSession(key string) error {
-	if !review.ValidSessionKey(key) {
-		return fmt.Errorf("invalid session ID %q", key)
-	}
 	cfg, err := config.LoadCurrent()
 	if err != nil {
 		return err
 	}
-	entry, err := review.ReadSessionEntry(key)
+	sess, mode, err := loadReviewSession(key)
 	if err != nil {
 		return err
 	}
-	sess, err := review.OpenSessionFromEntry(*entry)
-	if err != nil {
-		return err
+	if ipc.Alive(review.SocketPathFor(key)) {
+		return fmt.Errorf("review %s is already active", key)
 	}
-	if len(sess.CJ.CliArgs) == 1 && sess.CJ.CliArgs[0] == "--diff" {
-		return fmt.Errorf("diff reviews require updated input; run `tcrit --diff --session %s < updated.diff` from the original directory", key)
-	}
-	sock := review.SocketPathFor(key)
-	if !ipc.Alive(sock) {
-		return fmt.Errorf("review session %s is not running; start a new review with `tcrit`", key)
-	}
-	if multiplexer := findMultiplexerContext(); multiplexer != nil {
-		defer multiplexer.restoreFocus()
-	}
-	return runReviewCycle(cfg, sess, sock)
+	return runReviewFlow(cfg, sess, mode)
 }
 
 func Execute() int {
@@ -80,7 +66,7 @@ func Execute() int {
 func init() {
 	rootCmd.PreRunE = validateScopeFlags
 	rootCmd.Flags().StringVar(&reviewScope, "scope", "", "review scope: all (default), staged, unstaged, A..B, or A...B (omitted B means HEAD)")
-	rootCmd.Flags().StringVar(&rootSession, "session", "", "reconnect to a running review session by ID")
+	rootCmd.Flags().StringVar(&rootSession, "session", "", "resume a saved review session by ID")
 	rootCmd.Flags().BoolVar(&reviewStaged, "staged", false, "review only changes staged in the index (alias for --scope=staged)")
 	rootCmd.Flags().BoolVar(&reviewUnstaged, "unstaged", false, "review unstaged and untracked changes (alias for --scope=unstaged)")
 	addDiffFlag(rootCmd)

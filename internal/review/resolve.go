@@ -11,6 +11,58 @@ import (
 
 var sessionKeyRe = regexp.MustCompile(`^[0-9a-f]{12}$`)
 
+// FindSavedSession selects an unambiguous saved review in the current directory.
+func FindSavedSession(matches func(SessionEntry) bool) (*Session, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	entries, err := ListSessionEntries()
+	if err != nil {
+		return nil, err
+	}
+	var found *SessionEntry
+	for _, entry := range entries {
+		if entry.CWD != cwd || !matches(entry) {
+			continue
+		}
+		if found != nil {
+			return nil, fmt.Errorf("multiple saved reviews match; use --session <id>")
+		}
+		copy := entry
+		found = &copy
+	}
+	if found == nil {
+		return nil, nil
+	}
+	return OpenSessionFromEntry(*found)
+}
+
+func ResolvePlan(slug string) (*Session, error) {
+	sess, err := FindSavedSession(func(e SessionEntry) bool { return e.Mode == "plan" && e.PlanSlug == slug })
+	if err != nil || sess != nil {
+		return sess, err
+	}
+	return OpenPlanSession(slug)
+}
+
+func ResolveCode(dataRoot string) (*Session, error) {
+	sess, err := FindSavedSession(func(e SessionEntry) bool { return e.Mode == "git" })
+	if err != nil || sess != nil {
+		return sess, err
+	}
+	return OpenCodeSession(dataRoot)
+}
+
+func ResolveDocument(dataRoot, path string) (*Session, error) {
+	path = NormalizePath(path)
+	sess, err := FindSavedSession(func(e SessionEntry) bool { return e.Mode == "files" && len(e.Args) == 1 && e.Args[0] == path })
+	if err != nil || sess != nil {
+		return sess, err
+	}
+	return OpenDocSession(dataRoot, path)
+}
+
 // ValidSessionKey reports whether s looks like a session key.
 func ValidSessionKey(s string) bool {
 	return sessionKeyRe.MatchString(s)

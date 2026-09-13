@@ -88,7 +88,7 @@ func resolveCommentTarget(output string) (*review.Session, error) {
 		if commentSession != "" {
 			return nil, fmt.Errorf("--plan cannot be combined with --session")
 		}
-		return review.OpenPlanSession(review.Slugify(commentPlan))
+		return review.ResolvePlan(review.Slugify(commentPlan))
 	}
 	return review.ResolveTarget(output, commentSession)
 }
@@ -352,7 +352,7 @@ func runCommentClear(output string) error {
 	if err != nil {
 		return err
 	}
-	if err := sess.Clear(); err != nil {
+	if err := clearSavedReview(sess); err != nil {
 		return err
 	}
 	fmt.Println("Cleared review file")

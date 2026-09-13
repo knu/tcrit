@@ -157,15 +157,15 @@ func TestSplitWindowArgsWithoutSize(t *testing.T) {
 func captureSpawns(t *testing.T) *[][]string {
 	t.Helper()
 	var calls [][]string
-	origRun, origLook, origResolve := runCommand, lookPath, resolveExec
-	runCommand = func(cmd *exec.Cmd) error {
+	origRun, origOutput, origLook, origResolve := runCommand, commandOutput, lookPath, resolveExec
+	commandOutput = func(cmd *exec.Cmd) ([]byte, error) {
 		calls = append(calls, cmd.Args)
-		return nil
+		return []byte("%99\n"), nil
 	}
 	lookPath = func(string) (string, error) { return "/usr/bin/tmux", nil }
 	resolveExec = func() (string, error) { return "/usr/local/bin/tcrit", nil }
 	t.Cleanup(func() {
-		runCommand, lookPath, resolveExec = origRun, origLook, origResolve
+		runCommand, commandOutput, lookPath, resolveExec = origRun, origOutput, origLook, origResolve
 	})
 	return &calls
 }
@@ -173,8 +173,8 @@ func captureSpawns(t *testing.T) *[][]string {
 func TestSpawnTUIPaneCodeMode(t *testing.T) {
 	calls := captureSpawns(t)
 
-	mode := &reviewMode{ref: "HEAD"}
-	if err := spawnTUIPane(mode, tmuxContext{session: "/tmp/tmux/default,100,1", pane: "%42"}); err != nil {
+	mode := &reviewMode{ref: "HEAD", sessionKey: "0123456789ab"}
+	if _, err := spawnTUIPane(mode, tmuxContext{session: "/tmp/tmux/default,100,1", pane: "%42"}); err != nil {
 		t.Fatalf("spawnTUIPane: %v", err)
 	}
 
@@ -182,7 +182,7 @@ func TestSpawnTUIPaneCodeMode(t *testing.T) {
 		t.Fatalf("expected 1 tmux call, got %d", len(*calls))
 	}
 	cmd := (*calls)[0][len((*calls)[0])-1]
-	for _, want := range []string{"TCRIT_DETACHED=1", "_tui", "--scope=all"} {
+	for _, want := range []string{"TCRIT_DETACHED=1", "_tui", "--session"} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("pane command missing %q: %s", want, cmd)
 		}
@@ -195,11 +195,11 @@ func TestSpawnTUIPaneCodeMode(t *testing.T) {
 func TestBuildTUICommandStagedMode(t *testing.T) {
 	captureSpawns(t)
 
-	cmd, err := buildTUICommand(&reviewMode{ref: "HEAD", staged: true})
+	cmd, err := buildTUICommand(&reviewMode{ref: "HEAD", staged: true, sessionKey: "0123456789ab"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(cmd, "_tui --staged") {
+	if !strings.Contains(cmd, "_tui --session") {
 		t.Errorf("pane command missing staged scope: %s", cmd)
 	}
 	if strings.Contains(cmd, "--base") {
@@ -210,13 +210,13 @@ func TestBuildTUICommandStagedMode(t *testing.T) {
 func TestSpawnTUIPaneDocMode(t *testing.T) {
 	calls := captureSpawns(t)
 
-	mode := &reviewMode{docPath: "docs/it's plan.md"}
-	if err := spawnTUIPane(mode, tmuxContext{}); err != nil {
+	mode := &reviewMode{docPath: "docs/it's plan.md", sessionKey: "0123456789ab"}
+	if _, err := spawnTUIPane(mode, tmuxContext{}); err != nil {
 		t.Fatalf("spawnTUIPane: %v", err)
 	}
 
 	cmd := (*calls)[0][len((*calls)[0])-1]
-	if !strings.Contains(cmd, `it'\''s plan.md`) {
+	if !strings.Contains(cmd, "--session '0123456789ab'") {
 		t.Errorf("pane command should escape quotes: %s", cmd)
 	}
 	if strings.Contains(cmd, "--base") {
@@ -226,21 +226,21 @@ func TestSpawnTUIPaneDocMode(t *testing.T) {
 
 func TestSpawnTUIPaneRetriesWithoutPercentage(t *testing.T) {
 	var calls [][]string
-	origRun, origLook, origResolve := runCommand, lookPath, resolveExec
-	runCommand = func(cmd *exec.Cmd) error {
+	origRun, origOutput, origLook, origResolve := runCommand, commandOutput, lookPath, resolveExec
+	commandOutput = func(cmd *exec.Cmd) ([]byte, error) {
 		calls = append(calls, cmd.Args)
 		if len(calls) == 1 {
-			return fmt.Errorf("size unavailable")
+			return nil, fmt.Errorf("size unavailable")
 		}
-		return nil
+		return []byte("%99\n"), nil
 	}
 	lookPath = func(string) (string, error) { return "/usr/bin/tmux", nil }
 	resolveExec = func() (string, error) { return "/usr/local/bin/tcrit", nil }
 	t.Cleanup(func() {
-		runCommand, lookPath, resolveExec = origRun, origLook, origResolve
+		runCommand, commandOutput, lookPath, resolveExec = origRun, origOutput, origLook, origResolve
 	})
 
-	if err := spawnTUIPane(&reviewMode{ref: "HEAD"}, tmuxContext{}); err != nil {
+	if _, err := spawnTUIPane(&reviewMode{ref: "HEAD", sessionKey: "0123456789ab"}, tmuxContext{}); err != nil {
 		t.Fatalf("spawnTUIPane: %v", err)
 	}
 	if len(calls) != 2 {
@@ -373,7 +373,7 @@ func TestBuildFinishPayloadUnresolved(t *testing.T) {
 	})
 	cfg := &config.Config{}
 
-	payload := buildFinishPayload(cfg, sess, &reviewMode{ref: "HEAD"}, false)
+	payload := buildFinishPayload(cfg, sess, &reviewMode{ref: "HEAD", sessionKey: "0123456789ab"}, false)
 
 	if payload.Approved {
 		t.Error("expected unapproved payload")
@@ -437,15 +437,15 @@ func TestBuildFinishPayloadPlanMode(t *testing.T) {
 		{ID: "c_1", StartLine: 1, EndLine: 1, Body: "clarify"},
 	})
 	cfg := &config.Config{}
-	mode := &reviewMode{docPath: "current.md", planSlug: "my-plan"}
+	mode := &reviewMode{docPath: "current.md", planSlug: "my-plan", planFile: "docs/plan.md"}
 
 	payload := buildFinishPayload(cfg, sess, mode, false)
 
-	if want := "tcrit plan --name my-plan docs/plan.md"; payload.NextCommand != want {
+	if want := "tcrit plan --session " + sess.Key + " 'docs/plan.md'"; payload.NextCommand != want {
 		t.Errorf("NextCommand = %q, want %q", payload.NextCommand, want)
 	}
 	for _, want := range []string{
-		"tcrit comment --plan my-plan --reply-to <id>",
+		"tcrit comment --session " + sess.Key + " --reply-to <comment-id>",
 		payload.NextCommand,
 	} {
 		if !strings.Contains(payload.Prompt, want) {

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
@@ -74,8 +75,9 @@ type reviewMode struct {
 	staged      bool
 	planSlug    string // non-empty for plan mode
 	planFile    string // original plan path ("" when read from stdin)
+	planContent []byte // replacement plan input, saved after acquiring the run lock
 	patch       *git.Patch
-	diffSession string // persisted snapshot to open in the multiplexer
+	sessionKey  string // exact saved session opened by the TUI
 	source      *git.ReviewSource
 }
 
@@ -144,12 +146,28 @@ func runReview(args []string) error {
 	return runReviewFlow(cfg, sess, mode)
 }
 
-// runReviewFlow connects to a live session, opens the TUI in the caller's
-// terminal multiplexer, or runs it inline, then handles the finish result.
+// runReviewFlow opens one round in the caller's multiplexer or terminal.
 func runReviewFlow(cfg *config.Config, sess *review.Session, mode *reviewMode) error {
+	lock := flock.New(filepath.Join(sess.Dir, "run.lock"))
+	locked, err := lock.TryLock()
+	if err != nil {
+		return err
+	}
+	if !locked {
+		return fmt.Errorf("review %s is already active", sess.Key)
+	}
+	defer func() {
+		if err := lock.Unlock(); err != nil {
+			fmt.Fprintf(os.Stderr, "tcrit: releasing review lock: %v\n", err)
+		}
+	}()
+	fmt.Fprintf(os.Stderr, "Review session: %s\n", sess.Key)
 	sock := review.SocketPathFor(sess.Key)
 	if ipc.Alive(sock) {
-		return runReviewCycle(cfg, sess, sock)
+		return fmt.Errorf("review %s is already active; stop it before resuming", sess.Key)
+	}
+	if err := saveReviewMode(sess, mode); err != nil {
+		return err
 	}
 
 	if multiplexer := findMultiplexerContext(); multiplexer != nil {
@@ -158,6 +176,7 @@ func runReviewFlow(cfg *config.Config, sess *review.Session, mode *reviewMode) e
 			return err
 		}
 		defer launch.restoreFocus()
+		defer launch.close()
 		if err := ipc.WaitAlive(sock, 15*time.Second); err != nil {
 			launch.close()
 			return err
@@ -237,70 +256,50 @@ func resolveReviewMode(args []string) (*reviewMode, error) {
 }
 
 func openReviewSession(cfg *config.Config, mode *reviewMode) (*review.Session, error) {
-	if mode.patch != nil {
-		sess, err := review.OpenDiffSession(cfg.Output)
-		if err != nil {
-			return nil, err
-		}
-		if rootSession != "" {
-			if !review.ValidSessionKey(rootSession) {
-				return nil, fmt.Errorf("invalid session ID %q", rootSession)
-			}
-			entry, err := review.ReadSessionEntry(rootSession)
-			if err != nil {
-				return nil, err
-			}
-			if entry.CWD != sess.Meta.CWD || len(entry.Args) != 1 || entry.Args[0] != "--diff" {
-				return nil, fmt.Errorf("--diff requires a diff session in the current directory")
-			}
-			sess, err = review.OpenSessionFromEntry(*entry)
-			if err != nil {
-				return nil, err
-			}
-		}
-		if err := sess.SaveDiff(mode.patch); err != nil {
-			return nil, err
-		}
-		sess.CJ.BaseRef = ""
-		sess.CJ.CliArgs = mode.persistedCLIArgs()
-		for _, f := range mode.files {
-			sess.SetFileComments(f.Path, f.Status.String(), sess.FileComments(f.Path))
-		}
-		if err := sess.Save(); err != nil {
-			return nil, err
-		}
-		mode.diffSession = sess.Key
-		return sess, nil
-	}
-	if !mode.code() {
-		sess, err := review.OpenDocSession(cfg.Output, mode.docPath)
-		if err != nil {
-			return nil, fmt.Errorf("loading review state: %w", err)
-		}
-		return sess, nil
-	}
-
-	args := mode.persistedCLIArgs()
-	if mode.staged {
-		args = []string{"--scope", "staged"}
-	}
-	sess, err := review.OpenCodeSessionWithArgs(cfg.Output, args)
+	cwd, err := os.Getwd()
 	if err != nil {
-		return nil, fmt.Errorf("loading review state: %w", err)
+		return nil, err
 	}
-	sess.CJ.BaseRef = mode.ref
-	sess.CJ.CliArgs = mode.persistedCLIArgs()
-	// TCrit currently reviews working-tree ranges only.  In CritJSON,
-	// ActiveDiffScope and Comment.DiffScope are reserved for PR/range focus
-	// values ("layer" and "full_stack"), not all/staged/unstaged filtering.
-	sess.CJ.ActiveDiffScope = ""
-	for _, f := range mode.files {
-		sess.SetFileComments(f.Path, f.Status.String(), sess.FileComments(f.Path))
+	args := mode.persistedCLIArgs()
+	if !mode.code() {
+		args = []string{review.NormalizePath(mode.docPath)}
 	}
-	if err := sess.Save(); err != nil {
-		fmt.Fprintf(os.Stderr, "tcrit: warning: could not save session: %v\n", err)
+	branch, _ := git.CurrentBranch()
+	sess, err := review.NewSession(cfg.Output, review.SessionEntry{CWD: cwd, Branch: branch, Args: args, Mode: mode.internalMode()})
+	if err != nil {
+		return nil, err
+	}
+	if err := saveReviewMode(sess, mode); err != nil {
+		return nil, err
 	}
 	return sess, nil
+}
+
+func saveReviewMode(sess *review.Session, mode *reviewMode) error {
+	mode.sessionKey = sess.Key
+	if mode.planContent != nil {
+		if _, err := review.SavePlanVersionAt(filepath.Dir(mode.docPath), mode.planContent); err != nil {
+			return err
+		}
+		mode.planContent = nil
+	}
+	if mode.patch != nil {
+		if err := sess.SaveDiff(mode.patch); err != nil {
+			return err
+		}
+	}
+	return sess.Update(func(s *review.Session) error {
+		s.CJ.BaseRef = mode.ref
+		s.CJ.CliArgs = s.Meta.Args
+		s.CJ.Branch = s.Meta.Branch
+		if mode.plan() {
+			s.CJ.CliArgs = []string{"plan", "--name", mode.planSlug, mode.planFile}
+		}
+		for _, f := range mode.files {
+			s.SetFileComments(f.Path, f.Status.String(), s.FileComments(f.Path))
+		}
+		return nil
+	})
 }
 
 // runReviewCycle blocks on the session socket until the reviewer finishes,
@@ -341,27 +340,33 @@ func cleanupOnApprove(cfg *config.Config, sess *review.Session) {
 }
 
 // spawnTUIPane opens the TUI in a tmux split pane running `tcrit _tui`.
-func spawnTUIPane(mode *reviewMode, tmux tmuxContext) error {
+func spawnTUIPane(mode *reviewMode, tmux tmuxContext) (tmuxLaunch, error) {
 	tmuxBin, err := lookPath("tmux")
 	if err != nil {
-		return fmt.Errorf("tmux binary not found on PATH: %w", err)
+		return tmuxLaunch{}, err
 	}
 	tuiCmd, err := buildTUICommand(mode)
 	if err != nil {
-		return err
+		return tmuxLaunch{}, err
 	}
-
-	splitCmd := tmuxCommand(tmuxBin, tmux, splitWindowArgs(true, tuiCmd, tmux.pane)...)
-	if err := runCommand(splitCmd); err != nil {
-		// Retry without -p — percentage sizing fails when the parent pane
-		// size isn't available (e.g. invoked from an agent subprocess).
-		splitCmd = tmuxCommand(tmuxBin, tmux, splitWindowArgs(false, tuiCmd, tmux.pane)...)
-		if err := runCommand(splitCmd); err != nil {
-			return fmt.Errorf("failed to open tmux pane: %w", err)
+	var out []byte
+	for _, withSize := range []bool{true, false} {
+		args := splitWindowArgs(withSize, tuiCmd, tmux.pane)
+		args = append(args[:1], append([]string{"-P", "-F", "#{pane_id}"}, args[1:]...)...)
+		out, err = commandOutput(tmuxCommand(tmuxBin, tmux, args...))
+		if err == nil {
+			break
 		}
 	}
+	if err != nil {
+		return tmuxLaunch{}, fmt.Errorf("opening tmux pane: %w", err)
+	}
+	pane := strings.TrimSpace(string(out))
+	if !strings.HasPrefix(pane, "%") || strings.ContainsAny(pane, " \t\n") {
+		return tmuxLaunch{}, fmt.Errorf("tmux did not return a pane ID")
+	}
 	fmt.Fprintln(os.Stderr, "Opened review in tmux pane")
-	return nil
+	return tmuxLaunch{bin: tmuxBin, context: tmux, pane: pane}, nil
 }
 
 func buildTUICommand(mode *reviewMode) (string, error) {
@@ -379,32 +384,10 @@ func buildTUICommand(mode *reviewMode) (string, error) {
 		}
 	}
 
-	switch {
-	case mode.patch != nil:
-		return fmt.Sprintf("%s %s _tui --diff-session %s",
-			envPrefix, shellEscape(tcritBin), shellEscape(mode.diffSession)), nil
-	case mode.plan():
-		return fmt.Sprintf("%s %s _tui --plan %s",
-			envPrefix, shellEscape(tcritBin), shellEscape(mode.planSlug)), nil
-	case mode.code():
-		if mode.source != nil {
-			args := mode.persistedCLIArgs()
-			return fmt.Sprintf("%s %s _tui %s %s", envPrefix, shellEscape(tcritBin), args[0], shellEscape(args[1])), nil
-		}
-		if mode.staged {
-			return fmt.Sprintf("%s %s _tui --staged",
-				envPrefix, shellEscape(tcritBin)), nil
-		}
-		return fmt.Sprintf("%s %s _tui --scope=all",
-			envPrefix, shellEscape(tcritBin)), nil
-	default:
-		absPath, err := filepath.Abs(mode.docPath)
-		if err != nil {
-			return "", fmt.Errorf("resolving absolute path: %w", err)
-		}
-		return fmt.Sprintf("%s %s _tui %s",
-			envPrefix, shellEscape(tcritBin), shellEscape(absPath)), nil
+	if mode.sessionKey == "" {
+		return "", fmt.Errorf("missing review session ID")
 	}
+	return fmt.Sprintf("%s %s _tui --session %s", envPrefix, shellEscape(tcritBin), shellEscape(mode.sessionKey)), nil
 }
 
 // resolveExecutable returns the absolute path to the currently running binary.
@@ -418,7 +401,7 @@ func resolveExecutable() (string, error) {
 
 // splitWindowArgs builds the tmux split-window arguments, targeting the
 // invoking pane via TMUX_PANE and pinning the pane's working directory to
-// the caller's so both sides derive the same session key.
+// the caller's so the TUI resolves source paths in the original directory.
 func splitWindowArgs(withSize bool, tuiCmd, pane string) []string {
 	args := []string{"split-window", "-h"}
 	if pane != "" {
@@ -461,17 +444,18 @@ func (tmuxDetector) processContexts() map[int]reviewMultiplexerContext {
 }
 
 func (c tmuxContext) launchReview(mode *reviewMode) (reviewMultiplexerLaunch, error) {
-	if err := spawnTUIPane(mode, c); err != nil {
-		return nil, err
-	}
-	return tmuxLaunch{}, nil
+	return spawnTUIPane(mode, c)
 }
 
 func (tmuxContext) restoreFocus() {}
 
-type tmuxLaunch struct{}
+type tmuxLaunch struct {
+	bin     string
+	context tmuxContext
+	pane    string
+}
 
-func (tmuxLaunch) close()        {}
+func (l tmuxLaunch) close()      { _ = runCommand(tmuxCommand(l.bin, l.context, "kill-pane", "-t", l.pane)) }
 func (tmuxLaunch) restoreFocus() {}
 
 func (c tmuxContext) active() bool {

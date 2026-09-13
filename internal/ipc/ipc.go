@@ -67,7 +67,7 @@ func ReviewCycle(path string) (*FinishPayload, error) {
 	if err != nil {
 		return nil, fmt.Errorf("connecting to review session: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	if err := WriteMessage(conn, Request{Type: "review-cycle"}); err != nil {
 		return nil, fmt.Errorf("requesting review cycle: %w", err)
@@ -83,6 +83,29 @@ func ReviewCycle(path string) (*FinishPayload, error) {
 		return nil, fmt.Errorf("parsing finish payload: %w", err)
 	}
 	return &payload, nil
+}
+
+// Stop asks the TUI to exit without approving or deleting the review.
+func Stop(path string) error {
+	conn, err := net.DialTimeout("unix", path, time.Second)
+	if err != nil {
+		return fmt.Errorf("connecting to review: %w", err)
+	}
+	defer func() { _ = conn.Close() }()
+	if err := conn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		return err
+	}
+	if err := WriteMessage(conn, Request{Type: "stop"}); err != nil {
+		return err
+	}
+	var response FinishPayload
+	if err := json.NewDecoder(conn).Decode(&response); err != nil {
+		return fmt.Errorf("stopping review: %w", err)
+	}
+	if response.Type != "stopped" {
+		return fmt.Errorf("unexpected stop response %q", response.Type)
+	}
+	return nil
 }
 
 // WaitAlive polls until the socket accepts connections or the timeout

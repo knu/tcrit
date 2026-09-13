@@ -38,13 +38,9 @@ func resolveCodeScope() (*reviewMode, error) {
 	if scope == "" {
 		scope = "all"
 	}
-	source := git.ReviewSource{Scope: scope, Base: "HEAD"}
-	var err error
-	if scope != "all" && scope != "staged" && scope != "unstaged" {
-		source, err = git.ResolveRange(scope)
-		if err != nil {
-			return nil, err
-		}
+	source, err := resolveSource(scope)
+	if err != nil {
+		return nil, err
 	}
 	files, err := source.Files()
 	if err != nil {
@@ -53,5 +49,17 @@ func resolveCodeScope() (*reviewMode, error) {
 	if len(files) == 0 {
 		return nil, fmt.Errorf("no changes in the selected scope")
 	}
-	return &reviewMode{files: files, ref: source.Base, staged: source.Scope == "staged", source: &source}, nil
+	return &reviewMode{files: files, ref: source.Base, staged: source.Scope == "staged", source: source}, nil
+}
+
+func resolveSource(scope string) (*git.ReviewSource, error) {
+	source := git.ReviewSource{Scope: scope, Base: "HEAD"}
+	if scope != "all" && scope != "staged" && scope != "unstaged" {
+		resolved, err := git.ResolveRange(scope)
+		if err != nil {
+			return nil, err
+		}
+		source = resolved
+	}
+	return &source, nil
 }
