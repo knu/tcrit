@@ -8,6 +8,8 @@
 
 ## Key changes from upstream
 
+- **Read diffs without comment boxes** — press `H` to hide inline comments and replace the sidebar with a narrow gutter, giving the source more space.  A `💬` marks commented lines, including deleted lines; click a marker to open its thread.  Press `H` again to restore comments; the `h` setting for resolved comments is preserved.  Opening the sidebar with `s` or jumping to a file comment restores the sidebar.  Comment editors still show the full thread.
+
 - **[Crit](https://crit.md/)-compatible agent workflow** — review commands block until the reviewer finishes, print an agent-facing result, and support iterative rounds through `tcrit --session <id>`; each round refreshes the changed-file set so newly added files appear without restarting the TUI.
 - **Native Herdr and tmux workflows** — reviews open in a full-width Herdr tab or a tmux split; tcrit finds the invoking context from process ancestry even when tools such as Codex do not inherit multiplexer environment variables.
 - **CritJSON review state and CLI** — comments use [Crit](https://crit.md/)-compatible `review.json` data, with `tcrit comment` and `tcrit comments` for automation.
@@ -277,6 +279,7 @@ Tcrit resolves the Herdr workspace, tab, and pane or the tmux server and pane fr
 | `s`                                   | Toggle comment sidebar                   |
 | `[` / `]`                             | Jump to prev / next comment; skip resolved comments unless unfolded with `h` |
 | `h`                                   | Toggle folding resolved comments across all files |
+| `H`                                   | Hide/show comment boxes across all files; show line markers in a narrow right gutter |
 | `r`                                   | Resolve / unresolve the focused comment; resolving jumps to the next unresolved thread, or returns focus to the source if none remain |
 | `d`                                   | Delete the selected comment after confirmation |
 | `ctrl+PgUp` / `ctrl+PgDn`               | Scroll the selected inline or sidebar thread |

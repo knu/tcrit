@@ -95,6 +95,7 @@ type AppModel struct {
 	authorColors  map[string]int
 	threadScrolls map[threadViewKey]threadScroll
 	showResolved  bool
+	hideComments  bool
 
 	// Finish-flow state (see AppConfig).
 	serving   bool
@@ -579,12 +580,19 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.modal = helpModal
 		return m, nil
 
-	case key.Matches(msg, keys.FoldResolved):
+	case key.Matches(msg, keys.FoldResolved, keys.HideComments):
 		selectedID := ""
 		if t.sidebarCursor < len(t.sidebarItems) {
 			selectedID = t.sidebarItems[t.sidebarCursor].id
 		}
-		m.showResolved = !m.showResolved
+		if key.Matches(msg, keys.HideComments) {
+			m.hideComments = !m.hideComments
+			m.focused = contentPane
+			t.cursorOnAnnotation = false
+			m.recalculateLayout()
+		} else {
+			m.showResolved = !m.showResolved
+		}
 		m.updateCommentSidebar()
 		for i, item := range t.sidebarItems {
 			if item.id == selectedID {
@@ -603,6 +611,10 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, keys.Tab):
 		if !t.selecting {
+			if m.hideComments {
+				m.hideComments = false
+				m.recalculateLayout()
+			}
 			if m.focused == contentPane {
 				m.focused = commentPane
 			} else {
@@ -701,6 +713,9 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Content pane cursor movement (annotation-aware)
 	if m.focused == contentPane && t.doc != nil {
 		moved := false
+		if m.hideComments && key.Matches(msg, keys.Up, keys.Down) {
+			t.cursorOnAnnotation = false
+		}
 		switch {
 		case key.Matches(msg, keys.Down):
 			if t.cursorOnAnnotation {
@@ -716,7 +731,7 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				}
 			} else {
 				anns := m.annotationsAfterLine(t.cursorLine, t.cursorSide)
-				if len(anns) > 0 && !t.selecting {
+				if len(anns) > 0 && !t.selecting && !m.hideComments {
 					t.cursorOnAnnotation = true
 					t.cursorAnnoIdx = 0
 				} else if next, ok := m.adjacentLine(t, 1); ok && (!t.selecting || next.side == t.selectSide) {
@@ -735,7 +750,7 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			} else {
 				if prev, ok := m.adjacentLine(t, -1); ok && (!t.selecting || prev.side == t.selectSide) {
 					anns := m.annotationsAfterLine(prev.line, prev.side)
-					if len(anns) > 0 && !t.selecting {
+					if len(anns) > 0 && !t.selecting && !m.hideComments {
 						t.cursorLine, t.cursorSide = prev.line, prev.side
 						t.cursorOnAnnotation = true
 						t.cursorAnnoIdx = len(anns) - 1
@@ -1941,10 +1956,7 @@ func (m *AppModel) recalculateLayout() {
 	}
 	mainHeight := max(0, m.height-headerHeight-tabBarHeight-footerHeight-frameBorderHeight-tmuxPadding)
 
-	commentWidth := m.width / 4
-	if commentWidth < 20 {
-		commentWidth = 20
-	}
+	commentWidth := m.commentPanelWidth()
 	contentWidth := m.width - commentWidth - frameBorderWidth
 
 	m.contentViewport.SetWidth(contentWidth)
@@ -2027,6 +2039,10 @@ func (m *AppModel) commentTargets(tabIndex int) []commentTarget {
 // sit before the first line.
 func (m *AppModel) targetPosition(t *FileTab, target commentTarget) int {
 	if target.scope == "file" {
+		if m.hideComments {
+			m.hideComments = false
+			m.recalculateLayout()
+		}
 		return -1
 	}
 	return m.visualLineIndex(t, lineRef{side: target.side, line: target.line})
@@ -2383,6 +2399,9 @@ func (m *AppModel) rebuildContent() {
 				}
 			}
 			for idx, ann := range oldAnnosByEndLine[del.OldLineNum] {
+				if m.hideComments {
+					break
+				}
 				focused := m.focused == contentPane && t.cursorOnAnnotation && isCursor && t.cursorAnnoIdx == idx
 				layout.appendBlock(&b, m.renderAnnotationBox(ann, boxWidth, focused), contentMouseTarget{
 					line: del.OldLineNum, side: "old", annotation: true, annotationIndex: idx,
@@ -2506,6 +2525,9 @@ func (m *AppModel) rebuildContent() {
 		// Render inline annotations after this line
 		if anns, ok := annosByEndLine[lineNum]; ok {
 			for idx, ann := range anns {
+				if m.hideComments {
+					break
+				}
 				focused := m.focused == contentPane && t.cursorOnAnnotation && t.cursorSide == "" && t.cursorLine == lineNum && t.cursorAnnoIdx == idx
 				layout.appendBlock(&b, m.renderAnnotationBox(ann, boxWidth, focused), contentMouseTarget{
 					line: lineNum, annotation: true, annotationIndex: idx,
@@ -3003,6 +3025,10 @@ func (m *AppModel) updateCommentSidebar() {
 	if t.sidebarCursor < 0 {
 		t.sidebarCursor = 0
 	}
+	if m.hideComments {
+		m.commentViewport.SetContent("")
+		return
+	}
 
 	var b strings.Builder
 
@@ -3146,6 +3172,9 @@ func (m AppModel) renderHeader() string {
 	}
 
 	prefix := " TCrit: "
+	if m.hideComments {
+		prefix += "[Comments hidden: H] "
+	}
 	if scope := m.reviewScopeLabel(); scope != "" {
 		prefix += "[" + scope + "] "
 	}
@@ -3253,10 +3282,7 @@ func (m AppModel) renderReviewScreen() (string, renderedScreenLayout) {
 	}
 
 	// Content pane
-	commentWidth := m.width / 4
-	if commentWidth < 20 {
-		commentWidth = 20
-	}
+	commentWidth := m.commentPanelWidth()
 	contentWidth := m.width - commentWidth
 
 	panelHeight := m.contentViewport.Height()
@@ -3281,6 +3307,10 @@ func (m AppModel) renderReviewScreen() (string, renderedScreenLayout) {
 		Height(panelHeight).
 		PaddingLeft(1).
 		Render(commentHeader + "\n" + m.commentViewport.View())
+	if m.hideComments {
+		contentBox = lipgloss.NewStyle().Width(m.contentViewport.Width()).Height(panelHeight).Render(m.contentViewport.View())
+		commentBox = m.renderCommentGutter()
+	}
 
 	mainRow := lipgloss.JoinHorizontal(lipgloss.Top, contentBox, commentBox)
 
@@ -3534,6 +3564,12 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 
 	left, top, right, bottom = m.commentBounds()
 	if mouse.X >= left && mouse.X < right && mouse.Y >= top && mouse.Y < bottom {
+		if m.hideComments {
+			if id := m.gutterComment(mouse.Y - top + m.contentViewport.YOffset()); id != "" {
+				m.openCommentThread(id)
+			}
+			return m, nil
+		}
 		wasFocused := m.focused == commentPane
 		m.focused = commentPane
 		if mouse.Y > top {
@@ -3795,8 +3831,53 @@ func (m *AppModel) highlightedCommentLines() (int, int, string) {
 	return 0, 0, ""
 }
 
+func (m AppModel) commentPanelWidth() int {
+	if m.hideComments {
+		return 4
+	}
+	return max(m.width/4, 20)
+}
+
+func (m AppModel) gutterComment(row int) string {
+	if m.tab().state == nil || row < 0 || row >= len(m.contentLayout.rows) {
+		return ""
+	}
+	target := m.contentLayout.rows[row]
+	if target.line <= 0 {
+		return ""
+	}
+	if row+1 < len(m.contentLayout.rows) {
+		next := m.contentLayout.rows[row+1]
+		if next.line == target.line && next.side == target.side {
+			return ""
+		}
+	}
+	for _, c := range m.tab().state.Comments {
+		if c.Scope != "file" && c.Side == target.side && c.StartLine <= target.line && target.line <= c.EndLine {
+			return c.ID
+		}
+	}
+	return ""
+}
+
+func (m AppModel) renderCommentGutter() string {
+	rows := make([]string, m.contentViewport.Height())
+	for i := range rows {
+		marker := " "
+		if m.gutterComment(i+m.contentViewport.YOffset()) != "" {
+			marker = "💬"
+		}
+		rows[i] = lipgloss.NewStyle().Width(m.commentPanelWidth()).Align(lipgloss.Center).Render(marker)
+	}
+	return strings.Join(rows, "\n")
+}
+
 func (m *AppModel) commentBounds() (left, top, right, bottom int) {
-	commentWidth := max(m.width/4, 20)
+	if m.hideComments {
+		_, top, left, bottom = m.contentBounds()
+		return left, top, left + m.commentPanelWidth(), bottom
+	}
+	commentWidth := m.commentPanelWidth()
 	left = m.width - commentWidth
 	if m.multiFile {
 		left++
@@ -3881,7 +3962,7 @@ func (m *AppModel) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) 
 		return m, nil
 	}
 	left, top, right, bottom := m.commentBounds()
-	if mouse.X >= left && mouse.X < right && mouse.Y >= top && mouse.Y < bottom {
+	if !m.hideComments && mouse.X >= left && mouse.X < right && mouse.Y >= top && mouse.Y < bottom {
 		if i, ok := m.sidebarMouseTarget(mouse.Y - top - 1 + m.commentViewport.YOffset()); ok && mouse.Y > top {
 			m.focused = commentPane
 			m.tab().sidebarCursor = i
@@ -3899,7 +3980,7 @@ func (m *AppModel) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) 
 		return m, nil
 	}
 	left, top, right, bottom = m.contentBounds()
-	if mouse.X < left || mouse.X >= right || mouse.Y < top || mouse.Y >= bottom {
+	if mouse.X < left || (!m.hideComments && mouse.X >= right) || mouse.Y < top || mouse.Y >= bottom {
 		return m, nil
 	}
 	if target, ok := m.contentMouseTarget(mouse.Y - top + m.contentViewport.YOffset()); ok && target.annotation && mouse.X >= left+gutterWidth {
@@ -4102,7 +4183,7 @@ func (m AppModel) renderHelp(innerWidth int) string {
 		{keys: "v", desc: "select"},
 		{keys: "s", desc: "sidebar"},
 		{keys: "r", desc: "resolve"},
-		{keys: "h", desc: "fold resolved"},
+		{keys: "h/H", desc: "fold/hide"},
 		{keys: "d", desc: "delete comment"},
 		{keys: "q/ctrl+c", desc: "finish"},
 		{keys: "?", desc: "help"},

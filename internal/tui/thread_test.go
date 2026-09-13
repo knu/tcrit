@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	gitpkg "github.com/knu/tcrit/internal/git"
 	"github.com/knu/tcrit/internal/review"
 )
 
@@ -329,6 +330,140 @@ func TestResolveThreadReleasesFocus(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestToggleCommentVisibility(t *testing.T) {
+	for _, focus := range []pane{contentPane, commentPane} {
+		app := setupAppWithDoc(t, "source\n")
+		app.width, app.height = 120, 50
+		app.recalculateLayout()
+		app.tab().state.Comments = []review.Comment{
+			{ID: "line", StartLine: 1, EndLine: 1, Body: "line body"},
+			{ID: "file", Scope: "file", Body: "file body", Resolved: true},
+		}
+		app.showResolved = true
+		app.focused = focus
+		app.tab().cursorOnAnnotation = true
+		app.updateCommentSidebar()
+		for _, folded := range []bool{true, false} {
+			app = pressKey(app, 'H')
+			if app.hideComments != folded || !app.showResolved {
+				t.Fatal("folding changed the wrong preference")
+			}
+			screen, _ := app.renderReviewScreen()
+			for _, view := range []string{app.contentViewport.View(), screen} {
+				if strings.Contains(ansi.Strip(view), "body") == folded {
+					t.Fatalf("folded=%t: unexpected body visibility in %q", folded, ansi.Strip(view))
+				}
+			}
+			if strings.Contains(ansi.Strip(app.renderHeader()), "Comments hidden") != folded {
+				t.Fatal("header does not reflect folding mode")
+			}
+		}
+	}
+	app := newCommentNavigationTestApp()
+	app = pressKey(app, 'H')
+	app = pressKey(app, '3')
+	if app.activeTab != 2 || !app.hideComments {
+		t.Fatal("folding mode did not survive tab switch")
+	}
+}
+
+func TestHiddenCommentsUseClickableGutter(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\nthird\n")
+	app.width, app.height = 100, 30
+	app.recalculateLayout()
+	width := app.contentViewport.Width()
+	app.tab().state.Comments = []review.Comment{{ID: "c", StartLine: 1, EndLine: 2, Body: "body"}}
+	app.tab().cursorLine = 1
+	app = pressKey(app, 'H')
+	if app.contentViewport.Width() <= width {
+		t.Fatal("hiding comments did not widen the source")
+	}
+	if len(app.contentLayout.rows) != app.tab().doc.LineCount() {
+		t.Fatal("hidden comments still occupy rows")
+	}
+	if app.gutterComment(0) != "c" || app.gutterComment(1) != "c" || app.gutterComment(2) != "" {
+		t.Fatal("gutter markers do not match the commented range")
+	}
+	for _, row := range strings.Split(app.renderCommentGutter(), "\n") {
+		if got := lipgloss.Width(row); got != app.commentPanelWidth() {
+			t.Fatalf("gutter row width = %d, want %d: %q", got, app.commentPanelWidth(), row)
+		}
+	}
+	app = pressKey(app, 'j')
+	app = pressKey(app, 'j')
+	if app.tab().cursorLine != 3 || app.tab().cursorOnAnnotation {
+		t.Fatal("movement stopped on a hidden comment")
+	}
+	left, top, _, _ := app.commentBounds()
+	app = clickMouse(app, left+1, top)
+	if app.editingID != "c" || app.modal == noModal || !app.hideComments {
+		t.Fatal("gutter click did not open the thread while keeping reading mode")
+	}
+	app = pressKey(app, tea.KeyEscape)
+	app = pressKey(app, 'H')
+	if app.contentViewport.Width() != width {
+		t.Fatal("restoring comments did not restore source width")
+	}
+}
+
+func TestHiddenCommentGutterTracksDeletedWrappedLines(t *testing.T) {
+	app := setupAppWithDoc(t, "new line\n")
+	app.width, app.height = 60, 30
+	app.tab().deletedAfter = map[int][]gitpkg.DeletedLine{
+		0: {{OldLineNum: 1, Content: strings.Repeat("deleted ", 30)}},
+	}
+	app.tab().state.Comments = []review.Comment{{ID: "old", StartLine: 1, EndLine: 1, Side: "old", Body: "hidden"}}
+	app = pressKey(app, 'H')
+	oldRows := 0
+	for row, target := range app.contentLayout.rows {
+		if target.side == "old" {
+			oldRows++
+		} else if app.gutterComment(row) != "" {
+			t.Fatal("old-side marker leaked onto new-side line")
+		}
+	}
+	if oldRows < 2 {
+		t.Fatal("fixture did not wrap the deleted line")
+	}
+	for row := range oldRows {
+		want := ""
+		if row == oldRows-1 {
+			want = "old"
+		}
+		if got := app.gutterComment(row); got != want {
+			t.Fatalf("row %d marker = %q, want %q", row, got, want)
+		}
+	}
+	app.contentViewport.SetHeight(1)
+	app.contentViewport.SetYOffset(oldRows - 1)
+	if !strings.Contains(ansi.Strip(app.renderCommentGutter()), "💬") {
+		t.Fatal("gutter did not follow scrolling")
+	}
+	app.contentViewport.SetYOffset(0)
+	if strings.Contains(ansi.Strip(app.renderCommentGutter()), "💬") {
+		t.Fatal("marker appeared before the last wrapped row became visible")
+	}
+}
+
+func TestHideCommentsShortcutPreservesInput(t *testing.T) {
+	for _, modal := range []modalType{commentModal, fileCommentModal, replyModal, editModal} {
+		app := setupAppWithDoc(t, "source\n")
+		app.modal = modal
+		app.modalTextarea.Focus()
+		updated, _ := app.Update(tea.KeyPressMsg{Code: 'H', Text: "H"})
+		app = *updated.(*AppModel)
+		if app.hideComments || app.modalTextarea.Value() != "H" {
+			t.Fatalf("modal %v intercepted H", modal)
+		}
+	}
+	app := newCommentNavigationTestApp()
+	app = pressKey(app, '/')
+	app = pressKey(app, 'H')
+	if app.tabSearch != "H" || app.hideComments {
+		t.Fatal("fold shortcut intercepted tab search")
 	}
 }
 

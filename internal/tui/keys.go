@@ -23,6 +23,7 @@ type keyMap struct {
 	TabSearch    key.Binding
 	Resolve      key.Binding
 	FoldResolved key.Binding
+	HideComments key.Binding
 	Delete       key.Binding
 	FileComment  key.Binding
 	Help         key.Binding
@@ -49,6 +50,7 @@ var keys = keyMap{
 	TabSearch:    key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search tabs")),
 	Resolve:      key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "resolve/unresolve")),
 	FoldResolved: key.NewBinding(key.WithKeys("h"), key.WithHelp("h", "fold/unfold resolved")),
+	HideComments: key.NewBinding(key.WithKeys("H"), key.WithHelp("H", "hide/show comments")),
 	Delete:       key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete comment")),
 	FileComment:  key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "comment on file")),
 	Help:         key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
