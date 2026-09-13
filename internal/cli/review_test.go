@@ -378,8 +378,8 @@ func TestBuildFinishPayloadUnresolved(t *testing.T) {
 	if payload.Approved {
 		t.Error("expected unapproved payload")
 	}
-	if len(payload.Comments) != 1 || payload.Comments[0].ID != "c_1" {
-		t.Errorf("expected only unresolved comments, got %+v", payload.Comments)
+	if len(payload.Comments) != 2 {
+		t.Errorf("expected all comments, got %+v", payload.Comments)
 	}
 	if want := "tcrit --session " + sess.Key; payload.NextCommand != want {
 		t.Errorf("NextCommand = %q, want %q", payload.NextCommand, want)
@@ -387,6 +387,7 @@ func TestBuildFinishPayloadUnresolved(t *testing.T) {
 	for _, want := range []string{
 		"The review finished with 1 unresolved comment.",
 		`"id": "c_1"`,
+		`"id": "c_2"`,
 		"tcrit comment --session " + sess.Key + " --reply-to <comment-id>",
 		payload.NextCommand,
 	} {
@@ -410,11 +411,17 @@ func TestBuildFinishPayloadApproved(t *testing.T) {
 	}
 
 	sess.SetFileComments("a.go", "", []review.Comment{
-		{ID: "c_1", StartLine: 1, EndLine: 1, Body: "x", Resolved: true},
+		{ID: "c_1", StartLine: 1, EndLine: 1, Body: "Final instruction", Resolved: true, Replies: []review.Reply{{ID: "rp_1", Body: "Final reply"}}},
 	})
 	payload = buildFinishPayload(cfg, sess, &reviewMode{docPath: "doc.md"}, true)
-	if payload.Prompt != "Review approved. All comments are resolved — proceed with implementation." {
-		t.Errorf("prompt = %q", payload.Prompt)
+	if len(payload.Comments) != 1 || !payload.Comments[0].Resolved || len(payload.Comments[0].Replies) != 1 {
+		t.Fatalf("missing resolved thread: %+v", payload.Comments)
+	}
+	cleanupOnApprove(&config.Config{CleanupOnApprove: true}, sess)
+	for _, want := range []string{"Final instruction", "Final reply", `"resolved": true`} {
+		if !strings.Contains(payload.Prompt, want) {
+			t.Errorf("approval output lost %q after cleanup: %s", want, payload.Prompt)
+		}
 	}
 }
 

@@ -1,1 +1,3 @@
-{{if eq .total_count 0}}Review approved with no comments — no changes requested.{{else}}Review approved. All comments are resolved — proceed with implementation.{{end}}
+{{if eq .total_count 0}}Review approved with no comments — no changes requested.{{else}}Review approved.  Read the complete threads below, including resolved comments and replies, before committing or continuing.  Apply new reviewer instructions within the authorized scope; resolved status does not mean you have already read or acted on them.  Do not repeat work or replies already recorded.  If they require changes to the approved content, make those changes and review again before committing.  Saved review data may already have been deleted by approval cleanup.
+
+{{.comments_json}}{{end}}

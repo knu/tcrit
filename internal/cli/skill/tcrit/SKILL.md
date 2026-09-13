@@ -50,10 +50,10 @@ Without a supported multiplexer, ask the user to run the command in their termin
 
 ## Step 3: Read the result
 
-When the command returns, stdout holds the finish prompt and stderr reports `approved: true` or `approved: false`.
+When the command returns, stdout holds the finish prompt and stderr reports `approved: true` or `approved: false`.  Read all returned threads, including resolved comments and replies, for new reviewer instructions before committing or continuing.  Resolution does not mean you have read or acted on a message.  Approval may already have deleted the saved review, so use the returned thread contents.
 
-- `approved: true`: the review is done.  Leave the loop and continue with the task.
-- `approved: false`: the prompt lists the unresolved comments as JSON, the reply command to use, and the command that starts the next round.  Follow it.
+- `approved: true`: address any new instructions in the returned threads, then continue with the task.  If those instructions require changes to the approved content, make the changes and review again before committing.
+- `approved: false`: the prompt lists all comments as JSON, the reply command to use, and the command that starts the next round.  Follow it.
 
 Each comment carries `scope`, `path`, `start_line`, `end_line`, `body`, and `anchor`.  Use `anchor`, the text of the commented lines at the time the comment was written, to find the spot even after line numbers have moved.  A comment marked `drifted: true` no longer matches its original text, so treat its line numbers as approximate.  When `quote` is present, the reviewer selected that specific text; focus on it rather than the whole range.
 
@@ -63,7 +63,7 @@ Supplied diffs also receive a new session ID on each new invocation.  Use `--ses
 
 ## Step 4: Address new feedback
 
-Read each unresolved comment together with its replies, authors, and the work already recorded in this conversation.  Unresolved means the reviewer has not resolved it; it does not by itself request another edit or reply.
+Read each comment together with its replies, authors, and the work already recorded in this conversation.  Unresolved means the reviewer has not resolved it; it does not by itself request another edit or reply.
 
 - Act on reviewer feedback that has not yet been addressed, including a new reply or an edited request.
 - When the latest substantive message is your own comment or reply and the reviewer has not responded, leave the thread unchanged.  This also applies to threads you started and to earlier agents' completion replies.

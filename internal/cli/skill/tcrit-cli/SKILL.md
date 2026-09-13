@@ -27,7 +27,7 @@ tcrit comments <review-path>    # an explicit review.json or its directory
 
 Review-level comments come first, then files in path order with file-level comments before line-level ones.  Each JSON entry adds `scope` and `path` to the stored comment fields.
 
-The finish prompt printed by a review round already contains the unresolved comments, so use `tcrit comments` when re-entering a round or working headlessly.
+The finish prompt contains all comments and replies, including resolved threads on approval.  Read new reviewer instructions before continuing; approval cleanup may already have removed the saved review.  Use `tcrit comments --all` when inspecting a saved review headlessly.
 
 ## Targeting a session or plan
 

@@ -246,15 +246,11 @@ func buildFinishPayload(cfg *config.Config, sess *review.Session, mode *reviewMo
 		NextRoundCmd:      nextCmd,
 	}
 
-	comments := unresolved
-	if approved {
-		comments = nil
-	}
 	return ipc.FinishPayload{
 		Type:        "finish",
 		Approved:    approved,
 		Prompt:      prompt.RenderFinish(cfg.Prompts, cfg.ProjectRoot, ctx),
-		Comments:    comments,
+		Comments:    all,
 		NextCommand: nextCmd,
 	}
 }
