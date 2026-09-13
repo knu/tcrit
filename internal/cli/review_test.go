@@ -387,7 +387,7 @@ func TestBuildFinishPayloadUnresolved(t *testing.T) {
 	for _, want := range []string{
 		"The review finished with 1 unresolved comment.",
 		`"id": "c_1"`,
-		"tcrit comment --reply-to <comment-id>",
+		"tcrit comment --session " + sess.Key + " --reply-to <comment-id>",
 		payload.NextCommand,
 	} {
 		if !strings.Contains(payload.Prompt, want) {
@@ -445,7 +445,6 @@ func TestBuildFinishPayloadPlanMode(t *testing.T) {
 		t.Errorf("NextCommand = %q, want %q", payload.NextCommand, want)
 	}
 	for _, want := range []string{
-		"Revise the plan to address each comment.",
 		"tcrit comment --plan my-plan --reply-to <id>",
 		payload.NextCommand,
 	} {

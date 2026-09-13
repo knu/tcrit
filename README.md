@@ -23,6 +23,7 @@
 - **Richer review lifecycle** — comment threads can be replied to, resolved, reopened, and approved together.  Resolving with `r` advances to the next unresolved thread across files, or returns focus to the source when none remain.  Resolved inline and file-comment threads expand on keyboard focus, click, or wheel scrolling, keeping their resolved status, and collapse again when focus leaves.  Press `h` to unfold resolved comments across all files, including line comments in the sidebar; press it again to restore folding.  Unfolded threads use the same compact latest-message view as open threads until focused.  Complete code context and thread history remain scrollable while editing, and `[` / `]` and `n` / `N` navigate comments (including file comments) and changes across files.  Comment navigation skips resolved threads while folded and includes them when unfolded with `h`.
 - **Improved diffs and Git handling** — inline replacements preserve whitespace, long syntax-highlighted lines wrap instead of being truncated, comment anchors survive edited rounds, and paths with spaces or special characters work correctly.
 - **Agent integrations** — one command installs the shared `tcrit` review loop and `tcrit-cli` reference for Claude Code, Codex, OpenCode, and Gemini CLI. The current agent handles review rounds with the original task context; the loop picks code, document, or plan review from its arguments instead of asking.
+  The skills limit replies to new feedback or substantive updates, and require stopping an abandoned review before opening another TUI in the same directory.
 - **[Crit](https://crit.md/) CLI alignment** — customizable finish prompts, unified integration installers, and `tcrit check` were added as part of adopting the Crit CLI workflow.
 
 TUI for reviewing AI-generated code and plans — built for human-in-the-loop agentic coding workflows.
@@ -72,6 +73,8 @@ If you prefer not to use the plugin, install the integration for your agent dire
 
 - `tcrit [file]` — the interactive review loop. It opens the TUI on the git changes (`tcrit`), a document (`tcrit <file>`), or a versioned plan (`tcrit plan <file>`), then has the agent address the comments round by round.
 - `tcrit-cli` — a reference skill the agent loads when it needs `tcrit comment`, `tcrit comments`, session or plan targeting, bulk JSON input, or the review file format.
+
+The review loop reads existing replies before acting. Unanswered agent comments and completion replies remain unchanged until there is new feedback or a substantive update. When you cancel a review or switch tasks, the agent stops its TUI and checks that its dedicated pane or tab has closed before opening a replacement. This is a skill-level workflow rule; `tcrit clear` only deletes saved state and does not stop a running TUI.
 
 Run the installer from your home directory to install globally, or from a repository root to install for that project only.
 

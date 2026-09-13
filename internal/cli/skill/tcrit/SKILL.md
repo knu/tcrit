@@ -40,7 +40,11 @@ For a supplied diff, use `tcrit --diff=changes.diff` or `tcrit --diff changes.di
 
 ## Step 2: Launch the review and block
 
-When a new review task starts (not a later round of the same task), discard state left by earlier tasks once, from the project root (or the chosen working directory for a diff outside a repository):
+Keep one live TCrit TUI per working directory.  For later rounds, reuse its session and comments; `approved: false` leaves the TUI waiting.
+
+On cancellation or a task switch, follow `/tcrit-cli`'s "Stopping an abandoned review" before editing for the replacement task.  Use that procedure before every new review to check existing sessions and confirm the old TUI and review pane or tab have closed.  Cancellation is not approval.
+
+After that check, clear old state once for a fresh task.  Skip this reset when resuming a review or retaining saved reviews:
 
 ```bash
 tcrit clear --all
@@ -52,7 +56,7 @@ If the command runner hands back an execution session instead of waiting, keep p
 
 Without a supported multiplexer, ask the user to run the same command in their own terminal and tell you when they are done, then read the comments with `tcrit comments --json` instead of the output described below.
 
-Do not edit files while the TUI is open.  Wait for the command to return.
+While the reviewer is reviewing, wait for the command to return before editing files.  A cancellation or task switch takes the stopping path above instead of starting another round.
 
 ## Step 3: Read the result
 
@@ -67,27 +71,33 @@ If you need the comments outside this flow, `tcrit comments --json` lists the un
 
 Supplied diffs have a separate session per working directory.  Use `--session <id>` on `tcrit comments` and `tcrit comment`, including replies and bulk input, to target that diff review.  Use the session ID from the finish prompt.
 
-## Step 4: Address each comment
+## Step 4: Address new feedback
 
-For every unresolved comment:
+Read each unresolved comment together with its replies, authors, and the work already recorded in this conversation.  Unresolved means the reviewer has not resolved it; it does not by itself request another edit or reply.
+
+- Act on reviewer feedback that has not yet been addressed, including a new reply or an edited request.
+- When the latest substantive message is your own comment or reply and the reviewer has not responded, leave the thread unchanged.  This also applies to threads you started and to earlier agents' completion replies.
+- Add another reply only for new reviewer feedback or a material correction or additional result not already reported.  A new round, an unresolved flag, or repeating that work is complete is not new information.
+
+For feedback that needs action:
 
 1. Locate the target from `path`, the line range, and `anchor`.
 2. Change the file as the `body` asks.  Apply a `suggestion` block verbatim when the comment contains one.
-3. Reply with what you did, using the exact reply form shown in the finish prompt.  Plan reviews add `--plan <slug>`:
+3. Reply once with the change or answer, using the reply form shown in the finish prompt and the session ID.  Plan reviews use `--plan <slug>`:
 
 ```bash
-tcrit comment --reply-to <id> --author 'Claude Code' '<what you did>'
+tcrit comment --session <session-id> --reply-to <id> --author 'Claude Code' '<what you did>'
 ```
 
 Never pass `--resolve`.  Resolving is the reviewer's decision.
 
-For three or more replies, write them to a JSON file and submit once:
+For three or more needed replies, write them to a JSON file and submit once:
 
 ```bash
-tcrit comment --json --file .tmp/replies.json --author 'Claude Code'
+tcrit comment --session <session-id> --json --file .tmp/replies.json --author 'Claude Code'
 ```
 
-The `/tcrit-cli` skill documents the JSON format and the other comment commands.
+The `/tcrit-cli` skill documents the JSON format and the other comment commands.  If no thread needs action, proceed to the next round without edits or additional comments.  Only `approved: true` completes the review.
 
 ## Step 5: Start the next round
 

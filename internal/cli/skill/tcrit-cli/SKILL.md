@@ -109,6 +109,7 @@ tcrit comment --reply-to <id> --author 'Claude Code' '<body>'       # reply
 Rules:
 
 - Always pass `--author` with your agent name so the thread shows who wrote what.
+- Read the whole thread before replying.  Reply once to new reviewer feedback or with a material correction or additional result; leave an unanswered agent comment or completion reply unchanged.  An unresolved flag or a new round alone does not call for another reply.  The interactive skill's "Address new feedback" step defines the review loop.
 - Single-quote the body.  Double quotes let the shell interpret backticks and `$`.
 - Line numbers are 1-indexed source coordinates, not positions in the diff text.  Staged reviews use index contents, committed comparisons use the right endpoint, and supplied diffs use the saved snapshot.  Files on disk may differ or be absent.  Use comment anchors when content changes between rounds.
 - Bodies are Markdown; code fences and inline code render in the TUI.
@@ -162,6 +163,17 @@ tcrit comments --plan <slug> --json
 tcrit comment --plan <slug> --reply-to <id> --author 'Claude Code' '<body>'
 ```
 
+## Stopping an abandoned review
+
+Use this procedure when the user cancels a review or replaces its task, and before launching a new review in the same working directory.  TCrit currently has no `stop` command.  `clear` deletes saved state but does not stop the TUI, and cancelling the blocking CLI client can leave the separate TUI alive.
+
+1. Retain the working directory, session ID (or plan slug), and command-runner handle from the review.  Read the JSON registry entries under `${XDG_STATE_HOME:-$HOME/.local/state}/tcrit/sessions/`.  Match `cwd` to the review's absolute working directory; inspect all modes and scopes in that directory.  Entries include `key`, `pid`, `socket_path`, and `review_path`.  Missing entries after an earlier clear do not prove the TUI has exited: also check any pane, tab, or process tracked in this conversation.
+2. Identify the abandoned TUI using its recorded PID, actual executable and arguments, working directory, and, when available, ownership of its session socket.  Use process inspection tools such as `ps` and `lsof` and the multiplexer inventory.  A registry PID alone can be stale or reused.  Stop only the review owned by this task; do not use a broad process-name kill or close an unrelated pane.
+3. Send SIGTERM to the verified TUI PID, then wait for that process to exit and collect the blocking client's result.  If the runner is still waiting after the TUI has exited, terminate that specific runner handle.  Neither interruption nor a connection error is approval.  Preserve the review data so an interrupted task is not silently discarded.
+4. Confirm that the dedicated review pane or tab is gone.  If the multiplexer retained an empty pane or tab, close that exact review surface.  A socket file or registry entry may remain after exit; check live processes rather than file existence alone.  Launch a replacement only after no live TUI remains in that directory.  If ownership or exit cannot be verified, ask the user to close the identified review before launching another.
+
+Stopping a review is separate from clearing its comments.  For a later round of the same task, use its next-round command instead of this procedure.
+
 ## Clearing review state
 
 ```bash
@@ -171,4 +183,4 @@ tcrit clear <file>              # clear a document review
 tcrit clear --all               # delete every review session for the current directory
 ```
 
-Use `tcrit clear --all` once when a new review task begins, never in the middle of a round.
+Use `tcrit clear --all` once when a fresh review task begins, after the stopping procedure confirms no live TUI remains in that directory.  It deletes every registered review there, including other scopes and plans; preserve any review the user intends to resume.  Never clear state in the middle of a round or use clearing as a substitute for stopping a process.
