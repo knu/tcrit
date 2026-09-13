@@ -2556,7 +2556,7 @@ func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused boo
 	boxStyle := inlineCommentBox
 
 	if focused {
-		boxStyle = boxStyle.BorderForeground(warning)
+		boxStyle = boxStyle.Border(lipgloss.ThickBorder()).BorderForeground(commentFocusedBorderColor)
 	}
 	box := boxStyle.Width(maxWidth).Render(boxContent.String())
 
@@ -3267,11 +3267,12 @@ func (m AppModel) renderReviewScreen() (string, renderedScreenLayout) {
 		Render(m.contentViewport.View())
 
 	// Comment sidebar (left border to separate from content)
-	sidebarBorderColor := subtle
-	if m.focused == commentPane {
-		sidebarBorderColor = accent
-	}
+	sidebarBorderColor := commentBorderColor
 	sidebarBorder := lipgloss.Border{Left: "│"}
+	if m.focused == commentPane {
+		sidebarBorderColor = commentFocusedBorderColor
+		sidebarBorder.Left = lipgloss.ThickBorder().Left
+	}
 	commentHeader := lipgloss.NewStyle().Bold(true).Foreground(accent).Render(fmt.Sprintf("Comments (%d)", commentCount))
 	commentBox := lipgloss.NewStyle().
 		Border(sidebarBorder, false, false, false, true).
@@ -4303,6 +4304,11 @@ func (m AppModel) renderWithModal(background string) string {
 }
 
 func (m AppModel) renderWithModalLayout(background string) (string, []modalMouseRegion) {
+	frameStyle := modalStyle
+	switch m.modal {
+	case commentModal, fileCommentModal, replyModal, editModal:
+		frameStyle = frameStyle.BorderForeground(commentFocusedBorderColor)
+	}
 	var modalContent string
 	var regions []modalMouseRegion
 	bgW := lipgloss.Width(background)
@@ -4322,7 +4328,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 	switch m.modal {
 	case helpModal:
 		title := modalTitleStyle.MarginBottom(0).Render("Keyboard Help  (? / esc to close)")
-		modalContent = modalStyle.Width(modalWidth).Render(
+		modalContent = frameStyle.Width(modalWidth).Render(
 			title + "\n" + m.renderHelp(innerWidth))
 
 	case commentModal:
@@ -4371,12 +4377,12 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		}
 
 		fixedContent, _ := buildContent("", 0, 0)
-		fixedHeight := lipgloss.Height(modalStyle.Width(modalWidth).Render(fixedContent))
+		fixedHeight := lipgloss.Height(frameStyle.Width(modalWidth).Render(fixedContent))
 		contextHeight := max(3, bgH-fixedHeight-3)
 		contextSection, scrollOffset, scrollMaxOffset := renderScrollableModalBox(
 			contextContent, innerWidth-2, contextHeight, m.modalReferenceOffset)
 		content, contentRegions := buildContent(contextSection, scrollOffset, scrollMaxOffset)
-		modalContent = modalStyle.Width(modalWidth).Render(content)
+		modalContent = frameStyle.Width(modalWidth).Render(content)
 		regions = append(regions, contentRegions...)
 
 	case fileCommentModal:
@@ -4390,7 +4396,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 			{rendered: m.renderModalButton("Close", "esc", m.modalFocus == 2), action: modalMouseAction{focus: 2}},
 		}, innerWidth, strings.Count(prefix, "\n"))
 		regions = append(regions, buttonRegions...)
-		modalContent = modalStyle.Width(modalWidth).Render(prefix + buttons)
+		modalContent = frameStyle.Width(modalWidth).Render(prefix + buttons)
 
 	case replyModal, editModal:
 		titleText := "Edit Comment"
@@ -4473,7 +4479,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		}
 
 		fixedContent, _ := buildContent("", 0, 0)
-		fixedHeight := lipgloss.Height(modalStyle.Width(modalWidth).Render(fixedContent))
+		fixedHeight := lipgloss.Height(frameStyle.Width(modalWidth).Render(fixedContent))
 		referenceHeight := max(3, min(18, bgH-fixedHeight-3))
 		initialOffset := -1
 		if len(thread.starts) > 0 {
@@ -4482,7 +4488,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		referenceSection, scrollOffset, scrollMaxOffset := renderModalBoxAt(
 			referenceContent, innerWidth-2, referenceHeight, m.modalReferenceOffset, initialOffset)
 		content, contentRegions := buildContent(referenceSection, scrollOffset, scrollMaxOffset)
-		modalContent = modalStyle.Width(modalWidth).Render(content)
+		modalContent = frameStyle.Width(modalWidth).Render(content)
 		regions = append(regions, contentRegions...)
 
 	case discardChangesModal:
@@ -4494,7 +4500,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 			{rendered: m.renderModalButton("Keep Editing", "n / esc", m.modalFocus == 1), action: modalMouseAction{focus: 1}},
 		}, innerWidth, strings.Count(prefix, "\n"))
 		regions = append(regions, buttonRegions...)
-		modalContent = modalStyle.Width(modalWidth).Render(prefix + buttons)
+		modalContent = frameStyle.Width(modalWidth).Render(prefix + buttons)
 
 	case deleteConfirmModal:
 		titleText := "Delete comment?"
@@ -4509,7 +4515,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 			{rendered: m.renderModalButton("Keep", "n / esc", m.modalFocus == 1), action: modalMouseAction{focus: 1}},
 		}, innerWidth, strings.Count(prefix, "\n"))
 		regions = append(regions, buttonRegions...)
-		modalContent = modalStyle.Width(modalWidth).Render(prefix + buttons)
+		modalContent = frameStyle.Width(modalWidth).Render(prefix + buttons)
 
 	case finishModal:
 		unresolved := m.unresolvedTotal()
@@ -4534,7 +4540,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		regions = append(regions, buttonRegions...)
 		hint := footerStyle.Render("esc: back to review · q: quit without finishing")
 
-		modalContent = modalStyle.Width(modalWidth).Render(prefix + buttons + "\n" + hint)
+		modalContent = frameStyle.Width(modalWidth).Render(prefix + buttons + "\n" + hint)
 	}
 
 	modalW := lipgloss.Width(modalContent)
@@ -4550,8 +4556,8 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 	} else if my < 0 {
 		my = 0
 	}
-	contentX := mx + modalStyle.GetBorderLeftSize() + modalStyle.GetPaddingLeft()
-	contentY := my + modalStyle.GetBorderTopSize() + modalStyle.GetPaddingTop()
+	contentX := mx + frameStyle.GetBorderLeftSize() + frameStyle.GetPaddingLeft()
+	contentY := my + frameStyle.GetBorderTopSize() + frameStyle.GetPaddingTop()
 	for i := range regions {
 		regions[i].rect.left += contentX
 		regions[i].rect.right += contentX

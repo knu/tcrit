@@ -44,6 +44,9 @@ var (
 	warning = lipgloss.Yellow
 	muted   = lipgloss.White // normal white (dimmer than BrightWhite)
 
+	commentBorderColor        = lipgloss.Blue
+	commentFocusedBorderColor = lipgloss.BrightBlue
+
 	headerStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.BrightWhite).
@@ -79,7 +82,7 @@ var (
 			Foreground(lipgloss.BrightWhite)
 
 	modalStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
+			Border(lipgloss.ThickBorder()).
 			BorderForeground(accent).
 			Padding(1, 2).
 			Width(60)
@@ -121,7 +124,7 @@ var (
 	// Inline annotation box styles
 	inlineCommentBox = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Blue).
+				BorderForeground(commentBorderColor).
 				Foreground(muted).
 				PaddingLeft(1).
 				PaddingRight(1)
