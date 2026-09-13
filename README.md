@@ -287,7 +287,7 @@ Tcrit resolves the Herdr workspace, tab, and pane or the tmux server and pane fr
 
 | Key      | Action                                                        |
 |----------|---------------------------------------------------------------|
-| `ctrl+s` | Save the comment or reply                                     |
+| `ctrl+s` | Save the comment or reply; delete an existing entry if cleared; close if unchanged or a new entry is empty |
 | `ctrl+o` | Edit the comment or reply in `$EDITOR`                         |
 | `ctrl+y` | Insert a suggestion block and select its code for replacement |
 | `ctrl+v` | Paste text from the clipboard on the machine running TCrit    |

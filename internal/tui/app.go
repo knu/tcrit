@@ -958,7 +958,15 @@ func (m *AppModel) latestOwnReply(c *review.Comment) *review.Reply {
 func (m *AppModel) modalSubmit() {
 	t := m.tab()
 	body := strings.TrimSpace(m.modalTextarea.Value())
-	if body == "" || t.state == nil {
+	if m.modalTextarea.Value() == m.modalInitial || (body == "" && m.modalInitial == "") {
+		m.discardTextModal()
+		return
+	}
+	if body == "" {
+		m.modalDelete(0)
+		return
+	}
+	if t.state == nil {
 		return
 	}
 	var addedLineComment *commentTarget

@@ -746,6 +746,85 @@ func TestMouseDragCodeGutterScrollsAtBottomEdge(t *testing.T) {
 	}
 }
 
+func TestSaveTextModalWithoutFeedback(t *testing.T) {
+	for _, mode := range []modalType{commentModal, fileCommentModal, replyModal, editModal} {
+		for _, body := range []string{"", " \n\t", "original"} {
+			if mode == editModal && body != "original" {
+				continue
+			}
+			if mode != editModal && body == "original" {
+				continue
+			}
+			t.Run(fmt.Sprintf("%v/%q", mode, body), func(t *testing.T) {
+				app := setupAppWithDoc(t, "first\n")
+				app.modal = mode
+				if mode == editModal || mode == replyModal {
+					app.tab().state.Comments = []review.Comment{{ID: "c1", Body: "original", UpdatedAt: "unchanged"}}
+					app.editingID = "c1"
+				}
+				if mode == editModal {
+					app.modalInitial = "original"
+				}
+				app.modalTextarea.SetValue(body)
+				updated, _ := app.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+				app = *updated.(*AppModel)
+				want := noModal
+				if app.modal != want || app.newFeedback {
+					t.Fatalf("modal = %v, newFeedback = %v; want %v, false", app.modal, app.newFeedback, want)
+				}
+				if mode == editModal || mode == replyModal {
+					c := app.tab().state.Comments[0]
+					if c.Body != "original" || c.UpdatedAt != "unchanged" || len(c.Replies) != 0 {
+						t.Fatalf("comment changed: %+v", c)
+					}
+				} else if len(app.tab().state.Comments) != 0 {
+					t.Fatal("empty comment created")
+				}
+			})
+		}
+	}
+}
+
+func TestSaveClearedCommentDeletesEditedEntry(t *testing.T) {
+	for _, reply := range []bool{false, true} {
+		for _, body := range []string{"", " \n\t"} {
+			t.Run(fmt.Sprintf("reply=%v/body=%q", reply, body), func(t *testing.T) {
+				app := setupAppWithDoc(t, "first\n")
+				app.openLineComment()
+				app.modalTextarea.SetValue("original")
+				app.modalSubmit()
+				id := app.tab().state.Comments[0].ID
+				if reply {
+					app.tab().state.Comments[0].Replies = []review.Reply{
+						{ID: "r1", Body: "keep", Author: "Other"},
+						{ID: "r2", Body: "remove", Author: app.author, ReviewRound: app.reviewRound()},
+					}
+					app.persist()
+				}
+				app.openCommentThread(id)
+				if app.modal != editModal {
+					t.Fatalf("modal = %v, want edit", app.modal)
+				}
+				app.modalTextarea.SetValue(body)
+				updated, _ := app.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+				app = *updated.(*AppModel)
+				if app.modal != noModal {
+					t.Fatalf("modal = %v, want closed without confirmation", app.modal)
+				}
+				for _, comments := range [][]review.Comment{app.tab().state.Comments, app.session.FileComments(app.tab().path)} {
+					if reply {
+						if len(comments) != 1 || comments[0].Body != "original" || len(comments[0].Replies) != 1 || comments[0].Replies[0].ID != "r1" {
+							t.Fatalf("unexpected remaining thread: %+v", comments)
+						}
+					} else if len(comments) != 0 {
+						t.Fatalf("comment not deleted: %+v", comments)
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestMouseClickCommentModalSave(t *testing.T) {
 	app := setupAppWithDoc(t, "first\nsecond\n")
 	app.width = 100
