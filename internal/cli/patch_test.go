@@ -31,7 +31,7 @@ func TestDiffReviewSessionAndDetachedCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sess.Key == code.Key || mode.diffSession != sess.Key || mode.internalMode() != "diff" || len(sess.CJ.CliArgs) != 1 || sess.CJ.CliArgs[0] != "--diff" {
+	if sess.Key == code.Key || mode.sessionKey != sess.Key || mode.internalMode() != "diff" || len(sess.CJ.CliArgs) != 1 || sess.CJ.CliArgs[0] != "--diff" {
 		t.Fatalf("incorrect diff session: %+v", sess)
 	}
 	entry, err := review.ReadSessionEntry(sess.Key)
@@ -50,7 +50,7 @@ func TestDiffReviewSessionAndDetachedCommand(t *testing.T) {
 	resolveExec = func() (string, error) { return "/a path/tcrit", nil }
 	t.Cleanup(func() { resolveExec = original })
 	cmd, err := buildTUICommand(mode)
-	if err != nil || !strings.Contains(cmd, "'/a path/tcrit' _tui --diff-session '"+sess.Key+"'") {
+	if err != nil || !strings.Contains(cmd, "'/a path/tcrit' _tui --session '"+sess.Key+"'") {
 		t.Fatalf("detached command = %q, %v", cmd, err)
 	}
 	if got := nextRoundCommand(sess, mode); !strings.Contains(got, "--diff") {

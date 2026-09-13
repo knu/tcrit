@@ -54,8 +54,9 @@ func TestResolveExplicitScopes(t *testing.T) {
 		if err != nil || mode.source == nil || mode.source.Scope != scope || len(mode.files) != 1 {
 			t.Fatalf("%s: mode=%+v err=%v", scope, mode, err)
 		}
+		mode.sessionKey = "0123456789ab"
 		cmd, err := buildTUICommand(mode)
-		if err != nil || !strings.Contains(cmd, "--scope '"+scope+"'") {
+		if err != nil || !strings.Contains(cmd, "--session '0123456789ab'") {
 			t.Fatalf("command=%q err=%v", cmd, err)
 		}
 	}
@@ -135,11 +136,8 @@ func TestReviewSourceSessionIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if alias.Key != stagedKey || len(alias.FileComments("file.txt")) != 1 {
-		t.Fatal("staged alias does not reuse staged scope")
+	if alias.Key == stagedKey || len(alias.FileComments("file.txt")) != 0 {
+		t.Fatal("fresh review reused the previous staged task")
 	}
-	all, err := review.OpenCodeSession(cfg.Output)
-	if err != nil || !keys[all.Key] {
-		t.Fatalf("default session does not match all scope: %v", err)
-	}
+
 }

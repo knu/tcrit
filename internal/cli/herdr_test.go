@@ -196,7 +196,7 @@ func TestSpawnTUIHerdrTab(t *testing.T) {
 	})
 
 	launch, err := spawnTUIHerdrTab(
-		&reviewMode{ref: "HEAD"},
+		&reviewMode{ref: "HEAD", sessionKey: "0123456789ab"},
 		herdrContext{workspace: "w1", tab: "w1:t1", pane: "w1:p1"},
 	)
 	if err != nil {
@@ -221,7 +221,7 @@ func TestSpawnTUIHerdrTab(t *testing.T) {
 		t.Errorf("pane run target = %q", got)
 	}
 	command := runCalls[0][4]
-	for _, want := range []string{"exec env TCRIT_DETACHED=1", "XDG_STATE_HOME='/tmp/state with spaces'", "'/usr/local/bin/tcrit' _tui --scope=all"} {
+	for _, want := range []string{"exec env TCRIT_DETACHED=1", "XDG_STATE_HOME='/tmp/state with spaces'", "'/usr/local/bin/tcrit' _tui --session '0123456789ab'"} {
 		if !strings.Contains(command, want) {
 			t.Errorf("pane command missing %q: %s", want, command)
 		}
@@ -251,7 +251,7 @@ func TestSpawnTUIHerdrTabClosesTabWhenPaneRunFails(t *testing.T) {
 	})
 
 	_, err := spawnTUIHerdrTab(
-		&reviewMode{ref: "HEAD"},
+		&reviewMode{ref: "HEAD", sessionKey: "0123456789ab"},
 		herdrContext{workspace: "w1", tab: "w1:t1", pane: "w1:p1"},
 	)
 	if err == nil {
@@ -279,7 +279,7 @@ func TestSpawnTUIHerdrTabClosesIncompleteTab(t *testing.T) {
 	})
 
 	_, err := spawnTUIHerdrTab(
-		&reviewMode{ref: "HEAD"},
+		&reviewMode{ref: "HEAD", sessionKey: "0123456789ab"},
 		herdrContext{workspace: "w1", tab: "w1:t1", pane: "w1:p1"},
 	)
 	if err == nil {
@@ -321,14 +321,14 @@ func TestSpawnTUIHerdrTabCleansUpWhenFocusFails(t *testing.T) {
 	})
 
 	_, err := spawnTUIHerdrTab(
-		&reviewMode{ref: "HEAD"},
+		&reviewMode{ref: "HEAD", sessionKey: "0123456789ab"},
 		herdrContext{workspace: "w1", tab: "w1:t1", pane: "w1:p1"},
 	)
 	if err == nil {
 		t.Fatal("expected focus failure")
 	}
 	want := [][]string{
-		{"/usr/local/bin/herdr", "pane", "run", "w1:p9", "exec env TCRIT_DETACHED=1 '/usr/local/bin/tcrit' _tui --scope=all"},
+		{"/usr/local/bin/herdr", "pane", "run", "w1:p9", "exec env TCRIT_DETACHED=1 '/usr/local/bin/tcrit' _tui --session '0123456789ab'"},
 		{"/usr/local/bin/herdr", "tab", "focus", "w1:t9"},
 		{"/usr/local/bin/herdr", "tab", "close", "w1:t9"},
 		{"/usr/local/bin/herdr", "tab", "focus", "w1:t1"},

@@ -47,24 +47,14 @@ type FinishEvent struct {
 	Approved bool
 }
 
-// RoundStartMsg tells the TUI an agent requested the next review round:
-// reload comments (including agent replies) and file contents, and advance
-// the round counter.
-type RoundStartMsg struct{}
-
 // AppConfig carries the cross-cutting dependencies of the TUI.
 type AppConfig struct {
 	Session *review.Session
 	Author  string
 	// Staged reads code-review files and diffs from the Git index.
-	Staged    bool
-	Patch     *gitpkg.Patch
-	PatchPath string
-	Source    *gitpkg.ReviewSource
-	// Serving is true when an agent client may be blocked on this review;
-	// an unresolved finish then parks the TUI in a waiting state instead
-	// of quitting.
-	Serving  bool
+	Staged   bool
+	Patch    *gitpkg.Patch
+	Source   *gitpkg.ReviewSource
 	FinishCh chan<- FinishEvent
 }
 
@@ -98,14 +88,11 @@ type AppModel struct {
 	hideComments  bool
 
 	// Finish-flow state (see AppConfig).
-	serving   bool
-	finishCh  chan<- FinishEvent
-	waiting   bool
-	baseRef   string
-	staged    bool
-	patch     *gitpkg.Patch
-	patchPath string
-	source    *gitpkg.ReviewSource
+	finishCh chan<- FinishEvent
+	baseRef  string
+	staged   bool
+	patch    *gitpkg.Patch
+	source   *gitpkg.ReviewSource
 
 	detached bool
 
@@ -213,7 +200,6 @@ func NewApp(filePath string, cfg AppConfig) AppModel {
 		session:         cfg.Session,
 		author:          cfg.Author,
 		authorColors:    make(map[string]int),
-		serving:         cfg.Serving,
 		finishCh:        cfg.FinishCh,
 		detached:        os.Getenv("TCRIT_DETACHED") == "1",
 		contentViewport: viewport.New(),
@@ -260,6 +246,21 @@ func NewCodeReviewApp(files []gitpkg.FileChange, ref string, cfg AppConfig) AppM
 		tabs = append(tabs, ft)
 	}
 
+	if cfg.Session != nil {
+		present := make(map[string]bool, len(tabs))
+		for _, tab := range tabs {
+			present[tab.path] = true
+		}
+		for path, file := range cfg.Session.CJ.Files {
+			if !present[path] && len(file.Comments) > 0 {
+				tab := newFileTab(path, nil)
+				tab.outsideChanges = true
+				tabs = append(tabs, tab)
+			}
+		}
+		sort.Slice(tabs, func(i, j int) bool { return tabs[i].path < tabs[j].path })
+	}
+
 	return AppModel{
 		tabs:            tabs,
 		activeTab:       0,
@@ -267,12 +268,10 @@ func NewCodeReviewApp(files []gitpkg.FileChange, ref string, cfg AppConfig) AppM
 		session:         cfg.Session,
 		author:          cfg.Author,
 		authorColors:    make(map[string]int),
-		serving:         cfg.Serving,
 		finishCh:        cfg.FinishCh,
 		baseRef:         ref,
 		staged:          cfg.Staged,
 		patch:           cfg.Patch,
-		patchPath:       cfg.PatchPath,
 		source:          cfg.Source,
 		detached:        os.Getenv("TCRIT_DETACHED") == "1",
 		contentViewport: viewport.New(),
@@ -288,7 +287,7 @@ func (m AppModel) Init() tea.Cmd {
 func (m AppModel) loadDocuments() tea.Cmd {
 	return func() tea.Msg {
 		for _, tab := range m.tabs {
-			if tab.isBinary || tab.isDeleted {
+			if tab.isBinary || tab.isDeleted || tab.outsideChanges {
 				continue
 			}
 			if _, err := m.loadDocument(tab.path); err != nil {
@@ -433,11 +432,18 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case docRenderedMsg:
+		if err := m.restoreRound(); err != nil {
+			m.err = err
+			return m, nil
+		}
 		// Load documents and existing review comments for each tab
 		for i := range m.tabs {
 			t := &m.tabs[i]
 			t.state = &fileReview{Comments: m.sessionComments(t.path)}
 			if t.isBinary {
+				continue
+			}
+			if t.outsideChanges {
 				continue
 			}
 			if t.isDeleted {
@@ -469,10 +475,6 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case errMsg:
 		m.err = msg.err
-		return m, nil
-
-	case RoundStartMsg:
-		m.startNextRound()
 		return m, nil
 
 	case tea.MouseClickMsg:
@@ -527,14 +529,6 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.modal == finishModal {
 		return m.handleFinishModal(msg)
-	}
-
-	// While waiting for the agent's next round, only quitting is possible.
-	if m.waiting {
-		if key.Matches(msg, keys.Quit) {
-			return m, tea.Quit
-		}
-		return m, nil
 	}
 
 	// Tab search input mode
@@ -1408,6 +1402,7 @@ func (m *AppModel) persist() {
 		}
 		m.session.SetFileComments(m.tabs[i].path, "", m.tabs[i].state.Comments)
 	}
+	m.session.CJ.RoundState.NewFeedback = m.newFeedback
 	if err := m.session.Save(); err != nil {
 		m.err = err
 	}
@@ -1489,223 +1484,25 @@ func (m *AppModel) resolvesAllOnFinish() bool {
 	return !m.newFeedback && m.unresolvedTotal() > 0
 }
 
-// doFinish persists the review, emits the finish event, and either quits
-// (approved, or nothing is waiting on this review) or parks in the waiting
-// state until the agent starts the next round.
+// doFinish saves the completed round before closing the TUI.
 func (m *AppModel) doFinish() (tea.Model, tea.Cmd) {
+	if m.session != nil {
+		m.session.CJ.RoundState.Finished = true
+	}
 	if m.resolvesAllOnFinish() {
 		m.resolveAll()
 	} else {
 		m.persist()
+	}
+	if m.err != nil {
+		return m, nil
 	}
 	approved := m.unresolvedTotal() == 0
 	if m.finishCh != nil {
 		m.finishCh <- FinishEvent{Approved: approved}
 	}
 	m.modal = noModal
-	if approved || !m.serving {
-		return m, tea.Quit
-	}
-	m.waiting = true
-	return m, nil
-}
-
-// startNextRound reloads the session from disk (picking up agent replies),
-// carries comments forward onto the agent's edits with drift correction,
-// advances the round counter, and refreshes documents and diffs.
-func (m *AppModel) startNextRound() {
-	var nextPatch *gitpkg.Patch
-	if m.patch != nil {
-		var err error
-		nextPatch, err = gitpkg.LoadPatch(m.patchPath)
-		if err != nil {
-			m.err = err
-			return
-		}
-	}
-	// Capture the content the current comments were authored against
-	// before reloading, then reload the session so agent-side replies and
-	// resolutions written to review.json are picked up.
-	prevContents := make(map[string]string, len(m.tabs))
-	for i := range m.tabs {
-		if m.tabs[i].doc != nil {
-			prevContents[m.tabs[i].path] = m.tabs[i].doc.Content
-		}
-	}
-	if m.session != nil {
-		if fresh, err := review.OpenSessionAt(m.session.Key, m.session.Dir); err == nil {
-			m.session.CJ = fresh.CJ
-		}
-	}
-	prevPatch := m.patch
-	if nextPatch != nil {
-		m.patch = nextPatch
-		m.syncCodeReviewTabs(nextPatch.Changes())
-	} else if m.multiFile && m.baseRef != "" {
-		var files []gitpkg.FileChange
-		var err error
-		if m.source != nil {
-			if m.source.Scope == "range" {
-				source, resolveErr := gitpkg.ResolveRange(m.source.Range)
-				if resolveErr != nil {
-					m.err = resolveErr
-					return
-				}
-				m.source = &source
-				m.baseRef = source.Base
-			}
-			files, err = m.source.Files()
-		} else if m.staged {
-			files, err = gitpkg.ChangedFilesStaged()
-		} else {
-			files, err = gitpkg.ChangedFilesFrom(m.baseRef)
-		}
-		if err == nil {
-			m.syncCodeReviewTabs(files)
-		}
-	}
-
-	now := review.Now()
-	for i := range m.tabs {
-		t := &m.tabs[i]
-		comments := m.sessionComments(t.path)
-		if t.isBinary {
-			t.state = &fileReview{Comments: comments}
-			continue
-		}
-		if t.isDeleted {
-			t.doc = &document.Document{Path: t.path}
-		} else {
-			doc, _ := m.loadDocument(t.path)
-			t.doc = doc
-		}
-		t.chromaLines = nil
-		t.deletedLineCache = nil
-		if prev, ok := prevContents[t.path]; ok && t.doc != nil && !t.isDeleted {
-			partial := t.doc.Known != nil
-			if prevPatch != nil {
-				if f := prevPatch.File(t.path); f != nil && f.Known != nil {
-					partial = true
-				}
-			}
-			if partial {
-				comments = review.CarryForwardPartial(comments, prev != t.doc.Content, now)
-			} else {
-				comments = review.CarryForwardFile(comments, prev, t.doc.Content, now)
-			}
-		}
-		if prevPatch != nil && prevPatch.Raw != m.patch.Raw {
-			for i := range comments {
-				if comments[i].Side == "old" {
-					comments[i].Drifted = true
-				}
-			}
-		}
-		t.state = &fileReview{Comments: comments}
-		if m.multiFile && (m.baseRef != "" || m.patch != nil) {
-			t.changedLines = nil
-			t.inlineChanges = nil
-			t.deletedAfter = nil
-			t.changeChunks = nil
-			var diff *gitpkg.DiffInfo
-			if m.patch != nil {
-				if f := m.patch.File(t.path); f != nil {
-					diff = f.Diff
-				}
-			} else if m.source != nil {
-				diff, _ = m.source.Diff(t.path)
-			} else {
-				diff, _ = codeDiff(t.path, m.baseRef, m.staged)
-			}
-			if diff != nil {
-				t.changedLines = diff.ChangedLines
-				t.inlineChanges = diff.InlineChanges
-				t.deletedAfter = diff.DeletedAfter
-				t.changeChunks = computeChangeChunks(diff)
-			}
-		}
-		t.ensureHighlightCache()
-		if m.patch != nil {
-			lines := m.visualLines(t)
-			valid := false
-			for _, line := range lines {
-				if line.line == t.cursorLine && line.side == t.cursorSide {
-					valid = true
-					break
-				}
-			}
-			if !valid && len(lines) > 0 {
-				t.cursorLine, t.cursorSide = lines[0].line, lines[0].side
-			}
-		}
-	}
-
-	// Advance the round only after carry-forward, mirroring crit's ordering.
-	if m.session != nil {
-		m.session.CJ.ReviewRound++
-	}
-	m.persist()
-
-	m.waiting = false
-	m.newFeedback = false
-	m.rebuildContent()
-	m.updateCommentSidebar()
-}
-
-func (m *AppModel) syncCodeReviewTabs(files []gitpkg.FileChange) {
-	activePath := ""
-	if m.activeTab >= 0 && m.activeTab < len(m.tabs) {
-		activePath = m.tabs[m.activeTab].path
-	}
-
-	existing := make(map[string]FileTab, len(m.tabs))
-	for _, t := range m.tabs {
-		existing[t.path] = t
-	}
-
-	changed := make(map[string]bool, len(files))
-	tabs := make([]FileTab, 0, len(files))
-	for _, f := range files {
-		changed[f.Path] = true
-		t, ok := existing[f.Path]
-		if !ok {
-			t = newFileTab(f.Path, nil)
-		}
-		t.isBinary = f.Status == gitpkg.StatusBinary
-		t.isDeleted = f.Status == gitpkg.StatusDeleted
-		t.outsideChanges = false
-		tabs = append(tabs, t)
-	}
-
-	for _, t := range m.tabs {
-		hasComments := t.state != nil && len(t.state.Comments) > 0
-		if !hasComments {
-			hasComments = len(m.sessionComments(t.path)) > 0
-		}
-		if changed[t.path] || !hasComments {
-			continue
-		}
-		t.outsideChanges = true
-		tabs = append(tabs, t)
-	}
-
-	sort.Slice(tabs, func(i, j int) bool { return tabs[i].path < tabs[j].path })
-	m.tabs = tabs
-	if len(tabs) == 0 {
-		m.activeTab = 0
-		return
-	}
-	if activePath != "" {
-		for i := range tabs {
-			if tabs[i].path == activePath {
-				m.activeTab = i
-				return
-			}
-		}
-	}
-	if m.activeTab >= len(tabs) {
-		m.activeTab = len(tabs) - 1
-	}
+	return m, tea.Quit
 }
 
 func (m *AppModel) handleTextModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -3220,21 +3017,6 @@ func (m AppModel) View() tea.View {
 		return v
 	}
 
-	if m.waiting {
-		round := 0
-		if m.session != nil {
-			round = m.session.CJ.ReviewRound
-		}
-		msg := fmt.Sprintf(
-			"\n  Round %d finished — %d unresolved comment(s) sent to the agent.\n\n"+
-				"  Waiting for the agent to address them and start the next round…\n\n"+
-				"  q: quit without waiting",
-			round, m.unresolvedTotal())
-		v := tea.NewView(msg)
-		v.AltScreen = true
-		return v
-	}
-
 	if m.multiFile && len(m.tabs) == 0 && m.width > 0 {
 		body, _ := m.renderEmptyReview()
 		v := tea.NewView(body)
@@ -3464,7 +3246,7 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 		return m.handleEmptyReviewClick(msg)
 	}
 	mouse := msg.Mouse()
-	if mouse.Button != tea.MouseLeft || m.waiting {
+	if mouse.Button != tea.MouseLeft {
 		return m, nil
 	}
 	m.hoveredGutterLine = 0
@@ -3742,7 +3524,7 @@ func (m *AppModel) handleMouseMotion(msg tea.MouseMotionMsg) (tea.Model, tea.Cmd
 func (m *AppModel) updateGutterHover(mouse tea.Mouse) {
 	line := 0
 	side := ""
-	if m.modal == noModal && !m.waiting && len(m.tabs) > 0 && m.tab().state != nil {
+	if m.modal == noModal && len(m.tabs) > 0 && m.tab().state != nil {
 		left, top, _, bottom := m.contentBounds()
 		if mouse.X == left && mouse.Y >= top && mouse.Y < bottom {
 			if target, ok := m.contentMouseTarget(mouse.Y - top + m.contentViewport.YOffset()); ok && !target.annotation {
@@ -3951,7 +3733,7 @@ func (m *AppModel) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) 
 	if m.isTextModal() {
 		return m.handleTextModalWheel(msg.Mouse())
 	}
-	if m.modal != noModal || m.waiting {
+	if m.modal != noModal {
 		return m, nil
 	}
 	mouse := msg.Mouse()

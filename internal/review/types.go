@@ -86,6 +86,7 @@ type CritJSONFile struct {
 
 // CritJSON is the top-level review.json document.
 type CritJSON struct {
+	RoundState     RoundState              `json:"tcrit_state,omitempty"`
 	Branch         string                  `json:"branch"`
 	BaseRef        string                  `json:"base_ref"`
 	UpdatedAt      string                  `json:"updated_at"`

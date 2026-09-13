@@ -1,6 +1,6 @@
 ---
 name: tcrit-cli
-description: Reference for TCrit's headless commands. Use when an agent needs to list, add, or reply to review comments with tcrit comment and tcrit comments, target a specific session or plan, read a TCrit review.json file, or clear review state. Not for running the interactive review loop; that is the tcrit skill.
+description: Reference for TCrit's headless commands. Use when an agent needs to list, add, or reply to review comments with tcrit comment and tcrit comments, target a specific session or plan, read a TCrit review.json file, stop or resume a saved review, or clear review state. Not for running the interactive review loop; that is the tcrit skill.
 user-invocable: false
 ---
 
@@ -20,32 +20,29 @@ To run an interactive review round, use the `/tcrit` skill.  This reference cove
 tcrit comments                  # unresolved comments, human-readable
 tcrit comments --json           # the same as a JSON array
 tcrit comments --all            # include resolved comments
-tcrit comments --plan <slug>    # a plan review
+tcrit comments --plan <slug>    # a plan name, only when unambiguous
 tcrit comments --session <id>   # a specific review session
 tcrit comments <review-path>    # an explicit review.json or its directory
 ```
 
 Review-level comments come first, then files in path order with file-level comments before line-level ones.  Each JSON entry adds `scope` and `path` to the stored comment fields.
 
-The finish prompt printed by a review round already contains the unresolved comments, so use `tcrit comments` when re-entering a round or working headlessly.
+The finish prompt contains all comments and replies, including resolved threads on approval.  Read new reviewer instructions before continuing; approval cleanup may already have removed the saved review.  Use `tcrit comments --all` when inspecting a saved review headlessly.
 
 ## Targeting a session or plan
 
-`tcrit comment` and `tcrit comments` operate on the review that matches the current directory and branch.  When several reviews are active, pass `--session <id>`; the ID appears in the `tcrit --session <id>` command at the end of the finish prompt.  Plan reviews live in their own storage and always need `--plan <slug>`; the slug is printed when the plan is saved and in the finish prompt.
-
-`tcrit status --code` prints the files and comments of the current code review session as JSON, and `tcrit status <file>` does the same for a document review.
-
-Supplied diff reviews (`tcrit --diff`) use a separate session per working directory, including outside Git repositories.  Pass the ID from the finish prompt for every comment operation against that review:
+Each new review invocation creates independent storage.  Always use the session ID printed at startup or in the finish prompt, including for plans and bulk replies.  Commands without an ID refuse to guess when multiple saved reviews match.
 
 ```bash
+tcrit status                              # saved sessions in this directory, with running status
 tcrit comments --session <id> --json
 tcrit comment --session <id> --reply-to <comment-id> --author 'Claude Code' '<what you did>'
 tcrit comment --session <id> --json --file .tmp/replies.json --author 'Claude Code'
 ```
 
-To start another round, regenerate and feed the diff into `tcrit --diff --session <id>` from the original directory; `tcrit --session <id>` alone cannot refresh its snapshot.  The `/tcrit` skill covers that interactive loop.
+`--scope` stays fixed for a session.  Identical scope arguments, document paths, or plan names can have independent session IDs.  `--plan <slug>` selects a plan only when its name is unambiguous; prefer the ID.
 
-Different review scopes use separate sessions.  `--scope` accepts all/staged/unstaged or a committed comparison such as `main..HEAD` or `main...` (omitted B means HEAD).  Pass `--session <id>` from the finish prompt on all comment operations, including listing, replies, and bulk input.  `--staged` and `--scope=staged` select the same session, as do `--unstaged` and `--scope=unstaged`.  A review's scope stays fixed across rounds; another comparison does not reuse its comments.
+To resume, run `tcrit --session <id>` from its original directory.  This works after process exit and restores the saved plan or diff input.  To replace that input, use `tcrit plan --session <id> <file>` or `tcrit --diff=<file> --session <id>`.  The `/tcrit` skill covers the interactive review loop.
 
 ## Review file format
 
@@ -109,6 +106,7 @@ tcrit comment --reply-to <id> --author 'Claude Code' '<body>'       # reply
 Rules:
 
 - Always pass `--author` with your agent name so the thread shows who wrote what.
+- Read the whole thread before replying.  Reply once to new reviewer feedback or with a material correction or additional result; leave an unanswered agent comment or completion reply unchanged.  An unresolved flag or a new round alone does not call for another reply.  The interactive skill's "Address new feedback" step defines the review loop.
 - Single-quote the body.  Double quotes let the shell interpret backticks and `$`.
 - Line numbers are 1-indexed source coordinates, not positions in the diff text.  Staged reviews use index contents, committed comparisons use the right endpoint, and supplied diffs use the saved snapshot.  Files on disk may differ or be absent.  Use comment anchors when content changes between rounds.
 - Bodies are Markdown; code fences and inline code render in the TUI.
@@ -155,20 +153,17 @@ Line and file comment IDs are unique within one file, so the same ID can exist i
 
 ## Plan reviews
 
-`tcrit plan <file>` stores the plan outside the repository and versions it per round.  Every headless command against it needs `--plan <slug>`:
+`tcrit plan <file>` starts an independent plan review and stores its numbered versions inside the session directory.  Continue it with `tcrit plan --session <id> <file>`.  Reusing a plan name alone creates another review.
+
+## Stopping and deleting reviews
 
 ```bash
-tcrit comments --plan <slug> --json
-tcrit comment --plan <slug> --reply-to <id> --author 'Claude Code' '<body>'
+tcrit stop --session <id>       # close the TUI, retaining saved state
+tcrit --session <id>            # resume from the original directory
+tcrit clear --session <id>      # delete one stopped review
+tcrit clear --all               # delete every saved review for this directory
 ```
 
-## Clearing review state
+Each round closes its TUI and dedicated pane or tab.  On cancellation or a task switch, stop the specific review and collect the blocking command's result; neither cancellation nor a connection error is approval.  A stopped review keeps comments, replies, resolution status, and round context, but unsaved editor text is not retained.  Stop is also safe when that session is already stopped.
 
-```bash
-tcrit comment --clear           # delete the matching review file
-tcrit clear --code              # clear the code review session
-tcrit clear <file>              # clear a document review
-tcrit clear --all               # delete every review session for the current directory
-```
-
-Use `tcrit clear --all` once when a new review task begins, never in the middle of a round.
+Use `clear` only when deletion is requested.  `stop` preserves data; `clear` deletes it and refuses active reviews.  Never clear earlier tasks automatically to start a new one.  Legacy `clear --code`, `clear <file>`, and `comment --clear` select saved reviews through their existing targeting rules; use an explicit session ID when several match.

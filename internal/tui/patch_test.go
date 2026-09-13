@@ -28,7 +28,7 @@ func patchApp(t *testing.T, raw string) AppModel {
 	if err := sess.Save(); err != nil {
 		t.Fatal(err)
 	}
-	m := NewCodeReviewApp(p.Changes(), "", AppConfig{Session: sess, Patch: p, PatchPath: sess.DiffPath()})
+	m := NewCodeReviewApp(p.Changes(), "", AppConfig{Session: sess, Patch: p})
 	m.width, m.height = 120, 40
 	updated, _ := m.Update(docRenderedMsg{})
 	return updated.(AppModel)
@@ -83,7 +83,7 @@ func TestPatchRoundRefreshesSnapshot(t *testing.T) {
 	if err := m.session.SaveDiff(p); err != nil {
 		t.Fatal(err)
 	}
-	m.startNextRound()
+	m = restartRound(t, m)
 	if m.err != nil || m.session.CJ.ReviewRound != 2 || len(m.tabs) != 2 {
 		t.Fatalf("round failed: err=%v round=%d tabs=%d", m.err, m.session.CJ.ReviewRound, len(m.tabs))
 	}

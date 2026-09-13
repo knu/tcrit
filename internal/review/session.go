@@ -74,7 +74,7 @@ type CodeReviewStatus struct {
 
 // AggregateStatus summarizes the current code review session.
 func AggregateStatus(dataRoot string) (*CodeReviewStatus, error) {
-	s, err := OpenCodeSession(dataRoot)
+	s, err := ResolveCode(dataRoot)
 	if err != nil {
 		return nil, err
 	}

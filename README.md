@@ -10,9 +10,10 @@
 
 - **Read diffs without comment boxes** — press `H` to hide inline comments and replace the sidebar with a narrow gutter, giving the source more space.  A `💬` marks commented lines, including deleted lines; click a marker to open its thread.  Press `H` again to restore comments; the `h` setting for resolved comments is preserved.  Opening the sidebar with `s` or jumping to a file comment restores the sidebar.  Comment editors still show the full thread.
 
-- **[Crit](https://crit.md/)-compatible agent workflow** — review commands block until the reviewer finishes, print an agent-facing result, and support iterative rounds through `tcrit --session <id>`; each round refreshes the changed-file set so newly added files appear without restarting the TUI.
+- **[Crit](https://crit.md/)-compatible agent workflow** — review commands block until the reviewer finishes, print an agent-facing result, and support iterative rounds through `tcrit --session <id>`; each round closes the TUI and its dedicated pane or tab, and the next round restores saved state in a new process.
 - **Native Herdr and tmux workflows** — reviews open in a full-width Herdr tab or a tmux split; tcrit finds the invoking context from process ancestry even when tools such as Codex do not inherit multiplexer environment variables.
 - **CritJSON review state and CLI** — comments use [Crit](https://crit.md/)-compatible `review.json` data, with `tcrit comment` and `tcrit comments` for automation.
+- **Independent saved sessions** — every new review gets its own ID, even for the same directory, scope, or plan name. `tcrit stop --session <id>` preserves state; `tcrit --session <id>` resumes it after process exit.
 - **Fixed review scopes** — choose `--scope=all|staged|unstaged` or a committed comparison such as `--scope=main..HEAD` / `--scope=main...`.  Each scope keeps its comments in a separate session and stays visible in the TUI header.  The default is `all`; `--staged` and `--unstaged` are shortcuts.
 - **Supplied diff reviews** — `git diff <base> <head> | tcrit --diff` reviews arbitrary Git unified diffs, including outside a repository. Input snapshots survive Herdr/tmux launches and can be replaced for the next review round.
 - **File-level comments** — reviewers can press `f` to comment on the active file, with file threads kept in the comment sidebar instead of attached to a line.
@@ -25,6 +26,7 @@
 - **Richer review lifecycle** — comment threads can be replied to, resolved, reopened, and approved together.  Resolving with `r` advances to the next unresolved thread across files, or returns focus to the source when none remain.  Resolved inline and file-comment threads expand on keyboard focus, click, or wheel scrolling, keeping their resolved status, and collapse again when focus leaves.  Press `h` to unfold resolved comments across all files, including line comments in the sidebar; press it again to restore folding.  Unfolded threads use the same compact latest-message view as open threads until focused.  Complete code context and thread history remain scrollable while editing, and `[` / `]` and `n` / `N` navigate comments (including file comments) and changes across files.  Comment navigation skips resolved threads while folded and includes them when unfolded with `h`.
 - **Improved diffs and Git handling** — inline replacements preserve whitespace, long syntax-highlighted lines wrap instead of being truncated, comment anchors survive edited rounds, and paths with spaces or special characters work correctly.
 - **Agent integrations** — one command installs the shared `tcrit` review loop and `tcrit-cli` reference for Claude Code, Codex, OpenCode, and Gemini CLI. The current agent handles review rounds with the original task context; the loop picks code, document, or plan review from its arguments instead of asking.
+  The skills limit replies to new feedback or substantive updates, and require stopping an abandoned review before opening another TUI in the same directory.
 - **[Crit](https://crit.md/) CLI alignment** — customizable finish prompts, unified integration installers, and `tcrit check` were added as part of adopting the Crit CLI workflow.
 
 TUI for reviewing AI-generated code and plans — built for human-in-the-loop agentic coding workflows.
@@ -74,6 +76,8 @@ If you prefer not to use the plugin, install the integration for your agent dire
 
 - `tcrit [file]` — the interactive review loop. It opens the TUI on the git changes (`tcrit`), a document (`tcrit <file>`), or a versioned plan (`tcrit plan <file>`), then has the agent address the comments round by round.
 - `tcrit-cli` — a reference skill the agent loads when it needs `tcrit comment`, `tcrit comments`, session or plan targeting, bulk JSON input, or the review file format.
+
+The finish output includes resolved threads and replies, even on approval, so final reviewer instructions remain available after automatic cleanup. The review loop reads all returned threads for new instructions before committing or continuing. Unanswered agent comments and completion replies remain unchanged until there is new feedback or a substantive update. When you cancel a review or switch tasks, the agent stops its TUI and checks that its dedicated pane or tab has closed before opening a replacement. Each round closes its TUI automatically. `tcrit stop --session <id>` preserves saved state for later resumption; `tcrit clear` explicitly deletes it and refuses active reviews.
 
 Run the installer from your home directory to install globally, or from a repository root to install for that project only.
 
@@ -154,8 +158,11 @@ Running `tcrit` with no subcommand reviews the current Git changes. Running `tcr
 | `tcrit --scope <scope>` | Select all (default), staged, unstaged, or a committed comparison |
 | `tcrit --diff[=FILE]` | Review a supplied diff; omit FILE or use `-` for stdin |
 | `tcrit review [--scope <scope>] [file]` | Explicit form of the default review command; `--staged` reviews only the index |
-| `tcrit plan [--name <slug>] [file]` | Create or continue a versioned plan review; reads stdin when `file` is omitted |
-| `tcrit --session <id>` | Reconnect to a running review and start its next round |
+| `tcrit plan [--name <slug>] [file]` | Create an independent versioned plan review; use `--session <id>` to continue one |
+| `tcrit --session <id>` | Resume a saved review after process exit, from its original directory |
+| `tcrit stop --session <id>` | Stop the TUI while keeping saved comments and round context |
+| `tcrit status` | List saved sessions in this directory, including whether each is running |
+| `tcrit clear --session <id>` | Delete one stopped review |
 | `tcrit comment ...` | Add comments or replies, import JSON, or clear the selected review |
 | `tcrit comments [--json] [--all]` | List unresolved comments, optionally including resolved comments |
 | `tcrit clear <file>` | Clear a document review; use `--code` for code review or `--all` for all reviews in the current directory |
@@ -201,13 +208,13 @@ tcrit comments --json
 
 When the diff identifies the pre-change file content stored in the local Git object database, TCrit reads that content and applies the diff in memory to reconstruct the complete changed file. Otherwise it shows only the supplied context and changes at their original line numbers, marking omitted context explicitly. It never fills missing context from the working tree. Suggestions cannot span omitted lines. Input is limited to 64 MiB; when only partial file content is available, line numbers up to 1,000,000 are supported.
 
-Diff reviews use a separate session per working directory. For another round, regenerate the diff and pipe it into `tcrit --diff` from the same directory, or target the session explicitly:
+Every supplied diff starts an independent session. For another round with updated input, regenerate it and target the saved session explicitly from its original directory:
 
 ```bash
 git diff main feature | tcrit --diff --session <id>
 ```
 
-The waiting TUI reloads the snapshot and comments. A plain `tcrit --session <id>` cannot refresh a diff review without new input. When incomplete context prevents reliable comment relocation, changed snapshots preserve the original coordinates and mark the comments as drifted for inspection.
+A new TUI opens with the replaced snapshot and saved comments. Plain `tcrit --session <id>` opens the saved diff without replacing its input. When incomplete context prevents reliable comment relocation, changed snapshots preserve the original coordinates and mark the comments as drifted for inspection.
 
 ### How code review works
 
@@ -226,14 +233,27 @@ tcrit --scope=v0.7.0..v0.7.3      # review a historical comparison
 
 `--scope` also works with `tcrit review` and cannot be combined with a document or `--diff`.  In `A..B` and `A...B`, endpoints are resolved by Git and an omitted endpoint means HEAD: `main..` compares main with HEAD, while `main...` compares their merge base with HEAD.  Three-dot comparisons require a unique merge base.  The displayed contents come from the right endpoint, even if the working tree differs.  Keep the dots when omitting B so the comparison method remains explicit.
 
-The selected scope stays fixed for the session.  To inspect another comparison, start a separate review with a different scope; comments are isolated by working directory, branch, and scope.  `--staged` and `--scope=staged` share the same session, as do `--unstaged` and `--scope=unstaged`.  Conflicting scope flags are rejected.  Use `tcrit comments --session <id>` and `tcrit comment --session <id>` for these reviews; the finish prompt identifies the session.  Reconnecting for the next round retains the selected scope and refreshes comparison endpoints.  An empty comparison is reported without launching the TUI.  Without explicit flags, the scope is all: HEAD versus the working tree plus untracked files.  A clean working tree does not fall back to committed changes.
+The selected scope stays fixed for the session.  To inspect another comparison, start a separate review with a different scope; each new invocation receives an independent session ID, even with identical scope arguments.  `--staged` and `--scope=staged` select the same kind of comparison, as do `--unstaged` and `--scope=unstaged`.  Conflicting scope flags are rejected.  Use `tcrit comments --session <id>` and `tcrit comment --session <id>` for these reviews; the finish prompt identifies the session.  Reconnecting for the next round retains the selected scope and refreshes comparison endpoints.  An empty comparison is rejected for a new review; a resumed review can still display saved comments when all changes have been removed.  Without explicit flags, the scope is all: HEAD versus the working tree plus untracked files.  A clean working tree does not fall back to committed changes.
 
 1. An agent (or you) runs `tcrit review --code` — the TUI opens in a Herdr tab or tmux split and the command blocks
 2. Navigate between files and leave inline comments on the changes
 3. Press `q` or click the footer button — with unresolved comments the button is **Finish Review**, without any it is **Approve**
 4. On finish, the blocked command prints the unresolved comments and instructions on stdout and `approved: true|false` on stderr
-5. The agent edits the files, replies with `tcrit comment --reply-to`, and runs the printed `tcrit --session <id>` to start the next round; the waiting TUI reloads with the fixes and replies
+5. The agent edits the files, replies with `tcrit comment --reply-to`, and runs the printed `tcrit --session <id>` to start the next round; a new TUI restores the comments and remaps their anchors onto the updated contents
 6. Resolve comments with `r` and approve to end the loop
+
+## Stopping and resuming
+
+```bash
+tcrit status                    # list saved sessions in this working directory
+tcrit stop --session <id>        # stop without deleting or approving
+tcrit --session <id>             # reopen from the original directory
+tcrit clear --session <id>       # explicitly delete a stopped review
+```
+
+The TUI and its dedicated Herdr tab or tmux pane close after every submitted round, including rounds with unresolved comments. Stopping mid-round keeps saved comments, replies, resolution status, and the current round number. Submitting a round advances the number when it is reopened. Saved source context supports comment relocation after edits; unsaved editor input and cursor position are not restored. Code and document reviews read their current source when resumed, while plan and supplied-diff reviews reopen the saved input unless replacement input is provided.
+
+The session ID is printed when a review starts and included in the finish prompt. Use it for all comment operations when multiple reviews exist. Starting a new task does not delete earlier reviews. Approval retains the existing `cleanup_on_approve` behavior, which deletes approved review data by default.
 
 ## Plan Review (versioned)
 
@@ -242,7 +262,7 @@ tcrit plan docs/plans/my-plan.md            # slug derived from the first headin
 tcrit plan --name auth docs/plans/plan.md   # pinned slug
 ```
 
-Saves the document as an immutable numbered version under `$XDG_STATE_HOME/tcrit/plans/<slug>/` (or `~/.local/state/tcrit/plans/<slug>/` when `XDG_STATE_HOME` is unset) and opens a review of the latest version. Re-running with the same slug saves the next version and starts the next review round; comments carry forward onto the revised text. The command also accepts plan content on stdin.
+Saves numbered versions and `current.md` inside the session directory, normally `~/.local/state/tcrit/reviews/<id>/`. Each new invocation creates an independent review, even with the same plan name. Run `tcrit plan --session <id> <file>` to submit a revised version, or `tcrit --session <id>` to reopen the saved version. The plan command also accepts stdin. Comments carry forward onto revised text.
 
 ## Document Review (single file)
 
@@ -264,7 +284,7 @@ Tcrit resolves the Herdr workspace, tab, and pane or the tmux server and pane fr
 2. `tcrit review <path>` opens the TUI — read through and leave inline comments
 3. Finish the review with `q`; comments are saved as crit-compatible `review.json` under `$XDG_STATE_HOME/tcrit/reviews/` (or `~/.local/state/tcrit/reviews/`)
 4. Claude receives the unresolved comments from the blocking command (or via `tcrit comments --json`), edits the document, and replies to each comment
-5. Claude runs the printed `tcrit --session <id>`; the TUI reloads with the fixes for the next round
+5. Claude runs the printed `tcrit --session <id>`; a new TUI restores the review with the fixes for the next round
 
 ## Keybindings
 

@@ -48,7 +48,7 @@ unresolved comments are shown unless --all is given.`,
 			if commentsSession != "" {
 				return fmt.Errorf("--plan cannot be combined with --session")
 			}
-			sess, err = review.OpenPlanSession(review.Slugify(commentsPlan))
+			sess, err = review.ResolvePlan(review.Slugify(commentsPlan))
 		default:
 			sess, err = review.ResolveTarget(output, commentsSession)
 		}

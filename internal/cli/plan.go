@@ -4,18 +4,21 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
 	"github.com/knu/tcrit/internal/config"
+	"github.com/knu/tcrit/internal/ipc"
 	"github.com/knu/tcrit/internal/review"
 )
 
 var planName string
+var planSession string
 
 var planCmd = &cobra.Command{
-	Use:   "plan [--name <slug>] [file]",
+	Use:   "plan [--name <slug> | --session <id>] [file]",
 	Short: "Create or continue a versioned plan review",
 	Long: `Create or continue a plan review.  The plan content (from the file
 argument or piped stdin) is saved as a new immutable version under the
@@ -23,8 +26,8 @@ plan's storage directory, and a review of the latest version opens,
 blocking like ` + "`tcrit review`" + `.
 
 Without --name, the slug is derived from the plan's first heading.
-Re-running with the same slug saves a new version and starts the next
-review round.`,
+Each new invocation creates an independent session.  Use --session <id>
+to save a new version and continue a previous review.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runPlan(args)
@@ -43,37 +46,42 @@ func runPlan(args []string) error {
 	}
 
 	slug := review.Slugify(planName)
-	if slug == "" {
+	if slug == "" && planSession == "" {
 		slug = review.ResolveSlug(content)
 		fmt.Fprintf(os.Stderr, "No --name provided, derived slug: %s\n", slug)
 	}
 
-	ver, err := review.SavePlanVersion(slug, content)
-	if err != nil {
-		return err
+	var sess *review.Session
+	var mode *reviewMode
+	if planSession != "" {
+		sess, mode, err = loadReviewSession(planSession)
+		if err != nil {
+			return err
+		}
+		if !mode.plan() {
+			return fmt.Errorf("session is not a plan review")
+		}
+		if planName != "" && slug != mode.planSlug {
+			return fmt.Errorf("plan name differs from saved session")
+		}
+		if ipc.Alive(review.SocketPathFor(sess.Key)) {
+			return fmt.Errorf("review is active; stop it before updating the plan")
+		}
+		slug = mode.planSlug
+	} else {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		sess, err = review.NewSession(cfg.Output, review.SessionEntry{CWD: cwd, Mode: "plan", PlanSlug: slug})
+		if err != nil {
+			return err
+		}
+		mode = &reviewMode{docPath: filepath.Join(sess.Dir, "current.md"), planSlug: slug, sessionKey: sess.Key}
 	}
-	if !cfg.Quiet {
-		fmt.Fprintf(os.Stderr, "Plan '%s' saved as v%03d (%d bytes)\n", slug, ver, len(content))
-	}
-
-	sess, err := review.OpenPlanSession(slug)
-	if err != nil {
-		return err
-	}
-	cliArgs := []string{"plan", "--name", slug}
-	if sourceFile != "" {
-		cliArgs = append(cliArgs, sourceFile)
-	}
-	sess.CJ.CliArgs = cliArgs
-	if err := sess.Save(); err != nil {
-		fmt.Fprintf(os.Stderr, "tcrit: warning: could not save session: %v\n", err)
-	}
-
-	mode := &reviewMode{
-		docPath:  review.PlanCurrentPath(slug),
-		planSlug: slug,
-		planFile: sourceFile,
-	}
+	mode.planFile = sourceFile
+	mode.planContent = content
+	sess.Meta.Args = []string{"plan", "--name", slug, sourceFile}
 	return runReviewFlow(cfg, sess, mode)
 }
 
@@ -105,5 +113,6 @@ func readPlanContent(args []string) (content []byte, sourceFile string, err erro
 
 func init() {
 	rootCmd.AddCommand(planCmd)
+	planCmd.Flags().StringVar(&planSession, "session", "", "continue a saved plan review")
 	planCmd.Flags().StringVar(&planName, "name", "", "plan slug (derived from the first heading when omitted)")
 }

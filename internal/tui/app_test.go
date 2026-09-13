@@ -1999,7 +1999,6 @@ func newFinishTestApp(t *testing.T, comments []review.Comment, serving bool) (Ap
 	app := NewApp("test.go", AppConfig{
 		Session:  setupSession(t, "test.go"),
 		Author:   "Tester",
-		Serving:  serving,
 		FinishCh: finishCh,
 	})
 	app.tabs[0].state = &fileReview{Comments: comments}
@@ -2097,23 +2096,17 @@ func TestFinishModal_UnresolvedQuitsWhenNotServing(t *testing.T) {
 	if ev := takeEvent(t, ch); ev.Approved {
 		t.Error("expected unapproved finish event")
 	}
-	if app.waiting {
-		t.Error("inline mode should not enter the waiting state")
-	}
 }
 
-func TestFinishModal_UnresolvedWaitsWhenServing(t *testing.T) {
+func TestFinishModal_UnresolvedClosesAfterSaving(t *testing.T) {
 	app, ch := newFinishTestApp(t, []review.Comment{testComment()}, true)
 	app.newFeedback = true
 	app, _ = pressKeyCmd(app, 'q')
 
 	app, cmd := pressKeyCmd(app, 'y')
 
-	if isQuit(cmd) {
-		t.Fatal("expected the serving TUI to keep running")
-	}
-	if !app.waiting {
-		t.Error("expected waiting state after unresolved finish")
+	if !isQuit(cmd) {
+		t.Fatal("expected the TUI to close after saving the round")
 	}
 	if ev := takeEvent(t, ch); ev.Approved {
 		t.Error("expected unapproved finish event")
@@ -3024,7 +3017,6 @@ func TestRoundStart_ReloadsCommentsAndAdvancesRound(t *testing.T) {
 	// comments forward from; docRenderedMsg reloads state from the session.
 	updated0, _ := app.Update(docRenderedMsg{})
 	app = updated0.(AppModel)
-	app.waiting = true
 
 	// Simulate the agent replying via the CLI while the TUI waits.
 	other, err := review.OpenDocSession("", "test.go")
@@ -3038,12 +3030,8 @@ func TestRoundStart_ReloadsCommentsAndAdvancesRound(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	updated, _ := app.Update(RoundStartMsg{})
-	app = updated.(AppModel)
+	app = restartRound(t, app)
 
-	if app.waiting {
-		t.Error("round start should leave the waiting state")
-	}
 	if app.session.CJ.ReviewRound != 2 {
 		t.Errorf("expected round 2, got %d", app.session.CJ.ReviewRound)
 	}
@@ -3099,7 +3087,7 @@ func TestRoundStartRefreshesCodeReviewTabs(t *testing.T) {
 		runGit("add", path)
 	}
 
-	app.startNextRound()
+	app = restartRound(t, app)
 	want := []string{"existing.go", "go.mod", "internal/cli/process_darwin.go", "internal/cli/process_linux.go", "internal/cli/process_other.go"}
 	if len(app.tabs) != len(want) {
 		t.Fatalf("refreshed tabs = %d, want %d", len(app.tabs), len(want))
@@ -3157,7 +3145,7 @@ func TestStagedRoundUsesIndexDocument(t *testing.T) {
 	if err := os.WriteFile(path, []byte("package nextunstaged\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	app.startNextRound()
+	app = restartRound(t, app)
 	if got := app.tab().doc.Content; got != "package nextstaged\n" {
 		t.Fatalf("next-round document = %q, want indexed content", got)
 	}
@@ -3200,7 +3188,7 @@ func TestRevertedAdditionShowsPlaceholderAndKeepsComments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	app := NewCodeReviewApp(files, "HEAD", AppConfig{Session: sess, Author: "Tester", Serving: true})
+	app := NewCodeReviewApp(files, "HEAD", AppConfig{Session: sess, Author: "Tester"})
 	updated, _ := app.Update(docRenderedMsg{})
 	app = updated.(AppModel)
 	app.width, app.height = 100, 30
@@ -3216,7 +3204,7 @@ func TestRevertedAdditionShowsPlaceholderAndKeepsComments(t *testing.T) {
 	app.persist()
 
 	runGitIn(t, dir, "rm", "-q", "-f", "added.go")
-	app.startNextRound()
+	app = restartRound(t, app)
 
 	if app.tab().path != "added.go" || !app.tab().outsideChanges {
 		t.Fatalf("active tab = %q (outside changes: %t), want added.go kept outside the changes", app.tab().path, app.tab().outsideChanges)

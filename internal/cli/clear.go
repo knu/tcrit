@@ -8,11 +8,13 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/knu/tcrit/internal/config"
+	"github.com/knu/tcrit/internal/ipc"
 	"github.com/knu/tcrit/internal/review"
 )
 
 var clearCode bool
 var clearAll bool
+var clearSession string
 
 var clearCmd = &cobra.Command{
 	Use:   "clear [file]",
@@ -25,10 +27,20 @@ var clearCmd = &cobra.Command{
 		}
 
 		if clearAll {
-			if clearCode || len(args) > 0 {
+			if clearCode || len(args) > 0 || clearSession != "" {
 				return fmt.Errorf("--all cannot be combined with --code or a file argument")
 			}
 			return runClearAll()
+		}
+		if clearSession != "" {
+			if clearCode || len(args) > 0 {
+				return fmt.Errorf("--session cannot be combined with --code or a file")
+			}
+			sess, err := review.ResolveTarget(cfg.Output, clearSession)
+			if err != nil {
+				return err
+			}
+			return clearSavedReview(sess)
 		}
 
 		if clearCode {
@@ -41,13 +53,13 @@ var clearCmd = &cobra.Command{
 
 		filePath := args[0]
 
-		sess, err := review.OpenDocSession(cfg.Output, filePath)
+		sess, err := review.ResolveDocument(cfg.Output, filePath)
 		if err != nil {
 			return fmt.Errorf("loading review state: %w", err)
 		}
 
 		count := len(sess.FileComments(filePath))
-		if err := sess.Clear(); err != nil {
+		if err := clearSavedReview(sess); err != nil {
 			return fmt.Errorf("clearing review: %w", err)
 		}
 
@@ -57,14 +69,14 @@ var clearCmd = &cobra.Command{
 }
 
 func runCodeClear(cfg *config.Config) error {
-	sess, err := review.OpenCodeSession(cfg.Output)
+	sess, err := review.ResolveCode(cfg.Output)
 	if err != nil {
 		return err
 	}
 
 	total := sess.CJ.TotalComments()
 	fileCount := len(sess.CJ.Files)
-	if err := sess.Clear(); err != nil {
+	if err := clearSavedReview(sess); err != nil {
 		return fmt.Errorf("clearing review: %w", err)
 	}
 
@@ -86,6 +98,11 @@ func runClearAll() error {
 	}
 
 	removed := 0
+	for _, e := range entries {
+		if e.CWD == cwd && ipc.Alive(review.SocketPathFor(e.Key)) {
+			return fmt.Errorf("review %s is active; stop it before clearing", e.Key)
+		}
+	}
 	for _, e := range entries {
 		if e.CWD != cwd {
 			continue
@@ -109,4 +126,12 @@ func init() {
 	rootCmd.AddCommand(clearCmd)
 	clearCmd.Flags().BoolVar(&clearCode, "code", false, "clear the code review session")
 	clearCmd.Flags().BoolVar(&clearAll, "all", false, "delete all review sessions for the current directory")
+	clearCmd.Flags().StringVar(&clearSession, "session", "", "delete one saved review")
+}
+
+func clearSavedReview(sess *review.Session) error {
+	if ipc.Alive(review.SocketPathFor(sess.Key)) {
+		return fmt.Errorf("review %s is active; stop it before clearing", sess.Key)
+	}
+	return sess.Clear()
 }

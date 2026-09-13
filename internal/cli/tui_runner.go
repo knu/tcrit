@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -28,12 +29,8 @@ func runTUISession(cfg *config.Config, sess *review.Session, mode *reviewMode, s
 		Author:   cfg.Author,
 		Staged:   mode.staged,
 		Source:   mode.source,
-		Serving:  serving,
 		FinishCh: finishCh,
 		Patch:    mode.patch,
-	}
-	if mode.patch != nil {
-		appCfg.PatchPath = sess.DiffPath()
 	}
 
 	var model tui.AppModel
@@ -57,9 +54,10 @@ func runTUISession(cfg *config.Config, sess *review.Session, mode *reviewMode, s
 	}
 	p := tea.NewProgram(model, options...)
 
-	srv := &tuiServer{cfg: cfg, sess: sess, mode: mode, program: p}
+	srv := &tuiServer{cfg: cfg, sess: sess, mode: mode, program: p, done: make(chan struct{}), connected: make(chan struct{}), delivered: make(chan struct{})}
 
-	if serving {
+	var listener net.Listener
+	{
 		sock := review.SocketPathFor(sess.Key)
 		if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
 			return nil, fmt.Errorf("creating sessions dir: %w", err)
@@ -68,6 +66,7 @@ func runTUISession(cfg *config.Config, sess *review.Session, mode *reviewMode, s
 		if err != nil {
 			return nil, err
 		}
+		listener = ln
 		defer func() {
 			ln.Close()
 			os.Remove(sock)
@@ -80,6 +79,13 @@ func runTUISession(cfg *config.Config, sess *review.Session, mode *reviewMode, s
 		}
 
 		go srv.acceptLoop(ln)
+		if serving {
+			select {
+			case <-srv.connected:
+			case <-time.After(20 * time.Second):
+				return nil, fmt.Errorf("review client did not connect")
+			}
+		}
 	}
 
 	done := make(chan struct{})
@@ -93,24 +99,42 @@ func runTUISession(cfg *config.Config, sess *review.Session, mode *reviewMode, s
 	_, runErr := p.Run()
 	close(finishCh)
 	<-done
-	srv.closeWaiters()
+	if err := listener.Close(); err != nil {
+		fmt.Fprintf(os.Stderr, "tcrit: closing review socket: %v\n", err)
+	}
+	close(srv.done)
+	hasClient := serving
+	select {
+	case <-srv.connected:
+		hasClient = true
+	default:
+	}
+	if hasClient {
+		select {
+		case <-srv.delivered:
+		case <-time.After(5 * time.Second):
+		}
+	}
 	if runErr != nil {
 		return nil, fmt.Errorf("TUI error: %w", runErr)
 	}
 	return srv.lastPayload, nil
 }
 
-// tuiServer coordinates agent connections with the TUI program.
+// tuiServer serves one round.  Results are delivered only after the TUI exits.
 type tuiServer struct {
-	cfg     *config.Config
-	sess    *review.Session
-	mode    *reviewMode
-	program *tea.Program
-
-	mu          sync.Mutex
-	waiters     []net.Conn
-	finishCount int
-	lastPayload *ipc.FinishPayload
+	cfg          *config.Config
+	sess         *review.Session
+	mode         *reviewMode
+	program      *tea.Program
+	mu           sync.Mutex
+	lastPayload  *ipc.FinishPayload
+	done         chan struct{}
+	connected    chan struct{}
+	delivered    chan struct{}
+	connectOnce  sync.Once
+	deliverOnce  sync.Once
+	stopRequests sync.WaitGroup
 }
 
 func (s *tuiServer) acceptLoop(ln net.Listener) {
@@ -124,49 +148,56 @@ func (s *tuiServer) acceptLoop(ln net.Listener) {
 }
 
 func (s *tuiServer) handleConn(conn net.Conn) {
+	defer func() { _ = conn.Close() }()
 	req, err := ipc.ReadRequest(bufio.NewReader(conn))
-	if err != nil || req.Type != "review-cycle" {
-		conn.Close()
+	if err != nil {
 		return
 	}
-	focusCurrentHerdrTab()
-	s.mu.Lock()
-	startRound := s.finishCount > 0
-	s.waiters = append(s.waiters, conn)
-	s.mu.Unlock()
-	// The first review cycle reviews the session as loaded; later cycles
-	// mean the agent finished a round of fixes, so reload and advance.
-	if startRound {
-		s.program.Send(tui.RoundStartMsg{})
+	if req.Type == "stop" {
+		s.stopRequests.Add(1)
+		defer s.stopRequests.Done()
+		s.connectOnce.Do(func() { close(s.connected) })
+		s.program.Quit()
+		<-s.done
+		if err := ipc.WriteMessage(conn, ipc.FinishPayload{Type: "stopped"}); err != nil {
+			fmt.Fprintf(os.Stderr, "tcrit: stopping review: %v\n", err)
+		}
+		s.deliverOnce.Do(func() { close(s.delivered) })
+		return
 	}
+	if req.Type != "review-cycle" {
+		return
+	}
+	s.connectOnce.Do(func() { close(s.connected) })
+	// Losing the blocking client also ends its TUI, preserving saved state.
+	go func() {
+		var b [1]byte
+		if _, err := conn.Read(b[:]); err != nil {
+			select {
+			case <-s.done:
+			default:
+				s.program.Quit()
+			}
+		}
+	}()
+	<-s.done
+	s.stopRequests.Wait()
+	s.mu.Lock()
+	payload := s.lastPayload
+	s.mu.Unlock()
+	if payload != nil {
+		if err := ipc.WriteMessage(conn, payload); err != nil {
+			fmt.Fprintf(os.Stderr, "tcrit: sending review result: %v\n", err)
+		}
+	}
+	s.deliverOnce.Do(func() { close(s.delivered) })
 }
 
-// handleFinish builds the finish payload and delivers it to every blocked
-// client.  It runs on the runner goroutine after the TUI persisted the
-// session, so reading sess.CJ here does not race with the model.
 func (s *tuiServer) handleFinish(approved bool) {
 	payload := buildFinishPayload(s.cfg, s.sess, s.mode, approved)
-
 	s.mu.Lock()
-	s.finishCount++
-	waiters := s.waiters
-	s.waiters = nil
 	s.lastPayload = &payload
 	s.mu.Unlock()
-
-	for _, conn := range waiters {
-		_ = ipc.WriteMessage(conn, payload)
-		conn.Close()
-	}
-}
-
-func (s *tuiServer) closeWaiters() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, conn := range s.waiters {
-		conn.Close()
-	}
-	s.waiters = nil
 }
 
 // buildFinishPayload assembles the agent-facing finish result, rendering
@@ -215,37 +246,22 @@ func buildFinishPayload(cfg *config.Config, sess *review.Session, mode *reviewMo
 		NextRoundCmd:      nextCmd,
 	}
 
-	comments := unresolved
-	if approved {
-		comments = nil
-	}
 	return ipc.FinishPayload{
 		Type:        "finish",
 		Approved:    approved,
 		Prompt:      prompt.RenderFinish(cfg.Prompts, cfg.ProjectRoot, ctx),
-		Comments:    comments,
+		Comments:    all,
 		NextCommand: nextCmd,
 	}
 }
 
-// nextRoundCommand builds the command the agent runs to start the next
-// round.  Plan sessions reconnect through `tcrit plan` so the revised plan
-// content is versioned; the original file path is recovered from the
-// session's recorded cli_args when this process was spawned without it.
+// nextRoundCommand targets the saved review and, when needed, replacement input.
 func nextRoundCommand(sess *review.Session, mode *reviewMode) string {
 	if mode.patch != nil {
 		return "tcrit --diff --session " + sess.Key + " < updated.diff"
 	}
-	if !mode.plan() {
-		return "tcrit --session " + sess.Key
+	if mode.plan() && mode.planFile != "" {
+		return "tcrit plan --session " + sess.Key + " " + shellEscape(mode.planFile)
 	}
-	planFile := mode.planFile
-	if planFile == "" && len(sess.CJ.CliArgs) >= 4 && sess.CJ.CliArgs[0] == "plan" {
-		planFile = sess.CJ.CliArgs[3]
-	}
-	cmd := "tcrit plan --name " + mode.planSlug
-	if planFile != "" {
-		cmd += " " + planFile
-	}
-	return cmd
+	return "tcrit --session " + sess.Key
 }
