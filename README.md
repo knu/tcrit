@@ -9,7 +9,6 @@
 ## Key changes from upstream
 
 - **Read diffs without comment boxes** — press `H` to hide inline comments and replace the sidebar with a narrow gutter, giving the source more space.  A `💬` marks commented lines, including deleted lines; click a marker to open its thread.  Press `H` again to restore comments; the `h` setting for resolved comments is preserved.  Opening the sidebar with `s` or jumping to a file comment restores the sidebar.  Comment editors still show the full thread.
-
 - **[Crit](https://crit.md/)-compatible agent workflow** — review commands block until the reviewer finishes, print an agent-facing result, and support iterative rounds through `tcrit --session <id>`; each round closes the TUI and its dedicated pane or tab, and the next round restores saved state in a new process.
 - **Native Herdr and tmux workflows** — reviews open in a full-width Herdr tab or a tmux split; tcrit finds the invoking context from process ancestry even when tools such as Codex do not inherit multiplexer environment variables.
 - **CritJSON review state and CLI** — comments use [Crit](https://crit.md/)-compatible `review.json` data, with `tcrit comment` and `tcrit comments` for automation.
@@ -19,6 +18,7 @@
 - **File-level comments** — reviewers can press `f` to comment on the active file, with file threads kept in the comment sidebar instead of attached to a line.
 - **Readable comment threads** — your comments and replies appear in white; other authors use cyan, green, orange, purple, then yellow.  Unfocused inline and sidebar threads shrink to the latest message, down to one row.  Focus expands the history to at most 10 wrapped rows; reply dialogs show up to 16, shrinking on small terminals.  Expanded threads show the latest message at the bottom with earlier history above, or start at its first line when it exceeds the available height.  No blank padding follows the latest message; older messages and long bodies remain available by scrolling.
 - **Comment editing tools** — `ctrl+y` inserts GitHub-compatible suggestions for selected or anchored lines, including replies, and selects the inserted code for immediate deletion or replacement, leaving the suggestion fences intact; `ctrl+o` edits comment and reply bodies in `$EDITOR`, while `ctrl+PgUp` / `ctrl+PgDn` scroll through code context and thread history.
+- **Visible comment focus** — focused comments and editors use bright, thick borders; unfocused comments use thin blue borders.  The sidebar separator follows the same focus distinction, and modal dialogs use thick borders.
 - **Native input cursor** — comment and reply editors position the real terminal cursor at the insertion point so terminal IMEs can display composition there, including after wrapping and scrolling.
 - **Deleted-line comments** — removed lines, including lines in fully deleted files, can be selected and commented on from the keyboard or gutter.
 - **Mouse-first TUI controls** — click file tabs, code lines, comment threads, sidebar items, dialog actions, and the review-finish button; use the wheel to scroll code and drag the gutter to select line ranges.
@@ -238,7 +238,7 @@ The selected scope stays fixed for the session.  To inspect another comparison, 
 1. An agent (or you) runs `tcrit review --code` — the TUI opens in a Herdr tab or tmux split and the command blocks
 2. Navigate between files and leave inline comments on the changes
 3. Press `q` or click the footer button — with unresolved comments the button is **Finish Review**, without any it is **Approve**
-4. On finish, the blocked command prints the unresolved comments and instructions on stdout and `approved: true|false` on stderr
+4. On finish, the blocked command prints all comment threads and replies, including resolved threads on approval, with instructions on stdout and `approved: true|false` on stderr
 5. The agent edits the files, replies with `tcrit comment --reply-to`, and runs the printed `tcrit --session <id>` to start the next round; a new TUI restores the comments and remaps their anchors onto the updated contents
 6. Resolve comments with `r` and approve to end the loop
 
@@ -283,7 +283,7 @@ Tcrit resolves the Herdr workspace, tab, and pane or the tmux server and pane fr
 1. Claude writes a plan (or you open any markdown file)
 2. `tcrit review <path>` opens the TUI — read through and leave inline comments
 3. Finish the review with `q`; comments are saved as crit-compatible `review.json` under `$XDG_STATE_HOME/tcrit/reviews/` (or `~/.local/state/tcrit/reviews/`)
-4. Claude receives the unresolved comments from the blocking command (or via `tcrit comments --json`), edits the document, and replies to each comment
+4. Claude reads all returned threads for new instructions, including resolved threads, edits the document, and replies where there is new feedback or a substantive update.  Use `tcrit comments --json --all` to retrieve all saved threads separately.
 5. Claude runs the printed `tcrit --session <id>`; a new TUI restores the review with the fixes for the next round
 
 ## Keybindings

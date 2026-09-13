@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.9.0
+
+### Added
+
+- **Saved review sessions** — stop a review with `tcrit stop --session <id>`, discover saved sessions with `tcrit status`, and resume after process exit with `tcrit --session <id>`.  Source snapshots preserve comment context across rounds; `tcrit clear --session <id>` deletes a stopped review.
+- **Read diffs without comment boxes** — `H` hides inline comments and replaces the sidebar with a narrow gutter.  Click a comment marker to open its thread; press `H` again to restore comments without changing resolved-comment folding.
+
+### Changed
+
+- Every submitted round closes its TUI and dedicated Herdr tab or tmux pane.  The next round opens a new process and restores saved comments and replies.
+- Review results include resolved threads and replies, even on approval, so final instructions survive automatic cleanup.  Bundled skills read all returned threads and reply only to new feedback or substantive updates.
+- Focused comments and editors use bright, thick borders; unfocused comments use thin blue borders.  Modal dialogs also use thick borders.
+- Saving an empty new comment or reply closes the editor without creating an entry.  Saving an unchanged edit leaves review state unchanged; clearing an existing entry and saving deletes it without another confirmation.
+- Legacy review state is ignored without a warning.
+
+### Breaking changes
+
+- Each new review receives an independent session ID, even for the same directory, scope, or plan name.  Continue an existing review explicitly with `--session <id>` instead of repeating its original command.
+- Plan revisions are stored inside their review session directory.  Submit revised plans with `tcrit plan --session <id> <file>`; plain `tcrit --session <id>` reopens saved plan or supplied-diff input.
+- `tcrit clear` refuses active reviews.  Stop the review before deleting its saved state.
+
 ## 0.8.2
 
 ### Changed
