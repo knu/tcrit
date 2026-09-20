@@ -2480,6 +2480,52 @@ func TestFileCommentShortcutCreatesSidebarOnlyComment(t *testing.T) {
 	}
 }
 
+func TestFileCommentShortcutRepliesToExistingThread(t *testing.T) {
+	for _, resolved := range []bool{false, true} {
+		for _, ownReply := range []bool{false, true} {
+			for _, hidden := range []bool{false, true} {
+				t.Run(fmt.Sprintf("resolved=%t/ownReply=%t/hidden=%t", resolved, ownReply, hidden), func(t *testing.T) {
+					app := setupAppWithDoc(t, "first\nsecond\n")
+					thread := review.Comment{
+						ID: "file-thread", Scope: "file", Body: "original", Author: app.author,
+						ReviewRound: app.reviewRound(), Resolved: resolved,
+					}
+					if ownReply {
+						thread.Replies = []review.Reply{{ID: "own-reply", Body: "previous reply", Author: app.author, ReviewRound: app.reviewRound()}}
+					}
+					app.tab().state.Comments = []review.Comment{
+						{ID: "line", Scope: "line", StartLine: 1, EndLine: 1, Body: "line comment"},
+						thread,
+						{ID: "other-file-thread", Scope: "file", Body: "another thread"},
+					}
+					app.hideComments = hidden
+					app.updateCommentSidebar()
+					app = pressKey(app, 'f')
+					if app.modal != replyModal || app.editingID != thread.ID || app.editingReplyID != "" {
+						t.Fatalf("f opened modal %v for %q/%q, want a new reply to %q", app.modal, app.editingID, app.editingReplyID, thread.ID)
+					}
+					if app.modalTextarea.Value() != "" || !app.modalTextarea.Focused() || app.modalInitial != "" {
+						t.Fatal("reply editor should be empty and focused")
+					}
+					app.modalTextarea.SetValue("new reply")
+					app.modalSubmit()
+					comments := app.session.FileComments(app.tab().path)
+					if len(comments) != 3 {
+						t.Fatalf("got %d threads, want 3", len(comments))
+					}
+					got := comments[1]
+					if got.Body != thread.Body || got.Resolved || len(got.Replies) != len(thread.Replies)+1 || got.Replies[len(got.Replies)-1].Body != "new reply" {
+						t.Fatalf("persisted thread = %+v, want original body and appended reply", got)
+					}
+					if ownReply && got.Replies[0].Body != "previous reply" {
+						t.Fatal("existing reply was overwritten")
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestSuggestionButtonInsertsSelectedCodeAndPersistsComment(t *testing.T) {
 	app := setupAppWithDoc(t, "first\nsecond\nthird\n")
 	app.tabs[0].selecting = true

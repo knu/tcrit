@@ -643,6 +643,20 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, keys.FileComment):
 		if !t.selecting && t.state != nil {
+			for _, c := range t.state.Comments {
+				if c.Scope == "file" {
+					m.editingID = c.ID
+					m.editingReplyID = ""
+					m.modalReferenceOffset = -1
+					m.modal = replyModal
+					m.modalFocus = 0
+					m.modalTextarea.Placeholder = "Write a reply..."
+					m.modalTextarea.Reset()
+					m.modalInitial = ""
+					m.modalTextarea.Focus()
+					return m, nil
+				}
+			}
 			m.modal = fileCommentModal
 			m.modalFocus = 0
 			m.modalTextarea.Placeholder = "Type your file comment..."
