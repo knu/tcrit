@@ -46,6 +46,49 @@ func setupAppWithDoc(t *testing.T, content string) AppModel {
 	return a
 }
 
+func TestFileTabNavigationKeepsPaneFocus(t *testing.T) {
+	for _, sidebar := range []bool{false, true} {
+		for _, comments := range []bool{false, true} {
+			t.Run(fmt.Sprintf("sidebar=%t/comments=%t", sidebar, comments), func(t *testing.T) {
+				app := setupAppWithDoc(t, "first file\n")
+				second := setupAppWithDoc(t, "second file\n")
+				app.tabs = append(app.tabs, second.tabs[0])
+				app.multiFile = true
+				if sidebar {
+					app.focused = commentPane
+				}
+				if comments {
+					for i := range app.tabs {
+						app.tabs[i].state.Comments = []review.Comment{{
+							ID: fmt.Sprintf("comment-%d", i), Scope: "file", Body: fmt.Sprintf("file %d", i),
+						}}
+					}
+				}
+				app.updateCommentSidebar()
+				focus := app.focused
+				for _, step := range []struct {
+					mod  tea.KeyMod
+					want int
+				}{
+					{tea.ModShift, 0},
+					{0, 1},
+					{0, 1},
+					{tea.ModShift, 0},
+				} {
+					updated, _ := app.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: step.mod})
+					app = *updated.(*AppModel)
+					if app.activeTab != step.want || app.focused != focus {
+						t.Fatalf("tab/focus = %d/%v, want %d/%v", app.activeTab, app.focused, step.want, focus)
+					}
+					if comments && app.tab().sidebarItems[0].id != fmt.Sprintf("comment-%d", step.want) {
+						t.Fatal("sidebar did not switch to the active file's comments")
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestRenderHeaderUsesTCritBrand(t *testing.T) {
 	tests := []struct {
 		name  string

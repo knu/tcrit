@@ -325,7 +325,7 @@ Tcrit resolves the Herdr workspace, tab, and pane or the tmux server and pane fr
 
 | Key                 | Action                         |
 |---------------------|--------------------------------|
-| `tab` / `shift+tab` | Next / previous file tab       |
+| `tab` / `shift+tab` | Next / previous file tab from the content pane or sidebar; keep pane focus |
 | `n` / `N`           | Jump to next / previous change |
 | `/`                 | Search file tabs               |
 

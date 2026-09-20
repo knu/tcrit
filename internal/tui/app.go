@@ -653,7 +653,7 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Tab switching (multi-file mode)
-	if m.multiFile && m.focused == contentPane && !t.selecting {
+	if m.multiFile && !t.selecting {
 		switch {
 		case key.Matches(msg, keys.PrevTab):
 			if m.activeTab > 0 {
@@ -669,6 +669,11 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.updateCommentSidebar()
 			}
 			return m, nil
+		}
+	}
+
+	if m.multiFile && m.focused == contentPane && !t.selecting {
+		switch {
 		case key.Matches(msg, keys.TabSearch):
 			m.tabSearching = true
 			m.tabSearch = ""
