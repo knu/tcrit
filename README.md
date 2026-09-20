@@ -22,6 +22,7 @@
 - **Native input cursor** — comment and reply editors position the real terminal cursor at the insertion point so terminal IMEs can display composition there, including after wrapping and scrolling.
 - **Deleted-line comments** — removed lines, including lines in fully deleted files, can be selected and commented on from the keyboard or gutter.
 - **Mouse-first TUI controls** — click file tabs, code lines, comment threads, sidebar items, dialog actions, and the review-finish button; use the wheel to scroll code and drag the gutter to select line ranges.
+- **Combined change and comment navigation** — `n` / `N` visit change hunks and unresolved comments in display order across files, from either pane.  File comments and separate threads on the same line are included; resolved comments are skipped even when unfolded.
 - **Versioned plan reviews** — `tcrit plan` saves immutable revisions and carries comment threads forward as the plan changes.
 - **Richer review lifecycle** — comment threads can be replied to, resolved, reopened, and approved together.  Resolving with `r` advances to the next unresolved thread across files, or returns focus to the source when none remain.  Resolved inline and file-comment threads expand on keyboard focus, click, or wheel scrolling, keeping their resolved status, and collapse again when focus leaves.  Press `h` to unfold resolved comments across all files, including line comments in the sidebar; press it again to restore folding.  Unfolded threads use the same compact latest-message view as open threads until focused.  Complete code context and thread history remain scrollable while editing, and `[` / `]` and `n` / `N` navigate comments (including file comments) and changes across files.  Comment navigation skips resolved threads while folded and includes them when unfolded with `h`.
 - **Improved diffs and Git handling** — inline replacements preserve whitespace, long syntax-highlighted lines wrap instead of being truncated, comment anchors survive edited rounds, and paths with spaces or special characters work correctly.
@@ -329,9 +330,11 @@ Ignore whitespace is off by default and lasts for the current TUI run.  It ignor
 
 | Key                 | Action                         |
 |---------------------|--------------------------------|
-| `tab` / `shift+tab` | Next / previous file tab       |
-| `n` / `N`           | Jump to next / previous change |
+| `tab` / `shift+tab` | Next / previous file tab from the content pane or sidebar; keep pane focus |
+| `n` / `N`           | Jump to next / previous change or unresolved comment from either pane |
 | `/`                 | Search file tabs               |
+
+`n` / `N` visit change hunks and unresolved comments in display order across files, including file comments and separate threads on the same line.  They stop at the review boundaries and skip resolved comments even when unfolded with `h`.  Jumping to a comment reveals comments hidden with `H`.
 
 ## Mouse controls
 
