@@ -21,7 +21,8 @@ type FileTab struct {
 	path          string
 	doc           *document.Document
 	state         *fileReview
-	changedLines  map[int]bool // line numbers that are added/modified
+	diff          *gitpkg.DiffInfo // original diff, retained when whitespace is ignored
+	changedLines  map[int]bool     // line numbers that are added/modified
 	inlineChanges map[int][]gitpkg.InlineSegment
 	deletedAfter  map[int][]gitpkg.DeletedLine // deleted lines keyed by new-file line they appear after
 	changeChunks  []changeChunk                // contiguous groups of changed lines
@@ -65,6 +66,7 @@ func newFileTab(path string, diff *gitpkg.DiffInfo) FileTab {
 	ft := FileTab{
 		path:       path,
 		cursorLine: 1,
+		diff:       diff,
 	}
 	if diff != nil {
 		ft.changedLines = diff.ChangedLines

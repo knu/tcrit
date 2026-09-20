@@ -80,12 +80,13 @@ type AppModel struct {
 	filePath string
 
 	// Review session backing all tabs, and the author stamped on new comments.
-	session       *review.Session
-	author        string
-	authorColors  map[string]int
-	threadScrolls map[threadViewKey]threadScroll
-	showResolved  bool
-	hideComments  bool
+	session          *review.Session
+	author           string
+	authorColors     map[string]int
+	threadScrolls    map[threadViewKey]threadScroll
+	showResolved     bool
+	hideComments     bool
+	ignoreWhitespace bool
 
 	// Finish-flow state (see AppConfig).
 	finishCh chan<- FinishEvent
@@ -572,6 +573,12 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, keys.Help):
 		m.modal = helpModal
+		return m, nil
+
+	case key.Matches(msg, keys.IgnoreWhitespace):
+		if m.multiFile {
+			m.toggleWhitespace()
+		}
 		return m, nil
 
 	case key.Matches(msg, keys.FoldResolved, keys.HideComments):
@@ -2969,6 +2976,9 @@ func (m AppModel) renderHeader() string {
 	}
 
 	prefix := " TCrit: "
+	if m.ignoreWhitespace {
+		prefix += "[Whitespace ignored] "
+	}
 	if m.hideComments {
 		prefix += "[Comments hidden: H] "
 	}
@@ -3966,9 +3976,9 @@ func (m AppModel) renderHelp(innerWidth int) string {
 		{keys: "s", desc: "sidebar"},
 		{keys: "r", desc: "resolve"},
 		{keys: "h/H", desc: "fold/hide"},
+		{keys: "w", desc: "ignore WS"},
 		{keys: "d", desc: "delete comment"},
 		{keys: "q/ctrl+c", desc: "finish"},
-		{keys: "?", desc: "help"},
 	}, columnWidth)
 
 	navigation := renderHelpGroup("Navigation", []helpItem{

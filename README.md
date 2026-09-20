@@ -25,6 +25,7 @@
 - **Versioned plan reviews** — `tcrit plan` saves immutable revisions and carries comment threads forward as the plan changes.
 - **Richer review lifecycle** — comment threads can be replied to, resolved, reopened, and approved together.  Resolving with `r` advances to the next unresolved thread across files, or returns focus to the source when none remain.  Resolved inline and file-comment threads expand on keyboard focus, click, or wheel scrolling, keeping their resolved status, and collapse again when focus leaves.  Press `h` to unfold resolved comments across all files, including line comments in the sidebar; press it again to restore folding.  Unfolded threads use the same compact latest-message view as open threads until focused.  Complete code context and thread history remain scrollable while editing, and `[` / `]` and `n` / `N` navigate comments (including file comments) and changes across files.  Comment navigation skips resolved threads while folded and includes them when unfolded with `h`.
 - **Improved diffs and Git handling** — inline replacements preserve whitespace, long syntax-highlighted lines wrap instead of being truncated, comment anchors survive edited rounds, and paths with spaces or special characters work correctly.
+- **Ignore whitespace** — press `w` to toggle whitespace-insensitive diffs across all files, including supplied patches.  Source text and comment anchors stay intact, and `n` / `N` skips whitespace-only changes.
 - **Agent integrations** — one command installs the shared `tcrit` review loop and `tcrit-cli` reference for Claude Code, Codex, OpenCode, and Gemini CLI. The current agent handles review rounds with the original task context; the loop picks code, document, or plan review from its arguments instead of asking.
   The skills limit replies to new feedback or substantive updates, and require stopping an abandoned review before opening another TUI in the same directory.
 - **[Crit](https://crit.md/) CLI alignment** — customizable finish prompts, unified integration installers, and `tcrit check` were added as part of adopting the Crit CLI workflow.
@@ -300,11 +301,14 @@ Tcrit resolves the Herdr workspace, tab, and pane or the tmux server and pane fr
 | `[` / `]`                             | Jump to prev / next comment; skip resolved comments unless unfolded with `h` |
 | `h`                                   | Toggle folding resolved comments across all files |
 | `H`                                   | Hide/show comment boxes across all files; show line markers in a narrow right gutter |
+| `w`                                   | Toggle ignore whitespace across all files in code reviews |
 | `r`                                   | Resolve / unresolve the focused comment; resolving jumps to the next unresolved thread, or returns focus to the source if none remain |
 | `d`                                   | Delete the selected comment after confirmation |
 | `ctrl+PgUp` / `ctrl+PgDn`               | Scroll the selected inline or sidebar thread |
 | `?`                                   | Show all keyboard shortcuts              |
 | `q`                                   | Finish review (Approve when no unresolved comments remain) |
+
+Ignore whitespace is off by default and lasts for the current TUI run.  It ignores changes in spaces, tabs, carriage returns (CR, `\r`, including LF ↔ CRLF changes), and other ASCII whitespace within a line, including inside strings; it still shows added or deleted blank lines.  The header indicates when it is enabled.  Existing comments on ignored old-side lines retain their context, and files remain available even if all their changes are ignored.
 
 **Comment dialogs:**
 
