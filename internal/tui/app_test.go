@@ -1726,6 +1726,9 @@ func newChangeNavigationTestApp() AppModel {
 
 func TestChangeNavigationCrossesFilesWithoutWrapping(t *testing.T) {
 	app := newChangeNavigationTestApp()
+	for i := range app.tabs {
+		app.tabs[i].state.Comments = nil
+	}
 	app.tabs[0].cursorLine = 4
 
 	app = pressKey(app, 'n')
@@ -1750,6 +1753,93 @@ func TestChangeNavigationCrossesFilesWithoutWrapping(t *testing.T) {
 	app = pressKey(app, 'N')
 	if app.activeTab != 0 || app.tab().cursorLine != 2 {
 		t.Fatalf("previous change wrapped to tab %d, line %d", app.activeTab, app.tab().cursorLine)
+	}
+}
+
+func TestChangeNavigationIncludesUnresolvedComments(t *testing.T) {
+	for _, showResolved := range []bool{false, true} {
+		t.Run(fmt.Sprintf("showResolved=%t", showResolved), func(t *testing.T) {
+			app := newChangeNavigationTestApp()
+			app.showResolved = showResolved
+			app.tabs[0].state.Comments[1].Resolved = true
+			app.tabs[0].state.Comments = append(app.tabs[0].state.Comments,
+				review.Comment{ID: "same-line", StartLine: 2, EndLine: 2},
+				review.Comment{ID: "inside-hunk", StartLine: 3, EndLine: 3},
+				review.Comment{ID: "file", Scope: "file"})
+			app.tabs[0].changeChunks[0].endLine = 3
+			app.tabs[1].state.Comments = []review.Comment{{ID: "comments-only", Scope: "file"}}
+			app = pressKey(app, 'N')
+			if app.selectedCommentID() != "file" || app.focused != commentPane {
+				t.Fatal("previous target should be the file comment")
+			}
+			type stop struct {
+				tab  int
+				line int
+				id   string
+			}
+			stops := []stop{
+				{0, 0, "file"}, {0, 2, ""}, {0, 2, "first-a"}, {0, 2, "same-line"},
+				{0, 3, "inside-hunk"}, {0, 4, ""}, {0, 4, "first-c"},
+				{1, 0, "comments-only"}, {2, 1, ""}, {2, 1, "last-a"},
+				{2, 3, ""}, {2, 3, "last-b"},
+			}
+			check := func(want stop) {
+				t.Helper()
+				if app.activeTab != want.tab || app.selectedCommentID() != want.id ||
+					(want.line != 0 && app.tab().cursorLine != want.line) {
+					t.Fatalf("got tab=%d line=%d comment=%q, want %+v", app.activeTab, app.tab().cursorLine, app.selectedCommentID(), want)
+				}
+				if want.id == "" && app.focused != contentPane {
+					t.Fatal("change should focus content")
+				}
+			}
+			for _, want := range stops[1:] {
+				app = pressKey(app, 'n')
+				check(want)
+			}
+			app = pressKey(app, 'n')
+			check(stops[len(stops)-1])
+			for i := len(stops) - 2; i >= 0; i-- {
+				app = pressKey(app, 'N')
+				check(stops[i])
+			}
+			app = pressKey(app, 'N')
+			check(stops[0])
+		})
+	}
+}
+
+func TestChangeNavigationFromResolvedAndHiddenComments(t *testing.T) {
+	app := newChangeNavigationTestApp()
+	app.tabs[0].state.Comments[0].Resolved = true
+	app.tabs[0].cursorLine = 2
+	app.tabs[0].cursorOnAnnotation = true
+	app = pressKey(app, 'n')
+	if app.selectedCommentID() != "first-b" {
+		t.Fatal("should advance from a resolved comment to the next unresolved thread")
+	}
+	app.tabs[0].cursorOnAnnotation = false
+	app.hideComments = true
+	app = pressKey(app, 'n')
+	if app.hideComments || app.selectedCommentID() != "first-b" {
+		t.Fatal("should reveal the unresolved navigation target")
+	}
+}
+
+func TestChangeNavigationStopsAtTrailingDeletion(t *testing.T) {
+	app := newChangeNavigationTestApp()
+	app.tabs = app.tabs[:1]
+	app.tab().state.Comments = nil
+	app.tab().changeChunks = []changeChunk{{startLine: 2, endLine: 2}, {startLine: 5, endLine: 5}}
+	app.tab().cursorLine = 4
+	app = pressKey(app, 'n')
+	app = pressKey(app, 'n')
+	if app.tab().cursorLine != 5 {
+		t.Fatal("navigation should stop at the trailing deletion")
+	}
+	app = pressKey(app, 'N')
+	if app.tab().cursorLine != 2 {
+		t.Fatal("previous should return from the trailing deletion to the earlier hunk")
 	}
 }
 
@@ -1805,7 +1895,7 @@ func TestHelpModalShowsAllShortcutGroupsAndCloses(t *testing.T) {
 	rendered := app.renderWithModal(background)
 	for _, want := range []string{
 		"Keyboard Help", "General", "Navigation", "Code review", "Selection and dialogs",
-		"↑/↓,j/k", "PgUp/PgDn", "Home/End,g/G,</>", "tab/shift+tab", "ctrl+s", "ctrl+PgUp/PgDn", "y/n/esc", "Backspace",
+		"↑/↓,j/k", "PgUp/PgDn", "Home/End,g/G,</>", "tab/S-tab", "ctrl+s", "ctrl+PgUp/PgDn", "y/n/esc", "Backspace",
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Errorf("help modal does not contain %q", want)

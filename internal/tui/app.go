@@ -692,6 +692,17 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if !t.selecting {
+		switch {
+		case key.Matches(msg, keys.NextChange):
+			m.jumpToChange(1)
+			return m, nil
+		case key.Matches(msg, keys.PrevChange):
+			m.jumpToChange(-1)
+			return m, nil
+		}
+	}
+
 	if m.focused == contentPane && !t.selecting {
 		switch {
 		case key.Matches(msg, keys.NextComment):
@@ -699,12 +710,6 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case key.Matches(msg, keys.PrevComment):
 			m.jumpToComment(-1)
-			return m, nil
-		case key.Matches(msg, keys.NextChange):
-			m.jumpToChange(1)
-			return m, nil
-		case key.Matches(msg, keys.PrevChange):
-			m.jumpToChange(-1)
 			return m, nil
 		}
 	}
@@ -1964,50 +1969,116 @@ func (m *AppModel) selectComment(tabIndex int, target commentTarget) {
 	m.scrollToCursor()
 }
 
-// jumpToChange moves to the adjacent change in tab and line order.  Unlike
-// comment navigation, it stops at the beginning and end of the review.
-func (m *AppModel) jumpToChange(step int) bool {
-	t := m.tab()
-	if step > 0 {
-		for _, chunk := range t.changeChunks {
-			if chunk.startLine > t.cursorLine {
-				m.selectChange(m.activeTab, chunk)
-				return true
-			}
-		}
-	} else {
-		for i := len(t.changeChunks) - 1; i >= 0; i-- {
-			if t.changeChunks[i].startLine < t.cursorLine {
-				m.selectChange(m.activeTab, t.changeChunks[i])
-				return true
-			}
-		}
-	}
+type changeTarget struct {
+	position int
+	chunk    changeChunk
+	comment  commentTarget
+}
 
-	for tabIndex := m.activeTab + step; tabIndex >= 0 && tabIndex < len(m.tabs); tabIndex += step {
-		chunks := m.tabs[tabIndex].changeChunks
-		if len(chunks) == 0 {
-			continue
+func (m *AppModel) changeTargets(tabIndex int) []changeTarget {
+	t := &m.tabs[tabIndex]
+	lines := m.visualLines(t)
+	positions := make(map[lineRef]int, len(lines))
+	for i, line := range lines {
+		positions[line] = i
+	}
+	var targets []changeTarget
+	for _, chunk := range t.changeChunks {
+		position, ok := positions[m.changeCursor(t, chunk)]
+		if !ok {
+			position = len(lines) // A trailing deletion can anchor past EOF.
 		}
-		chunk := chunks[0]
+		targets = append(targets, changeTarget{position: position, chunk: chunk})
+	}
+	for _, comment := range m.commentTargets(tabIndex) {
+		position := -1
+		if comment.scope != "file" {
+			var ok bool
+			position, ok = positions[lineRef{side: comment.side, line: comment.line}]
+			if !ok {
+				continue
+			}
+		}
+		targets = append(targets, changeTarget{position: position, comment: comment})
+	}
+	sort.SliceStable(targets, func(i, j int) bool {
+		return targets[i].position < targets[j].position
+	})
+	return targets
+}
+
+// jumpToChange visits changes and unresolved comments in display order,
+// stopping at the beginning and end of the review.
+func (m *AppModel) jumpToChange(step int) bool {
+	currentID := m.selectedCommentID()
+	t := m.tab()
+	cursor := m.visualLineIndex(t, lineRef{side: t.cursorSide, line: t.cursorLine})
+	if cursor < 0 && t.cursorSide == "" && t.doc != nil && t.cursorLine > t.doc.LineCount() {
+		cursor = len(m.visualLines(t))
+	}
+	for tabIndex := m.activeTab; tabIndex >= 0 && tabIndex < len(m.tabs); tabIndex += step {
+		targets := m.changeTargets(tabIndex)
+		current := -1
+		if tabIndex == m.activeTab && currentID != "" {
+			for i, target := range targets {
+				if target.comment.id == currentID {
+					current = i
+					break
+				}
+			}
+		}
+		start := 0
 		if step < 0 {
-			chunk = chunks[len(chunks)-1]
+			start = len(targets) - 1
 		}
-		m.selectChange(tabIndex, chunk)
-		return true
+		for i := start; i >= 0 && i < len(targets); i += step {
+			target := targets[i]
+			if target.comment.resolved {
+				continue
+			}
+			if tabIndex == m.activeTab {
+				if current >= 0 {
+					if (i-current)*step <= 0 {
+						continue
+					}
+				} else if step > 0 {
+					if target.position < cursor || (target.position == cursor && target.comment.id == "") {
+						continue
+					}
+				} else if target.position >= cursor {
+					continue
+				}
+			}
+			if target.comment.id != "" {
+				if m.hideComments {
+					m.hideComments = false
+					m.recalculateLayout()
+				}
+				m.selectComment(tabIndex, target.comment)
+			} else {
+				m.focused = contentPane
+				m.selectChange(tabIndex, target.chunk)
+			}
+			return true
+		}
 	}
 	return false
+}
+
+func (m *AppModel) changeCursor(t *FileTab, chunk changeChunk) lineRef {
+	if m.patch != nil && t.doc != nil && !t.doc.HasLine(chunk.startLine) {
+		if dels := t.deletedAfter[chunk.startLine-1]; len(dels) > 0 {
+			return lineRef{line: dels[0].OldLineNum, side: "old"}
+		}
+	}
+	return lineRef{line: chunk.startLine}
 }
 
 func (m *AppModel) selectChange(tabIndex int, chunk changeChunk) {
 	m.activeTab = tabIndex
 	t := m.tab()
-	t.cursorLine, t.cursorSide = chunk.startLine, ""
-	if m.patch != nil && t.doc != nil && !t.doc.HasLine(chunk.startLine) {
-		if dels := t.deletedAfter[chunk.startLine-1]; len(dels) > 0 {
-			t.cursorLine, t.cursorSide = dels[0].OldLineNum, "old"
-		}
-	}
+	cursor := m.changeCursor(t, chunk)
+	t.cursorLine, t.cursorSide = cursor.line, cursor.side
 	t.cursorOnAnnotation = false
 	t.cursorAnnoIdx = 0
 	m.rebuildContent()
@@ -3920,7 +3991,7 @@ func (m AppModel) renderFooter() string {
 		if m.multiFile {
 			items = append([]string{
 				k("tab/S-tab", "next/prev tab"),
-				k("n/N", "next/prev change"),
+				k("n/N", "change/open comment"),
 			}, items...)
 		}
 		items = append([]string{m.renderModalButton(m.finishActionLabel(), "q", true)}, items...)
@@ -3984,11 +4055,11 @@ func (m AppModel) renderHelp(innerWidth int) string {
 		{keys: "[/]", desc: "comments"},
 	}, columnWidth)
 	codeReview := renderHelpGroup("Code review / search", []helpItem{
-		{keys: "tab/shift+tab", desc: "files"},
+		{keys: "tab/S-tab", desc: "files"},
 		{keys: "1-9", desc: "file tab"},
 		{keys: "/", desc: "search"},
-		{keys: "n/N", desc: "changes"},
-		{keys: "type/Backspace", desc: "filter"},
+		{keys: "n/N", desc: "diff/open"},
+		{keys: "Backspace", desc: "filter"},
 		{keys: "tab", desc: "next match"},
 		{keys: "enter/esc", desc: "open/cancel"},
 	}, columnWidth)

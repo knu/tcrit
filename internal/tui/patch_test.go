@@ -72,6 +72,29 @@ func TestPatchZeroContextDeletionNavigation(t *testing.T) {
 	}
 }
 
+func TestChangeNavigationVisitsDeletedLineComments(t *testing.T) {
+	m := patchApp(t, "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -10,2 +9,0 @@\n-old\n-more\n")
+	m.tab().state.Comments = []review.Comment{
+		{ID: "old-first", Side: "old", StartLine: 10, EndLine: 10},
+		{ID: "old-second", Side: "old", StartLine: 11, EndLine: 11},
+	}
+	m.selectChange(0, m.tab().changeChunks[0])
+	for _, id := range []string{"old-first", "old-second", "old-second"} {
+		m = pressKey(m, 'n')
+		if m.selectedCommentID() != id || m.tab().cursorSide != "old" {
+			t.Fatalf("next comment = %q, side = %q; want %q on old side", m.selectedCommentID(), m.tab().cursorSide, id)
+		}
+	}
+	m = pressKey(m, 'N')
+	if m.selectedCommentID() != "old-first" {
+		t.Fatal("previous should visit the first deleted-line comment")
+	}
+	m = pressKey(m, 'N')
+	if m.tab().cursorOnAnnotation || m.tab().cursorSide != "old" || m.tab().cursorLine != 10 {
+		t.Fatal("previous should return to the deletion hunk")
+	}
+}
+
 func TestPatchRoundRefreshesSnapshot(t *testing.T) {
 	m := patchApp(t, "diff --git a/a.txt b/a.txt\nnew file mode 100644\n--- /dev/null\n+++ b/a.txt\n@@ -0,0 +1 @@\n+first\n")
 	m.tab().state.Comments = []review.Comment{{ID: "c1", Scope: "file", Body: "keep this thread"}}
