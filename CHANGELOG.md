@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.1
+
+### Added
+
+- **Ignore whitespace** — `w` toggles whitespace-insensitive diffs across all files in Git and supplied-diff reviews.  Whitespace-only changes are excluded from highlighting and `n` / `N` navigation while source text, line numbers, and comment context remain intact.  Added and deleted blank lines remain visible; the setting lasts for the current TUI run.
+
+### Changed
+
+- `n` / `N` visits change hunks and unresolved comment threads in display order from either pane, including file comments, deleted-line comments, and multiple threads on one line.  Selecting a hidden comment reveals it; resolved threads are skipped.
+- `Tab` / `Shift+Tab` switches file tabs from the sidebar as well as the content pane, preserving pane focus.
+
 ## 0.9.0
 
 ### Added
