@@ -1470,6 +1470,133 @@ func TestMouseClickOpensFocusedInlineComment(t *testing.T) {
 	}
 }
 
+func TestMouseClickTogglesCommentResolution(t *testing.T) {
+	for _, location := range []string{"inline", "sidebar", "file"} {
+		for _, width := range []int{60, 120} {
+			for _, multiFile := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/width=%d/multiFile=%t", location, width, multiFile), func(t *testing.T) {
+					app := setupAppWithDoc(t, strings.Repeat("source line\n", 30))
+					app.width, app.height, app.multiFile = width, 30, multiFile
+					comment := review.Comment{
+						ID: "thread", StartLine: 1, EndLine: 1, Body: "original",
+						Author: "日本語の長い名前", Replies: []review.Reply{{Body: "reply", Author: "AI"}},
+					}
+					if location == "file" {
+						comment.Scope, comment.StartLine, comment.EndLine = "file", 0, 0
+					}
+					app.tab().state.Comments = []review.Comment{comment}
+					app.showResolved = location == "sidebar"
+					app.recalculateLayout()
+					app.updateCommentSidebar()
+					app.rebuildContent()
+					for _, label := range []string{"☐ Resolve", "☑︎ Resolved"} {
+						left, top, right, bottom := app.contentBounds()
+						if location == "inline" {
+							app.contentViewport.SetYOffset(max(0, app.contentLayout.resolve[0].rect.top-1))
+						} else {
+							left, top, right, bottom = app.commentBounds()
+							app.commentViewport.SetYOffset(max(0, app.sidebarResolve[0].rect.top-1))
+						}
+						clicked := false
+						for y, line := range strings.Split(ansi.Strip(app.View().Content), "\n") {
+							if y < top || y >= bottom {
+								continue
+							}
+							pane := ansi.Cut(line, left, right)
+							if index := strings.Index(pane, label); index >= 0 {
+								app = clickMouse(app, left+lipgloss.Width(pane[:index])+2, y)
+								clicked = true
+								break
+							}
+						}
+						if !clicked {
+							t.Fatalf("button %q not visible:\n%s", label, ansi.Strip(app.View().Content))
+						}
+						wantResolved := label == "☐ Resolve"
+						for _, comments := range [][]review.Comment{app.tab().state.Comments, app.session.FileComments(app.tab().path)} {
+							if len(comments) != 1 || comments[0].Resolved != wantResolved {
+								t.Fatalf("comments = %+v, want resolved=%t", comments, wantResolved)
+							}
+						}
+						if app.modal != noModal {
+							t.Fatalf("resolve click opened modal %v", app.modal)
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestResolveButtonPositionSurvivesCollapse(t *testing.T) {
+	for _, width := range []int{20, 24, 32, 40} {
+		for _, replies := range []int{0, 2} {
+			t.Run(fmt.Sprintf("width=%d/replies=%d", width, replies), func(t *testing.T) {
+				app := setupAppWithDoc(t, "source\n")
+				comment := review.Comment{ID: "thread", StartLine: 1, EndLine: 1, Body: "body", Author: "Long reviewer name"}
+				for range replies {
+					comment.Replies = append(comment.Replies, review.Reply{Body: "reply"})
+				}
+				var inline, sidebar mouseRect
+				for _, resolved := range []bool{false, true} {
+					comment.Resolved = resolved
+					box, button := app.renderAnnotationBox(newAnnotation(comment), width, false)
+					if resolved {
+						if button != inline || strings.Contains(ansi.Strip(box), comment.Author) {
+							t.Fatalf("collapsed inline button = %+v, want %+v; box=%q", button, inline, ansi.Strip(box))
+						}
+					} else {
+						inline = button
+					}
+					comment.Scope = "file"
+					app.tab().state.Comments = []review.Comment{comment}
+					app.commentViewport.SetWidth(width)
+					app.commentViewport.SetHeight(20)
+					app.updateCommentSidebar()
+					button = app.sidebarResolve[0].rect
+					if resolved {
+						if button != sidebar || strings.Contains(ansi.Strip(app.commentViewport.View()), comment.Author) {
+							t.Fatalf("collapsed sidebar button = %+v, want %+v", button, sidebar)
+						}
+					} else {
+						sidebar = button
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestReviewFrameFitsTerminalWithSidebar(t *testing.T) {
+	for _, width := range []int{60, 120} {
+		for _, hidden := range []bool{false, true} {
+			t.Run(fmt.Sprintf("width=%d/hidden=%t", width, hidden), func(t *testing.T) {
+				app := setupAppWithDoc(t, strings.Repeat("source\n", 30))
+				app.width, app.height, app.multiFile = width, 30, true
+				app.hideComments = hidden
+				app.tab().state.Comments = []review.Comment{{ID: "file", Scope: "file", Body: "comment"}}
+				app.recalculateLayout()
+				app.updateCommentSidebar()
+				app.rebuildContent()
+				rows := strings.Split(ansi.Strip(app.View().Content), "\n")
+				_, top, contentRight, bottom := app.contentBounds()
+				for y := top; y < bottom; y++ {
+					if lipgloss.Width(rows[y]) != width || ansi.Cut(rows[y], width-1, width) != "│" {
+						t.Fatalf("row %d: width=%d, want %d with right border at last column; %q", y, lipgloss.Width(rows[y]), width, rows[y])
+					}
+				}
+				left, _, right, _ := app.commentBounds()
+				if left != contentRight || right != width-1 {
+					t.Fatalf("sidebar bounds [%d,%d), want [%d,%d)", left, right, contentRight, width-1)
+				}
+				if !hidden && ansi.Cut(rows[top], left, left+1) != "│" {
+					t.Fatal("sidebar mouse bounds should start at its rendered divider")
+				}
+			})
+		}
+	}
+}
+
 func TestMouseClickFocusesSidebar(t *testing.T) {
 	app := setupAppWithDoc(t, "first\nsecond\n")
 	app.width = 100
@@ -2767,8 +2894,8 @@ func TestRenderAnnotationBoxCollapsesResolvedThread(t *testing.T) {
 		Replies: []review.Reply{{Author: "AI", Body: "fixed"}},
 	})
 
-	box := app.renderAnnotationBox(ann, 40, false)
-	if !strings.Contains(box, "resolved") {
+	box, _ := app.renderAnnotationBox(ann, 40, false)
+	if !strings.Contains(box, "Resolved") {
 		t.Fatalf("resolved annotation box = %q", box)
 	}
 	if strings.Contains(box, "please fix") || strings.Contains(box, "fixed") {
@@ -3420,7 +3547,7 @@ func TestCommentSidebarCollapsesResolvedFileComments(t *testing.T) {
 		t.Fatalf("sidebar items = %+v, want the resolved file comment first", items)
 	}
 	rendered := ansi.Strip(app.commentViewport.View())
-	if !strings.Contains(rendered, "✓ resolved") || strings.Contains(rendered, fileComment.Body) {
+	if !strings.Contains(rendered, "☑︎ Resolved") || strings.Contains(rendered, fileComment.Body) {
 		t.Fatalf("sidebar = %q, want a collapsed resolved header without the body", rendered)
 	}
 

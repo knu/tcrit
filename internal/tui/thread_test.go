@@ -213,7 +213,7 @@ func TestResolvedThreadsExpandOnFocus(t *testing.T) {
 					}
 					return ansi.Strip(app.contentViewport.View())
 				}
-				if got := view(); strings.Contains(got, "latest reply") || !strings.Contains(got, "resolved") {
+				if got := view(); strings.Contains(got, "latest reply") || !strings.Contains(got, "Resolved") {
 					t.Fatalf("unfocused resolved thread = %q", got)
 				}
 				left, top, _, _ := app.contentBounds()
@@ -230,7 +230,7 @@ func TestResolvedThreadsExpandOnFocus(t *testing.T) {
 				case "wheel":
 					app = wheelMouse(app, x, y, tea.MouseWheelUp)
 				}
-				if got := view(); !strings.Contains(got, "history") || !strings.Contains(got, "resolved") {
+				if got := view(); !strings.Contains(got, "history") || !strings.Contains(got, "Resolved") {
 					t.Fatalf("focused resolved thread = %q", got)
 				}
 				if !app.tab().state.Comments[0].Resolved {
