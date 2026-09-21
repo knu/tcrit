@@ -180,7 +180,7 @@ func (l *renderedContentLayout) appendBlock(b *strings.Builder, block string, ta
 		b.WriteByte('\n')
 		l.rows = append(l.rows, target)
 	}
-	if target.line <= 0 {
+	if target.line <= 0 && !target.annotation {
 		return
 	}
 	ranges := l.lineRanges
@@ -397,6 +397,9 @@ func (m *AppModel) visualLines(t *FileTab) []lineRef {
 
 func (m *AppModel) adjacentLine(t *FileTab, step int) (lineRef, bool) {
 	lines := m.visualLines(t)
+	if t.cursorLine == 0 && step > 0 && len(lines) > 0 {
+		return lines[0], true
+	}
 	for i, ref := range lines {
 		if ref.line != t.cursorLine || ref.side != t.cursorSide {
 			continue
@@ -607,6 +610,9 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.hideComments = !m.hideComments
 			m.focused = contentPane
 			t.cursorOnAnnotation = false
+			if t.cursorLine == 0 {
+				m.moveCursorBy(t, 1, 1)
+			}
 			m.recalculateLayout()
 		} else {
 			m.showResolved = !m.showResolved
@@ -644,7 +650,7 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, keys.VisualMode):
-		if m.focused == contentPane && t.doc != nil {
+		if m.focused == contentPane && t.doc != nil && t.cursorLine > 0 {
 			if t.selecting {
 				t.selecting = false
 			} else {
@@ -753,7 +759,7 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Content pane cursor movement (annotation-aware)
-	if m.focused == contentPane && t.doc != nil {
+	if m.focused == contentPane && (t.doc != nil || t.cursorOnAnnotation) {
 		moved := false
 		if m.hideComments && key.Matches(msg, keys.Up, keys.Down) {
 			t.cursorOnAnnotation = false
@@ -785,7 +791,7 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if t.cursorOnAnnotation {
 				if t.cursorAnnoIdx > 0 {
 					t.cursorAnnoIdx--
-				} else {
+				} else if t.cursorLine != 0 {
 					t.cursorOnAnnotation = false
 					t.cursorAnnoIdx = 0
 				}
@@ -798,6 +804,11 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 						t.cursorAnnoIdx = len(anns) - 1
 					} else {
 						t.cursorLine, t.cursorSide = prev.line, prev.side
+					}
+				} else if !t.selecting && !m.hideComments {
+					if anns := m.annotationsAfterLine(0, ""); len(anns) > 0 {
+						t.cursorLine, t.cursorSide = 0, ""
+						t.cursorOnAnnotation, t.cursorAnnoIdx = true, len(anns)-1
 					}
 				}
 			}
@@ -851,6 +862,9 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 
 		if moved {
+			if t.cursorLine == 0 && !t.cursorOnAnnotation {
+				m.moveCursorBy(t, 1, 1)
+			}
 			m.rebuildContent()
 			m.scrollToCursor()
 			return m, nil
@@ -1001,6 +1015,12 @@ func (m *AppModel) openCommentDelete(id string) {
 }
 
 func (m *AppModel) openLineComment() {
+	if m.tab().cursorLine == 0 {
+		m.moveCursorBy(m.tab(), 1, 1)
+		if m.tab().cursorLine == 0 {
+			return
+		}
+	}
 	if m.patch != nil && len(m.visualLines(m.tab())) == 0 {
 		return
 	}
@@ -1141,11 +1161,9 @@ func (m *AppModel) modalSubmit() {
 	m.rebuildContent()
 	m.updateCommentSidebar()
 	if addedFileCommentID != "" {
-		for i, item := range t.sidebarItems {
-			if item.id == addedFileCommentID {
-				m.focused = commentPane
-				t.sidebarCursor = i
-				m.updateCommentSidebar()
+		for _, target := range m.commentTargets(m.activeTab) {
+			if target.id == addedFileCommentID {
+				m.selectComment(m.activeTab, target)
 				break
 			}
 		}
@@ -1234,6 +1252,9 @@ func (m *AppModel) modalDelete(targetIndex int) {
 	m.modalTextarea.Blur()
 	t.cursorOnAnnotation = false
 	t.cursorAnnoIdx = 0
+	if t.cursorLine == 0 {
+		m.moveCursorBy(t, 1, 1)
+	}
 	m.rebuildContent()
 	m.updateCommentSidebar()
 }
@@ -1277,6 +1298,9 @@ func (m *AppModel) toggleResolve(id string) {
 			m.focused = contentPane
 			t.cursorOnAnnotation = false
 			t.cursorAnnoIdx = 0
+			if t.cursorLine == 0 {
+				m.moveCursorBy(t, 1, 1)
+			}
 		}
 		c.UpdatedAt = review.Now()
 		break
@@ -1845,6 +1869,9 @@ func (m *AppModel) annotationsAfterLine(lineNum int, side string) []annotation {
 	var anns []annotation
 	for _, c := range t.state.Comments {
 		if c.Scope == "file" {
+			if lineNum == 0 && side == "" {
+				anns = append(anns, newAnnotation(c))
+			}
 			continue
 		}
 		if c.EndAt() == lineNum && c.Side == side {
@@ -1856,7 +1883,7 @@ func (m *AppModel) annotationsAfterLine(lineNum int, side string) []annotation {
 
 type commentTarget struct {
 	id       string
-	scope    string // "file" targets live in the sidebar; others are inline annotations
+	scope    string
 	resolved bool
 	line     int
 	side     string
@@ -1864,7 +1891,7 @@ type commentTarget struct {
 }
 
 // commentTargets lists a tab's comments in navigation order: file comments
-// first (open before resolved, as the sidebar shows them), then line
+// first in insertion order, then line
 // comments in visual order.
 func (m *AppModel) commentTargets(tabIndex int) []commentTarget {
 	t := &m.tabs[tabIndex]
@@ -1876,7 +1903,7 @@ func (m *AppModel) commentTargets(tabIndex int) []commentTarget {
 	var fileTargets, lineTargets []commentTarget
 	for _, c := range t.state.Comments {
 		if c.Scope == "file" {
-			fileTargets = append(fileTargets, commentTarget{id: c.ID, scope: "file", resolved: c.Resolved})
+			fileTargets = append(fileTargets, commentTarget{id: c.ID, scope: "file", resolved: c.Resolved, annoIdx: len(fileTargets)})
 			continue
 		}
 		line := c.EndAt()
@@ -1884,9 +1911,6 @@ func (m *AppModel) commentTargets(tabIndex int) []commentTarget {
 		lineTargets = append(lineTargets, commentTarget{id: c.ID, resolved: c.Resolved, line: line, side: c.Side, annoIdx: indices[ref]})
 		indices[ref]++
 	}
-	sort.SliceStable(fileTargets, func(i, j int) bool {
-		return !fileTargets[i].resolved && fileTargets[j].resolved
-	})
 	sort.SliceStable(lineTargets, func(i, j int) bool {
 		ri := lineRef{side: lineTargets[i].side, line: lineTargets[i].line}
 		rj := lineRef{side: lineTargets[j].side, line: lineTargets[j].line}
@@ -1926,7 +1950,7 @@ func (m *AppModel) currentCommentTarget(targets []commentTarget) int {
 	}
 	if t.cursorOnAnnotation {
 		for i, target := range targets {
-			if target.scope != "file" && target.line == t.cursorLine && target.side == t.cursorSide && target.annoIdx == t.cursorAnnoIdx {
+			if target.line == t.cursorLine && target.side == t.cursorSide && target.annoIdx == t.cursorAnnoIdx {
 				return i
 			}
 		}
@@ -1996,22 +2020,9 @@ func (m *AppModel) adjacentComment(step int, includeResolved bool) (int, comment
 func (m *AppModel) selectComment(tabIndex int, target commentTarget) {
 	m.activeTab = tabIndex
 	t := m.tab()
-	if target.scope == "file" {
-		// File comments have no inline box, so land on their sidebar entry.
-		m.focused = commentPane
-		t.cursorOnAnnotation = false
-		t.cursorAnnoIdx = 0
-		m.updateCommentSidebar()
-		for i, item := range t.sidebarItems {
-			if item.id == target.id {
-				t.sidebarCursor = i
-				break
-			}
-		}
-		m.updateCommentSidebar()
-		m.rebuildContent()
-		m.scrollToSidebarCursor()
-		return
+	if target.scope == "file" && m.hideComments {
+		m.hideComments = false
+		m.recalculateLayout()
 	}
 	m.focused = contentPane
 	t.cursorLine, t.cursorSide = target.line, target.side
@@ -2158,6 +2169,7 @@ type sidebarItem struct {
 // annotation represents an inline comment to render.
 type annotation struct {
 	id       string
+	scope    string
 	body     string
 	line     int
 	endLine  int
@@ -2169,7 +2181,7 @@ type annotation struct {
 
 func newAnnotation(c review.Comment) annotation {
 	return annotation{
-		id: c.ID, body: c.Body,
+		id: c.ID, body: c.Body, scope: c.Scope,
 		line: c.StartLine, endLine: c.EndLine, side: c.Side,
 		author: c.Author, resolved: c.Resolved, replies: c.Replies,
 	}
@@ -2195,19 +2207,6 @@ func (m *AppModel) rebuildContent() {
 	}
 	t := m.tab()
 	m.contentLayout = newRenderedContentLayout()
-
-	// Handle placeholder tabs
-	if t.isBinary {
-		m.contentViewport.SetContent("\n  Binary file changed — cannot display content.\n")
-		return
-	}
-	if t.outsideChanges && t.doc == nil {
-		m.contentViewport.SetContent("\n  Added file removed — no longer part of the changes.\n  Comments are kept in the sidebar.\n")
-		return
-	}
-	if t.doc == nil {
-		return
-	}
 
 	// Collect annotations keyed by the line they appear AFTER
 	annosByEndLine := make(map[int][]annotation)
@@ -2264,7 +2263,11 @@ func (m *AppModel) rebuildContent() {
 	// Use cached syntax highlighting
 	isMarkdown := t.isMarkdown
 	// Detect table blocks so we can align columns across rows
-	tableBlocks := detectTableBlocks(t.doc.Lines)
+	var sourceLines []string
+	if t.doc != nil {
+		sourceLines = t.doc.Lines
+	}
+	tableBlocks := detectTableBlocks(sourceLines)
 	tableBlockMap := make(map[int]*tableBlock)
 	for i := range tableBlocks {
 		tb := &tableBlocks[i]
@@ -2274,7 +2277,7 @@ func (m *AppModel) rebuildContent() {
 	}
 
 	var b strings.Builder
-	b.Grow(len(t.doc.Lines) * 200) // pre-allocate to reduce allocations
+	b.Grow(len(sourceLines) * 200) // pre-allocate to reduce allocations
 	layout := newRenderedContentLayout()
 	appendAnnotation := func(ann annotation, focused bool, target contentMouseTarget) {
 		box, button := m.renderAnnotationBox(ann, boxWidth, focused)
@@ -2282,6 +2285,22 @@ func (m *AppModel) rebuildContent() {
 		button.id = ann.id
 		layout.actions = append(layout.actions, button)
 		layout.appendBlock(&b, box, target)
+	}
+	if !m.hideComments {
+		for idx, ann := range m.annotationsAfterLine(0, "") {
+			focused := m.focused == contentPane && t.cursorOnAnnotation && t.cursorLine == 0 && t.cursorAnnoIdx == idx
+			appendAnnotation(ann, focused, contentMouseTarget{annotation: true, annotationIndex: idx})
+		}
+	}
+	if t.isBinary || t.doc == nil {
+		if t.isBinary {
+			layout.appendBlock(&b, "\n  Binary file changed — cannot display content.", contentMouseTarget{})
+		} else if t.outsideChanges {
+			layout.appendBlock(&b, "\n  Added file removed — no longer part of the changes.", contentMouseTarget{})
+		}
+		m.contentLayout = layout
+		m.contentViewport.SetContent(b.String())
+		return
 	}
 	renderDeleted := func(afterLine int) {
 		dels := t.deletedAfter[afterLine]
@@ -2481,7 +2500,9 @@ func (m *AppModel) rebuildContent() {
 func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused bool) (string, commentHeaderRegion) {
 	collapsed := ann.resolved && !m.showResolved && !focused
 	var lineLabel string
-	if ann.endLine > ann.line {
+	if ann.scope == "file" {
+		lineLabel = "File"
+	} else if ann.endLine > ann.line {
 		lineLabel = fmt.Sprintf("L%d-%d", ann.line, ann.endLine)
 	} else {
 		lineLabel = fmt.Sprintf("L%d", ann.line)
@@ -2836,6 +2857,21 @@ func highlightInline(line string) string {
 
 func (m *AppModel) scrollToCursor() {
 	t := m.tab()
+	if t.cursorLine == 0 && t.cursorOnAnnotation {
+		start, end := -1, 0
+		for row, target := range m.contentLayout.rows {
+			if target.line == 0 && target.annotation && target.annotationIndex == t.cursorAnnoIdx {
+				if start < 0 {
+					start = row
+				}
+				end = row + 1
+			}
+		}
+		if start >= 0 {
+			m.contentViewport.SetYOffset(max(0, min(start, end-m.contentViewport.Height())))
+		}
+		return
+	}
 	if t.doc == nil {
 		return
 	}

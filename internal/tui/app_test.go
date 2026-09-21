@@ -913,7 +913,7 @@ func TestNewFileCommentIsSelectedForImmediateDeletion(t *testing.T) {
 	app.modalSubmit()
 
 	comment := app.tab().state.Comments[0]
-	if app.focused != commentPane || app.selectedCommentID() != comment.ID {
+	if app.focused != contentPane || app.selectedCommentID() != comment.ID {
 		t.Fatalf("selected comment = %q in pane %v, want %q in comment pane",
 			app.selectedCommentID(), app.focused, comment.ID)
 	}
@@ -1540,6 +1540,7 @@ func TestResolveButtonPositionSurvivesCollapse(t *testing.T) {
 				var inline, sidebar mouseRect
 				for _, resolved := range []bool{false, true} {
 					comment.Resolved = resolved
+					comment.Scope = "line"
 					box, buttons := app.renderAnnotationBox(newAnnotation(comment), width, false)
 					button := buttons.resolve
 					if resolved {
@@ -1983,7 +1984,7 @@ func TestChangeNavigationIncludesUnresolvedComments(t *testing.T) {
 			app.tabs[0].changeChunks[0].endLine = 3
 			app.tabs[1].state.Comments = []review.Comment{{ID: "comments-only", Scope: "file"}}
 			app = pressKey(app, 'N')
-			if app.selectedCommentID() != "file" || app.focused != commentPane {
+			if app.selectedCommentID() != "file" || app.focused != contentPane {
 				t.Fatal("previous target should be the file comment")
 			}
 			type stop struct {
@@ -2658,9 +2659,10 @@ func TestCommentSidebarHidesResolvedThreads(t *testing.T) {
 	}
 }
 
-func TestFileCommentShortcutCreatesSidebarOnlyComment(t *testing.T) {
+func TestFileCommentShortcutCreatesInlineFileComment(t *testing.T) {
 	app := setupAppWithDoc(t, "first\nsecond\n")
 	app.contentViewport.SetWidth(80)
+	app.contentViewport.SetHeight(12)
 	app.commentViewport.SetWidth(40)
 	app.commentViewport.SetHeight(20)
 
@@ -2689,8 +2691,76 @@ func TestFileCommentShortcutCreatesSidebarOnlyComment(t *testing.T) {
 	if targets := app.commentTargets(0); len(targets) != 1 || targets[0].scope != "file" {
 		t.Fatalf("navigation targets = %+v, want one file-scoped target", targets)
 	}
-	if got := app.contentViewport.View(); strings.Contains(got, comment.Body) {
-		t.Fatalf("file comment rendered inline: %q", got)
+	if got := app.contentViewport.View(); !strings.Contains(got, comment.Body) {
+		t.Fatalf("file comment missing inline: %q", got)
+	}
+}
+
+func TestFileCommentsRenderBeforeContent(t *testing.T) {
+	for _, kind := range []string{"source", "empty", "deleted", "binary", "removed"} {
+		t.Run(kind, func(t *testing.T) {
+			app := setupAppWithDoc(t, "source\n")
+			app.contentViewport.SetHeight(20)
+			app.contentViewport.SetWidth(80)
+			switch kind {
+			case "empty", "deleted":
+				app.tab().doc.Lines = nil
+				if kind == "deleted" {
+					app.tab().deletedAfter = map[int][]gitpkg.DeletedLine{0: {{OldLineNum: 1, Content: "deleted"}}}
+				}
+			case "binary":
+				app.tab().isBinary, app.tab().doc = true, nil
+			case "removed":
+				app.tab().outsideChanges, app.tab().doc = true, nil
+			}
+			app.tab().state.Comments = []review.Comment{
+				{ID: "resolved", Scope: "file", Body: "older", Resolved: true},
+				{ID: "open", Scope: "file", Body: "newer"},
+			}
+			app.rebuildContent()
+			if row := app.contentLayout.rows[0]; !row.annotation || row.line != 0 || row.annotationIndex != 0 {
+				t.Fatalf("first row = %+v, want first file comment", row)
+			}
+			app.selectComment(0, app.commentTargets(0)[1])
+			if app.selectedCommentID() != "open" || !strings.Contains(app.contentViewport.View(), "newer") {
+				t.Fatal("file comment navigation did not reveal the selected thread")
+			}
+			app = pressKey(app, 'H')
+			for _, row := range app.contentLayout.rows {
+				if row.annotation {
+					t.Fatal("hidden file comment remains in content layout")
+				}
+			}
+		})
+	}
+}
+
+func TestFileCommentArrowNavigation(t *testing.T) {
+	app := setupAppWithDoc(t, "source\n")
+	app.contentViewport.SetWidth(80)
+	app.contentViewport.SetHeight(8)
+	app.tab().state.Comments = []review.Comment{
+		{ID: "first", Scope: "file", Body: "first thread"},
+		{ID: "second", Scope: "file", Body: "second thread"},
+	}
+	app.rebuildContent()
+	for _, id := range []string{"second", "first", "first"} {
+		app = pressKey(app, 'k')
+		if app.selectedCommentID() != id || !strings.Contains(app.contentViewport.View(), id+" thread") {
+			t.Fatalf("up selected %q, want visible %q", app.selectedCommentID(), id)
+		}
+	}
+	app = pressKey(app, 'v')
+	if app.tab().selecting {
+		t.Fatal("file comment should not start a line selection")
+	}
+	app = pressKey(app, 'j')
+	if app.selectedCommentID() != "second" {
+		t.Fatal("down should select the next file comment")
+	}
+	app = pressKey(app, 'j')
+	if app.tab().cursorLine != 1 || app.tab().cursorOnAnnotation {
+		t.Fatal("down should return to the first source line")
 	}
 }
 
@@ -3737,12 +3807,12 @@ func TestCommentNavigationVisitsFileComments(t *testing.T) {
 
 	// Backward from the top of the first file lands on its file comment.
 	app = pressKey(app, '[')
-	if app.activeTab != 0 || app.focused != commentPane || app.tab().sidebarItems[app.tab().sidebarCursor].id != fileComment.ID {
-		t.Fatalf("previous from top = tab %d, focus %v, sidebar %d; want the file comment in the sidebar",
+	if app.activeTab != 0 || app.focused != contentPane || app.selectedCommentID() != fileComment.ID {
+		t.Fatalf("previous from top = tab %d, focus %v, sidebar %d; want the inline file comment",
 			app.activeTab, app.focused, app.tab().sidebarCursor)
 	}
 
-	// Forward from the sidebar continues to the first line comment.
+	// Forward from the file comment continues to the first line comment.
 	app = pressKey(app, ']')
 	if app.focused != contentPane || app.tab().cursorLine != 2 || !app.tab().cursorOnAnnotation || app.tab().cursorAnnoIdx != 0 {
 		t.Fatalf("next from file comment = focus %v, line %d, annotation %t/%d; want line 2 annotation 0",
@@ -3751,7 +3821,7 @@ func TestCommentNavigationVisitsFileComments(t *testing.T) {
 
 	// Backward from the first line comment returns to the file comment.
 	app = pressKey(app, '[')
-	if app.focused != commentPane || app.tab().sidebarItems[app.tab().sidebarCursor].id != fileComment.ID {
+	if app.focused != contentPane || app.selectedCommentID() != fileComment.ID {
 		t.Fatalf("previous from line comment did not return to the file comment (focus %v)", app.focused)
 	}
 
@@ -3761,7 +3831,7 @@ func TestCommentNavigationVisitsFileComments(t *testing.T) {
 	app.tabs[2].cursorLine = 3
 	app.tabs[2].cursorOnAnnotation = true
 	app = pressKey(app, ']')
-	if app.activeTab != 0 || app.focused != commentPane || app.tab().sidebarItems[app.tab().sidebarCursor].id != fileComment.ID {
+	if app.activeTab != 0 || app.focused != contentPane || app.selectedCommentID() != fileComment.ID {
 		t.Fatalf("wrapped next = tab %d, focus %v; want the file comment of tab 0", app.activeTab, app.focused)
 	}
 }
