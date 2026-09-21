@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.9.2
+
+### Changed
+
+- `f` replies to an existing file-comment thread, including resolved threads, and creates a new thread only when none exists.  Saving a reply reopens a resolved thread.
+- Inline and sidebar thread headers now have clickable **Resolve / Resolved** toggles and a right-aligned red **x** deletion button.  Deletion remains limited to your comments from the current round with no replies and requires confirmation.
+- Resolution controls stay in place when toggled; collapsed resolved threads omit the author name.
+- Keyboard help uses distinct colors for section headings and key names, with brighter descriptions.
+- Bundled agent skills read saved feedback after a nonzero review exit, then stop work and wait for explicit chat instructions instead of automatically restarting TCrit.
+
+### Fixed
+
+- Keep the right outer frame visible when the comment sidebar is open, with mouse targets aligned to the pane layout.
+
 ## 0.9.1
 
 ### Added

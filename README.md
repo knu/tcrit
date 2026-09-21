@@ -30,7 +30,7 @@
 - **Ignore whitespace** — press `w` to toggle whitespace-insensitive diffs across all files, including supplied patches.  Source text and comment anchors stay intact, and `n` / `N` skips whitespace-only changes.
 - **Review navigation across panes** — `n` / `N` visits changes and unresolved threads in display order, including file and deleted-line comments, and reveals hidden comments when selected.  `Tab` / `Shift+Tab` switches files from either the content pane or the sidebar while preserving pane focus.
 - **Agent integrations** — one command installs the shared `tcrit` review loop and `tcrit-cli` reference for Claude Code, Codex, OpenCode, and Gemini CLI. The current agent handles review rounds with the original task context; the loop picks code, document, or plan review from its arguments instead of asking.
-  The skills limit replies to new feedback or substantive updates, and require stopping an abandoned review before opening another TUI in the same directory.
+  The skills limit replies to new feedback or substantive updates, and require stopping an abandoned review before opening another TUI in the same directory.  After a nonzero review exit, they read saved feedback, stop work, and wait for explicit chat instructions before acting or restarting TCrit.
 - **[Crit](https://crit.md/) CLI alignment** — customizable finish prompts, unified integration installers, and `tcrit check` were added as part of adopting the Crit CLI workflow.
 
 TUI for reviewing AI-generated code and plans — built for human-in-the-loop agentic coding workflows.
@@ -82,6 +82,8 @@ If you prefer not to use the plugin, install the integration for your agent dire
 - `tcrit-cli` — a reference skill the agent loads when it needs `tcrit comment`, `tcrit comments`, session or plan targeting, bulk JSON input, or the review file format.
 
 The finish output includes resolved threads and replies, even on approval, so final reviewer instructions remain available after automatic cleanup. The review loop reads all returned threads for new instructions before committing or continuing. Unanswered agent comments and completion replies remain unchanged until there is new feedback or a substantive update. When you cancel a review or switch tasks, the agent stops its TUI and checks that its dedicated pane or tab has closed before opening a replacement. Each round closes its TUI automatically. `tcrit stop --session <id>` preserves saved state for later resumption; `tcrit clear` explicitly deletes it and refuses active reviews.
+
+If the review exits with a nonzero status, the agent reads any new saved comments and replies, preserves the work and session, and reports the interruption in chat.  It then waits for explicit chat instructions before making changes or restarting TCrit.
 
 Run the installer from your home directory to install globally, or from a repository root to install for that project only.
 
