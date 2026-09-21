@@ -1032,7 +1032,7 @@ func TestMouseClickCommentModalSuggest(t *testing.T) {
 	app.tabs[0].cursorLine = 1
 	app.openLineComment()
 
-	app = clickModalAction(t, app, "Suggest ctrl+y")
+	app = clickModalAction(t, app, "Suggest alt+s")
 
 	if got := app.modalTextarea.Value(); !strings.Contains(got, "```suggestion\nfirst\n```") {
 		t.Fatalf("textarea = %q, want suggestion block", got)
@@ -2818,7 +2818,7 @@ func TestSuggestionButtonInsertsSelectedCodeAndPersistsComment(t *testing.T) {
 	app.modal = commentModal
 	app.modalTextarea.SetValue("Use clearer names.")
 
-	updated, _ := app.Update(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
+	updated, _ := app.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModAlt})
 	app = *updated.(*AppModel)
 
 	wantBody := "Use clearer names.\n\n```suggestion\nfirst\nsecond\n```"
@@ -2855,7 +2855,7 @@ func TestSuggestionButtonIsInCommentModal(t *testing.T) {
 
 	background := lipgloss.NewStyle().Width(app.width).Height(app.height).Render("")
 	rendered := app.renderWithModal(background)
-	if !strings.Contains(rendered, "Suggest") || !strings.Contains(rendered, "ctrl+y") {
+	if !strings.Contains(rendered, "Suggest") || !strings.Contains(rendered, "alt+s") {
 		t.Fatalf("comment modal does not contain Suggest button: %q", rendered)
 	}
 	if strings.Index(rendered, "Suggest") < strings.Index(rendered, "Cancel") {
@@ -2883,7 +2883,7 @@ func TestAddCommentModalKeepsFullContextScrollable(t *testing.T) {
 	if strings.Contains(plainRendered, "more lines") {
 		t.Fatal("add comment context is summarized instead of scrollable")
 	}
-	for _, action := range []string{"Save ctrl+s", "Close esc", "Suggest ctrl+y"} {
+	for _, action := range []string{"Save ctrl+s", "Close esc", "Suggest alt+s"} {
 		if !strings.Contains(plainRendered, action) {
 			t.Fatalf("add comment modal does not show %q", action)
 		}
@@ -2920,7 +2920,7 @@ func TestSuggestionIsAvailableWhenReplyingToLineComment(t *testing.T) {
 		t.Fatalf("line reply modal = %v, canSuggest=%t", app.modal, app.canSuggest())
 	}
 
-	updated, _ := app.Update(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
+	updated, _ := app.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModAlt})
 	app = *updated.(*AppModel)
 	want := "```suggestion\nfirst\nsecond\n```"
 	if got := app.modalTextarea.Value(); got != want {
@@ -3214,7 +3214,7 @@ func TestEditReplyModalKeepsDeleteButtonVisibleWithLongThread(t *testing.T) {
 	const displayHeight = 24
 	background := lipgloss.NewStyle().Width(app.width).Height(displayHeight).Render("")
 	staleHeightRendered, _ := app.renderWithModalLayout(background)
-	for _, action := range []string{"Save ctrl+s", "Close esc", "Suggest ctrl+y", "Delete reply"} {
+	for _, action := range []string{"Save ctrl+s", "Close esc", "Suggest alt+s", "Delete reply"} {
 		if !strings.Contains(ansi.Strip(staleHeightRendered), action) {
 			t.Fatalf("modal using display height does not show %q", action)
 		}
@@ -3226,7 +3226,7 @@ func TestEditReplyModalKeepsDeleteButtonVisibleWithLongThread(t *testing.T) {
 		t.Fatalf("modal height = %d, display height = %d", height, displayHeight)
 	}
 	plainRendered := ansi.Strip(rendered)
-	for _, action := range []string{"Save ctrl+s", "Close esc", "Suggest ctrl+y", "Delete reply"} {
+	for _, action := range []string{"Save ctrl+s", "Close esc", "Suggest alt+s", "Delete reply"} {
 		if !strings.Contains(plainRendered, action) {
 			t.Fatalf("modal does not show %q", action)
 		}

@@ -17,7 +17,7 @@
 - **Supplied diff reviews** — `git diff <base> <head> | tcrit --diff` reviews arbitrary Git unified diffs, including outside a repository. Input snapshots survive Herdr/tmux launches and can be replaced for the next review round.
 - **File-level comments** — press `f` to comment on the active file.  File threads appear above the first source line, directly below the tabs, and remain listed in the sidebar.  Navigate, reply, resolve, and delete them like inline line comments; they also appear for empty, deleted, and binary files.
 - **Readable comment threads** — your comments and replies appear in white; other authors use cyan, green, orange, purple, then yellow.  Unfocused inline and sidebar threads shrink to the latest message, down to one row.  Focus expands the history to at most 10 wrapped rows; reply dialogs show up to 16, shrinking on small terminals.  Expanded threads show the latest message at the bottom with earlier history above, or start at its first line when it exceeds the available height.  No blank padding follows the latest message; older messages and long bodies remain available by scrolling.
-- **Comment editing tools** — `ctrl+y` inserts GitHub-compatible suggestions for selected or anchored lines, including replies, and selects the inserted code for immediate deletion or replacement, leaving the suggestion fences intact; `ctrl+o` edits comment and reply bodies in `$EDITOR`, while `ctrl+PgUp` / `ctrl+PgDn` scroll through code context and thread history.
+- **Comment editing tools** — an Emacs-style kill ring keeps deleted text: `ctrl+y` yanks it and `alt+y` cycles through earlier kills.  `alt+s` inserts GitHub-compatible suggestions for selected or anchored lines, including replies, and selects the inserted code for immediate deletion or replacement, leaving the suggestion fences intact; `ctrl+o` edits comment and reply bodies in `$EDITOR`, while `ctrl+PgUp` / `ctrl+PgDn` scroll through code context and thread history.
 - **Visible comment focus** — focused comments and editors use bright, thick borders; unfocused comments use thin blue borders.  The sidebar separator follows the same focus distinction, and modal dialogs use thick borders.
 - **Native input cursor** — comment and reply editors position the real terminal cursor at the insertion point so terminal IMEs can display composition there, including after wrapping and scrolling.
 - **Deleted-line comments** — removed lines, including lines in fully deleted files, can be selected and commented on from the keyboard or gutter.
@@ -321,14 +321,20 @@ Ignore whitespace is off by default and lasts for the current TUI run.  It ignor
 |----------|---------------------------------------------------------------|
 | `ctrl+s` | Save the comment or reply; delete an existing entry if cleared; close if unchanged or a new entry is empty |
 | `ctrl+o` | Edit the comment or reply in `$EDITOR`                         |
-| `ctrl+y` | Insert a suggestion block and select its code for replacement |
+| `alt+s` | Insert a suggestion block and select its code for replacement |
+| `ctrl+y` | Yank the latest kill at the cursor, replacing selected text |
+| `alt+y` | After a yank or yank-pop, replace the yanked text with the next older kill; wrap at the end |
 | `ctrl+v` | Paste text from the clipboard on the machine running TCrit    |
-| `ctrl+k` | Delete the selection, or delete from the cursor to line end; at line end, join the next line |
-| `ctrl+u` | Delete the selection, or delete back to line start; at line start, join the previous line |
+| `ctrl+k` | Kill the selection, or text from the cursor to line end; at line end, kill the next newline |
+| `ctrl+u` | Kill the selection, or text back to line start; at line start, kill the previous newline |
+| `ctrl+w` / `alt+Backspace` | Kill the selection or the previous word |
+| `alt+d` / `alt+Delete` | Kill the selection or the next word |
 | `Delete` / `Backspace` | Delete the selected text, or the next / previous character |
 | `ctrl+PgUp` / `ctrl+PgDn` | Scroll code context and thread history             |
 
-`ctrl+v` uses the host's clipboard (`pbpaste` on macOS).  When TCrit runs over SSH, this is the remote host's clipboard.  Deletion shortcuts do not save text to a clipboard or kill ring, and the input box has no undo/redo.  Use `ctrl+o` to edit in your external editor when you need its editing commands.  `ctrl+y` inserts a suggestion; it does not yank deleted text.
+The kill ring holds up to 60 entries, shared across comment and reply dialogs during the current TUI run.  Consecutive kills combine into one entry in text order.  Other keys, mouse actions, or pasted input end the sequence and disable yank-pop until the next `ctrl+y`.  Ordinary Delete/Backspace do not add entries.  `alt` is the terminal's Meta modifier (`M-y` / `M-s`); configure your terminal to send Meta for these shortcuts.
+
+The kill ring is independent of the system clipboard.  `ctrl+v` uses the host's clipboard (`pbpaste` on macOS).  When TCrit runs over SSH, this is the remote host's clipboard.  The input box has no undo/redo; use `ctrl+o` to edit in your external editor when you need those commands.
 
 **Code review only:**
 

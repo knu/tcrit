@@ -100,6 +100,7 @@ type AppModel struct {
 	contentViewport   viewport.Model
 	commentViewport   viewport.Model
 	modalTextarea     textarea.Model
+	killRing          killRing
 	mouseSelecting    bool
 	hoveredGutterLine int
 	hoveredGutterSide string
@@ -491,6 +492,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case editorFinishedMsg:
+		m.killRing.interrupt()
 		m.finishExternalEdit(msg)
 		return m, nil
 
@@ -499,21 +501,33 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseClickMsg:
+		m.killRing.interrupt()
 		return m.handleMouseClick(msg)
 	case tea.MouseMotionMsg:
+		m.killRing.interrupt()
 		return m.handleMouseMotion(msg)
 	case tea.MouseReleaseMsg:
+		m.killRing.interrupt()
 		return m.handleMouseRelease(msg)
 	case tea.MouseWheelMsg:
+		m.killRing.interrupt()
 		return m.handleMouseWheel(msg)
 
 	case tea.KeyPressMsg:
+		kill, _ := killDirection(msg, m.modalTextarea.KeyMap)
+		if !m.isTextModal() || m.modalFocus != 0 || (!kill && msg.String() != "ctrl+y" && msg.String() != "alt+y") {
+			m.killRing.interrupt()
+		}
 		return m.handleKeyPress(msg)
 	}
 
 	var cmd tea.Cmd
 	if m.modal == commentModal || m.modal == fileCommentModal || m.modal == replyModal || m.modal == editModal {
+		before := m.modalTextarea.Value()
 		m.modalTextarea, cmd = m.modalTextarea.Update(msg)
+		if _, pasted := msg.(tea.PasteMsg); pasted || m.modalTextarea.Value() != before {
+			m.killRing.interrupt()
+		}
 		return m, cmd
 	}
 
@@ -1645,7 +1659,7 @@ func (m *AppModel) handleTextModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, m.openExternalEditor()
 		}
 		return m, nil
-	case "ctrl+y":
+	case "alt+s":
 		if m.canSuggest() {
 			m.insertSuggestion()
 		}
@@ -1653,6 +1667,9 @@ func (m *AppModel) handleTextModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.modalFocus == 0 {
+		if handled, cmd := m.updateKillRing(msg); handled {
+			return m, cmd
+		}
 		var cmd tea.Cmd
 		m.modalTextarea, cmd = m.modalTextarea.Update(msg)
 		return m, cmd
@@ -4208,9 +4225,9 @@ func (m AppModel) renderHelp(innerWidth int) string {
 	columns := lipgloss.JoinHorizontal(lipgloss.Top, general, "  ", navigation, "  ", codeReview)
 	contexts := renderHelpGroup("Selection and dialogs", []helpItem{
 		{keys: "↑/↓,j/k · enter/v/esc · ctrl+PgUp/PgDn", desc: "extend · comment/toggle/cancel selection · scroll thread"},
-		{keys: "ctrl+s/o/y · tab/S-tab · enter/esc", desc: "save/editor/suggest · focus · activate/close dialog"},
+		{keys: "ctrl+s/o · alt+s · tab/S-tab · enter/esc", desc: "save/edit · suggest · focus · activate/close"},
+		{keys: "ctrl+k/u/w,alt+d · ctrl+y · alt+y", desc: "kill · yank · rotate kills"},
 		{keys: "y/n/esc · ←/→,h/l,tab/shift+tab · enter", desc: "confirm/cancel · focus · activate finish dialog"},
-		{keys: "q/ctrl+c", desc: "quit from finish dialog"},
 	}, innerWidth)
 
 	return columns + "\n" + contexts
@@ -4427,7 +4444,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		}
 		if m.canSuggest() {
 			buttonSpecs = append(buttonSpecs, modalButtonSpec{
-				rendered: m.renderModalButton("Suggest", "ctrl+y", m.modalFocus == 3),
+				rendered: m.renderModalButton("Suggest", "alt+s", m.modalFocus == 3),
 				action:   modalMouseAction{focus: 3},
 			})
 		}
@@ -4516,7 +4533,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		}
 		if m.canSuggest() {
 			buttonSpecs = append(buttonSpecs, modalButtonSpec{
-				rendered: m.renderModalButton("Suggest", "ctrl+y", m.modalFocus == 3),
+				rendered: m.renderModalButton("Suggest", "alt+s", m.modalFocus == 3),
 				action:   modalMouseAction{focus: 3},
 			})
 		}
