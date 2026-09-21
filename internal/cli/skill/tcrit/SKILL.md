@@ -44,13 +44,15 @@ Run the command from Step 1 and wait for it to finish.  Each new invocation crea
 
 TCrit opens a Herdr tab or tmux pane and closes it at the end of each round, including rounds with unresolved comments.  Give the blocking command a long timeout (at least 10 minutes).  If the runner returns an execution handle, poll it until completion.  Wait for the reviewer to finish before editing.
 
-When the user cancels or replaces the task, run `tcrit stop --session <id>` and collect the original command's result before continuing.  This preserves saved comments and round context; cancellation is not approval.  Use `tcrit --session <id>` to resume later from the original directory.  Keep earlier review data when starting a different task; `clear` is only for explicitly requested deletion.
+When the user cancels or replaces the task, run `tcrit stop --session <id>` and collect the original command's result.  This preserves saved comments and round context; cancellation is not approval.  Resume with `tcrit --session <id>` from the original directory only when the user explicitly asks in chat.  Keep earlier review data when starting a different task; `clear` is only for explicitly requested deletion.
 
 Without a supported multiplexer, ask the user to run the command in their terminal.  Record its session ID, then read that session's comments after they finish.
 
 ## Step 3: Read the result
 
-When the command returns, stdout holds the finish prompt and stderr reports `approved: true` or `approved: false`.  Read all returned threads, including resolved comments and replies, for new reviewer instructions before committing or continuing.  Resolution does not mean you have read or acted on a message.  Approval may already have deleted the saved review, so use the returned thread contents.
+Check the exit status first.  On nonzero exit, read any new saved comments and replies, preserve work and session state, and report the interruption in chat.  Then end the turn and wait for explicit chat instructions; do not act on the comments or restart TCrit automatically.  Only exit status 0 enters the continuation flow below.
+
+Read the finish prompt and `approved: true` or `approved: false`.  Check all returned threads, including resolved comments and replies, for new instructions before continuing.  Approval may already have deleted the saved review, so use the returned thread contents.
 
 - `approved: true`: address any new instructions in the returned threads, then continue with the task.  If those instructions require changes to the approved content, make the changes and review again before committing.
 - `approved: false`: the prompt lists all comments as JSON, the reply command to use, and the command that starts the next round.  Follow it.
@@ -91,7 +93,7 @@ The `/tcrit-cli` skill documents the JSON format and the other comment commands.
 
 ## Step 5: Start the next round
 
-Run the command printed in the finish prompt from the original working directory.  `tcrit --session <id>` opens a new TUI from saved comments and round context; it retains the scope and refreshes code or document contents.  After an interrupted round it resumes that round; after a submitted round it advances to the next one.
+After an unapproved round submitted with exit status 0, run the command printed in the finish prompt from the original working directory.  `tcrit --session <id>` opens a new TUI from saved comments and round context; it retains the scope and refreshes code or document contents.  It advances past a submitted round, or resumes an interrupted round when explicitly requested by the user in chat.
 
 For a revised plan, use `tcrit plan --session <id> <file>` (or pipe the plan to it) to save a new version.  Plain `tcrit --session <id>` opens the saved plan without replacing its content.
 
