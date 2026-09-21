@@ -105,7 +105,7 @@ type AppModel struct {
 	hoveredGutterSide string
 	contentLayout     renderedContentLayout
 	sidebarTargets    []int
-	sidebarResolve    []commentResolveRegion
+	sidebarActions    []commentHeaderRegion
 
 	// Editing state
 	editingID            string // ID of the parent comment being edited or replied to
@@ -141,12 +141,22 @@ type renderedContentLayout struct {
 	rows       []contentMouseTarget
 	lineRanges map[int]renderedRange
 	oldRanges  map[int]renderedRange
-	resolve    []commentResolveRegion
+	actions    []commentHeaderRegion
 }
 
-type commentResolveRegion struct {
-	rect mouseRect
-	id   string
+type commentHeaderRegion struct {
+	resolve mouseRect
+	delete  mouseRect
+	id      string
+}
+
+func (r *commentHeaderRegion) translate(x, y int) {
+	for _, rect := range []*mouseRect{&r.resolve, &r.delete} {
+		rect.left += x
+		rect.right += x
+		rect.top += y
+		rect.bottom += y
+	}
 }
 
 type renderedScreenLayout struct {
@@ -962,7 +972,22 @@ func (m *AppModel) selectedCommentID() string {
 }
 
 func (m *AppModel) openSelectedCommentDelete() {
-	id := m.selectedCommentID()
+	m.openCommentDelete(m.selectedCommentID())
+}
+
+func (m *AppModel) canDeleteComment(id string) bool {
+	if m.tab().state == nil {
+		return false
+	}
+	for _, c := range m.tab().state.Comments {
+		if c.ID == id {
+			return len(c.Replies) == 0 && m.authoredThisRound(c.Author, c.ReviewRound)
+		}
+	}
+	return false
+}
+
+func (m *AppModel) openCommentDelete(id string) {
 	if id == "" {
 		return
 	}
@@ -1153,7 +1178,7 @@ func (m *AppModel) modalDeleteTargets() []modalDeleteTarget {
 			continue
 		}
 		if m.editingReplyID == "" {
-			if len(c.Replies) == 0 && m.authoredThisRound(c.Author, c.ReviewRound) {
+			if m.canDeleteComment(c.ID) {
 				return []modalDeleteTarget{{label: "Delete comment"}}
 			}
 			return nil
@@ -2253,9 +2278,9 @@ func (m *AppModel) rebuildContent() {
 	layout := newRenderedContentLayout()
 	appendAnnotation := func(ann annotation, focused bool, target contentMouseTarget) {
 		box, button := m.renderAnnotationBox(ann, boxWidth, focused)
-		button.top += len(layout.rows)
-		button.bottom += len(layout.rows)
-		layout.resolve = append(layout.resolve, commentResolveRegion{rect: button, id: ann.id})
+		button.translate(0, len(layout.rows))
+		button.id = ann.id
+		layout.actions = append(layout.actions, button)
 		layout.appendBlock(&b, box, target)
 	}
 	renderDeleted := func(afterLine int) {
@@ -2453,7 +2478,7 @@ func (m *AppModel) rebuildContent() {
 }
 
 // renderAnnotationBox renders a bordered annotation box indented under the gutter.
-func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused bool) (string, mouseRect) {
+func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused bool) (string, commentHeaderRegion) {
 	collapsed := ann.resolved && !m.showResolved && !focused
 	var lineLabel string
 	if ann.endLine > ann.line {
@@ -2472,7 +2497,7 @@ func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused boo
 	if len(ann.replies) > 0 {
 		header += commentLineStyle.Render(fmt.Sprintf(" · %d replies", len(ann.replies)))
 	}
-	header, button := renderCommentHeader(header, ann.resolved, max(1, maxWidth-4))
+	header, button := renderCommentHeader(header, ann.resolved, m.canDeleteComment(ann.id), max(1, maxWidth-4))
 	boxContent.WriteString(header)
 	if !collapsed {
 		boxContent.WriteString("\n")
@@ -2497,15 +2522,12 @@ func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused boo
 	for _, line := range strings.Split(box, "\n") {
 		b.WriteString(prefix + line + "\n")
 	}
-	button.left += gutterWidth + 2
-	button.right += gutterWidth + 2
-	button.top++
-	button.bottom++
+	button.translate(gutterWidth+2, 1)
 	return b.String(), button
 }
 
 // renderCommentHeader keeps the resolve button intact when the header wraps.
-func renderCommentHeader(label string, resolved bool, width int) (string, mouseRect) {
+func renderCommentHeader(label string, resolved, deletable bool, width int) (string, commentHeaderRegion) {
 	button := inlineLabelComment.Render("☐ Resolve")
 	if resolved {
 		button = resolvedBadge.Render("☑︎ Resolved")
@@ -2514,14 +2536,25 @@ func renderCommentHeader(label string, resolved bool, width int) (string, mouseR
 	rows := strings.Split(header, "\n")
 	x, y := lipgloss.Width(rows[len(rows)-1])+1, len(rows)-1
 	buttonWidth := lipgloss.Width("☑︎ Resolved")
-	if x+buttonWidth > width {
+	deleteButton := lipgloss.NewStyle().Foreground(lipgloss.Red).Render("x")
+	actionsWidth := buttonWidth
+	if deletable {
+		actionsWidth += 1 + lipgloss.Width(deleteButton)
+	}
+	if x+actionsWidth > width {
 		header += "\n"
 		x, y = 0, y+1
 	} else {
 		header += " "
 	}
-	return header + lipgloss.NewStyle().Width(buttonWidth).Render(button),
-		mouseRect{left: x, top: y, right: x + buttonWidth, bottom: y + 1}
+	header += lipgloss.NewStyle().Width(buttonWidth).Render(button)
+	region := commentHeaderRegion{resolve: mouseRect{left: x, top: y, right: x + buttonWidth, bottom: y + 1}}
+	if deletable {
+		deleteX := max(x+buttonWidth+1, width-lipgloss.Width(deleteButton))
+		header += strings.Repeat(" ", deleteX-x-buttonWidth) + deleteButton
+		region.delete = mouseRect{left: deleteX, top: y, right: deleteX + lipgloss.Width(deleteButton), bottom: y + 1}
+	}
+	return header, region
 }
 
 var (
@@ -2919,7 +2952,7 @@ func (m *AppModel) updateCommentSidebar() {
 		return
 	}
 	m.sidebarTargets = nil
-	m.sidebarResolve = nil
+	m.sidebarActions = nil
 
 	t.sidebarItems = nil
 	for _, c := range t.state.Comments {
@@ -2995,10 +3028,10 @@ func (m *AppModel) updateCommentSidebar() {
 		if isSelected {
 			prefix = cursorCol.Render(cursorMarker.Render(">"))
 		}
-		header, button := renderCommentHeader(prefix+lineInfo, it.resolved, max(1, m.commentViewport.Width()))
-		button.top += len(m.sidebarTargets)
-		button.bottom += len(m.sidebarTargets)
-		m.sidebarResolve = append(m.sidebarResolve, commentResolveRegion{rect: button, id: it.id})
+		header, button := renderCommentHeader(prefix+lineInfo, it.resolved, m.canDeleteComment(it.id), max(1, m.commentViewport.Width()))
+		button.translate(0, len(m.sidebarTargets))
+		button.id = it.id
+		m.sidebarActions = append(m.sidebarActions, button)
 
 		if collapsed {
 			item.WriteString(header)
@@ -3458,9 +3491,8 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 			t.cursorAnnoIdx = target.annotationIndex
 			if !t.selecting && target.annotation {
 				point := tea.Mouse{X: mouse.X - left, Y: mouse.Y - top + m.contentViewport.YOffset()}
-				for _, region := range m.contentLayout.resolve {
-					if region.rect.contains(point) {
-						m.toggleResolve(region.id)
+				for _, region := range m.contentLayout.actions {
+					if m.handleCommentHeaderClick(region, point) {
 						return m, nil
 					}
 				}
@@ -3501,9 +3533,8 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 				openThread := wasFocused && t.sidebarCursor == i
 				m.selectSidebarItem(i)
 				if !t.selecting {
-					for _, region := range m.sidebarResolve {
-						if region.rect.contains(point) {
-							m.toggleResolve(region.id)
+					for _, region := range m.sidebarActions {
+						if m.handleCommentHeaderClick(region, point) {
 							return m, nil
 						}
 					}
@@ -3519,6 +3550,18 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 		m.scrollToSidebarCursor()
 	}
 	return m, nil
+}
+
+func (m *AppModel) handleCommentHeaderClick(region commentHeaderRegion, point tea.Mouse) bool {
+	switch {
+	case region.resolve.contains(point):
+		m.toggleResolve(region.id)
+	case region.delete.contains(point):
+		m.openCommentDelete(region.id)
+	default:
+		return false
+	}
+	return true
 }
 
 func (m *AppModel) selectTab(index int) {

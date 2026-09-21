@@ -1492,10 +1492,10 @@ func TestMouseClickTogglesCommentResolution(t *testing.T) {
 					for _, label := range []string{"☐ Resolve", "☑︎ Resolved"} {
 						left, top, right, bottom := app.contentBounds()
 						if location == "inline" {
-							app.contentViewport.SetYOffset(max(0, app.contentLayout.resolve[0].rect.top-1))
+							app.contentViewport.SetYOffset(max(0, app.contentLayout.actions[0].resolve.top-1))
 						} else {
 							left, top, right, bottom = app.commentBounds()
-							app.commentViewport.SetYOffset(max(0, app.sidebarResolve[0].rect.top-1))
+							app.commentViewport.SetYOffset(max(0, app.sidebarActions[0].resolve.top-1))
 						}
 						clicked := false
 						for y, line := range strings.Split(ansi.Strip(app.View().Content), "\n") {
@@ -1540,7 +1540,8 @@ func TestResolveButtonPositionSurvivesCollapse(t *testing.T) {
 				var inline, sidebar mouseRect
 				for _, resolved := range []bool{false, true} {
 					comment.Resolved = resolved
-					box, button := app.renderAnnotationBox(newAnnotation(comment), width, false)
+					box, buttons := app.renderAnnotationBox(newAnnotation(comment), width, false)
+					button := buttons.resolve
 					if resolved {
 						if button != inline || strings.Contains(ansi.Strip(box), comment.Author) {
 							t.Fatalf("collapsed inline button = %+v, want %+v; box=%q", button, inline, ansi.Strip(box))
@@ -1553,7 +1554,7 @@ func TestResolveButtonPositionSurvivesCollapse(t *testing.T) {
 					app.commentViewport.SetWidth(width)
 					app.commentViewport.SetHeight(20)
 					app.updateCommentSidebar()
-					button = app.sidebarResolve[0].rect
+					button = app.sidebarActions[0].resolve
 					if resolved {
 						if button != sidebar || strings.Contains(ansi.Strip(app.commentViewport.View()), comment.Author) {
 							t.Fatalf("collapsed sidebar button = %+v, want %+v", button, sidebar)
@@ -1594,6 +1595,92 @@ func TestReviewFrameFitsTerminalWithSidebar(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestMouseClickHeaderDelete(t *testing.T) {
+	for _, location := range []string{"inline", "sidebar", "file"} {
+		for _, width := range []int{60, 120} {
+			for _, resolved := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/width=%d/resolved=%t", location, width, resolved), func(t *testing.T) {
+					app := setupAppWithDoc(t, strings.Repeat("source\n", 30))
+					app.width, app.height = width, 30
+					comment := review.Comment{ID: "delete", StartLine: 1, EndLine: 1, Body: "delete me",
+						Author: app.author, ReviewRound: app.reviewRound(), Resolved: resolved}
+					if location == "file" {
+						comment.Scope, comment.StartLine, comment.EndLine = "file", 0, 0
+					}
+					app.tab().state.Comments = []review.Comment{comment}
+					app.showResolved = location == "sidebar"
+					app.recalculateLayout()
+					app.updateCommentSidebar()
+					app.rebuildContent()
+					for _, confirm := range []bool{false, true} {
+						region := app.contentLayout.actions
+						left, top, _, _ := app.contentBounds()
+						right := app.contentViewport.Width() - 2
+						if location != "inline" {
+							region = app.sidebarActions
+							left, top, _, _ = app.commentBounds()
+							left, top = left+2, top+1
+							right = app.commentViewport.Width()
+						}
+						button := region[0].delete
+						if button.right != right || button.left <= region[0].resolve.right {
+							t.Fatalf("delete button = %+v, want right edge %d after resolve", button, right)
+						}
+						button.left, button.right = button.left+left, button.right+left
+						button.top, button.bottom = button.top+top, button.bottom+top
+						rows := strings.Split(ansi.Strip(app.View().Content), "\n")
+						if got := ansi.Cut(rows[button.top], button.left, button.right); got != "x" {
+							t.Fatalf("delete region contains %q, want x", got)
+						}
+						app = clickMouse(app, button.left, button.top)
+						if app.modal != deleteConfirmModal || app.editingID != comment.ID || len(app.tab().state.Comments) != 1 {
+							t.Fatal("delete click should ask for confirmation without deleting")
+						}
+						if confirm {
+							app = pressKey(app, 'y')
+							if len(app.tab().state.Comments) != 0 || len(app.session.FileComments(app.tab().path)) != 0 {
+								t.Fatal("confirmed deletion should be persisted")
+							}
+						} else {
+							app = pressKey(app, tea.KeyEscape)
+							if app.modal != noModal || len(app.tab().state.Comments) != 1 {
+								t.Fatal("cancel should keep the comment")
+							}
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestHeaderDeleteHonorsExistingRestrictions(t *testing.T) {
+	for _, reason := range []string{"other author", "previous round", "has replies"} {
+		t.Run(reason, func(t *testing.T) {
+			app := setupAppWithDoc(t, "source\n")
+			comment := review.Comment{ID: "keep", StartLine: 1, EndLine: 1, Body: "keep me", Author: app.author, ReviewRound: app.reviewRound()}
+			switch reason {
+			case "other author":
+				comment.Author = "Someone else"
+			case "previous round":
+				comment.ReviewRound--
+			case "has replies":
+				comment.Replies = []review.Reply{{Body: "reply"}}
+			}
+			app.tab().state.Comments = []review.Comment{comment}
+			_, buttons := app.renderAnnotationBox(newAnnotation(comment), 60, false)
+			app.updateCommentSidebar()
+			if buttons.delete.left != buttons.delete.right || app.sidebarActions[0].delete.left != app.sidebarActions[0].delete.right {
+				t.Fatal("ineligible comment should not have a delete button")
+			}
+			app.openCommentDelete(comment.ID)
+			if app.modal != noModal || len(app.tab().state.Comments) != 1 {
+				t.Fatal("ineligible comment should not be deleted")
+			}
+		})
 	}
 }
 
