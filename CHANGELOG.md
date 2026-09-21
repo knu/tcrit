@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.9.3
+
+### Added
+
+- **Kill ring** — comment and reply editors share up to 60 entries during the current TUI run.  Line and word kills (`ctrl+k`, `ctrl+u`, `ctrl+w`, `alt+d`, and their aliases) save deleted text; consecutive kills combine in text order.  `ctrl+y` yanks the latest entry, and `alt+y` immediately after a yank or yank-pop cycles through older entries.  Other input ends the sequence.  The ring is independent of the system clipboard; ordinary Delete/Backspace do not add entries.
+
+### Changed
+
+- File-comment threads appear above the first source or deleted line, directly below the tabs, including for empty, deleted, and binary files.  They remain listed in the sidebar; creating a file comment or navigating to one focuses its inline box.  Inline reply, resolve, delete, folding, and visibility controls apply to file comments too.
+
+### Breaking changes
+
+- Suggestion insertion moves from `ctrl+y` to `alt+s` (`M-s`).  `ctrl+y` now yanks from the kill ring; the Suggest button remains available.
+
 ## 0.9.2
 
 ### Changed
