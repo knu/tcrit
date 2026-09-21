@@ -4126,11 +4126,11 @@ func renderHelpGroup(title string, items []helpItem, width int) string {
 	}
 
 	var b strings.Builder
-	b.WriteString(footerKeyStyle.Render(title))
+	b.WriteString(helpHeadingStyle.Render(title))
 	b.WriteString("\n")
 	for i, item := range items {
-		key := footerKeyStyle.Width(keyWidth).Render(item.keys)
-		b.WriteString(key + footerStyle.Render(item.desc))
+		key := helpKeyStyle.Width(keyWidth).Render(item.keys)
+		b.WriteString(key + helpDescriptionStyle.Render(item.desc))
 		if i < len(items)-1 {
 			b.WriteString("\n")
 		}

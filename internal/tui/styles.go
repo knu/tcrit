@@ -81,6 +81,17 @@ var (
 			Bold(true).
 			Foreground(lipgloss.BrightWhite)
 
+	helpHeadingStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.BrightYellow)
+
+	helpKeyStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.BrightCyan)
+
+	helpDescriptionStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.BrightWhite)
+
 	modalStyle = lipgloss.NewStyle().
 			Border(lipgloss.ThickBorder()).
 			BorderForeground(accent).
