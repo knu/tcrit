@@ -86,6 +86,7 @@ type AppModel struct {
 	showResolved     bool
 	hideComments     bool
 	ignoreWhitespace bool
+	previousReplyIDs []string // submission baseline pending initial window dimensions
 
 	// Finish-flow state (see AppConfig).
 	finishCh chan<- FinishEvent
@@ -366,6 +367,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.tabs) > 0 && m.tab().state != nil {
 			m.rebuildContent()
 			m.updateCommentSidebar()
+			m.focusNewReply()
 		}
 		return m, nil
 
@@ -405,6 +407,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recalculateLayout()
 		m.rebuildContent()
 		m.updateCommentSidebar()
+		m.focusNewReply()
 		return m, nil
 
 	case editorFinishedMsg:
@@ -1494,6 +1497,7 @@ func (m *AppModel) resolvesAllOnFinish() bool {
 func (m *AppModel) doFinish() (tea.Model, tea.Cmd) {
 	if m.session != nil {
 		m.session.CJ.RoundState.Finished = true
+		m.session.CJ.RoundState.SubmittedReplies = m.replyIDs()
 	}
 	if m.resolvesAllOnFinish() {
 		m.resolveAll()

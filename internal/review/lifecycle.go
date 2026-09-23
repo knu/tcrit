@@ -41,6 +41,9 @@ type RoundState struct {
 	Diff        string                  `json:"diff,omitempty"`
 	Finished    bool                    `json:"finished,omitempty"`
 	NewFeedback bool                    `json:"new_feedback,omitempty"`
+	// Nil means no baseline was recorded; an empty array means no replies
+	// existed at submission.  Preserve that distinction in saved sessions.
+	SubmittedReplies []string `json:"submitted_replies"`
 }
 
 // BeginRound restores the persisted round and remaps anchors onto fresh content.

@@ -66,6 +66,7 @@ type threadScroll struct {
 	manual                    bool
 	lastReply                 string
 	replies                   int
+	revealReply               string
 }
 
 func (m *AppModel) threadHeight(sidebar bool) int {
@@ -98,6 +99,16 @@ func (m *AppModel) renderThread(key threadViewKey, author, body string, replies 
 	scroll.height = height
 	scroll.maxOffset = max(0, len(layout.lines)-height)
 	scroll.replies, scroll.lastReply = len(replies), lastReply
+	if focused && scroll.revealReply != "" {
+		for i, reply := range replies {
+			if reply.ID == scroll.revealReply {
+				scroll.offset = min(layout.starts[i+1], scroll.maxOffset)
+				scroll.manual = true
+				break
+			}
+		}
+		scroll.revealReply = ""
+	}
 	if scroll.manual {
 		scroll.offset = min(scroll.offset, scroll.maxOffset)
 	} else {

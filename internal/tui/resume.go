@@ -2,9 +2,27 @@ package tui
 
 import "github.com/knu/tcrit/internal/review"
 
+func (m *AppModel) replyIDs() []string {
+	ids := []string{}
+	for _, tab := range m.tabs {
+		if tab.state == nil {
+			continue
+		}
+		for _, comment := range tab.state.Comments {
+			for _, reply := range comment.Replies {
+				ids = append(ids, reply.ID)
+			}
+		}
+	}
+	return ids
+}
+
 func (m *AppModel) restoreRound() error {
 	if m.session == nil {
 		return nil
+	}
+	if m.session.CJ.RoundState.Finished {
+		m.previousReplyIDs = m.session.CJ.RoundState.SubmittedReplies
 	}
 	files := make(map[string]review.SnapshotFile, len(m.tabs))
 	for _, tab := range m.tabs {
@@ -30,4 +48,44 @@ func (m *AppModel) restoreRound() error {
 	}
 	m.newFeedback = m.session.CJ.RoundState.NewFeedback
 	return nil
+}
+
+func (m *AppModel) focusNewReply() {
+	if m.previousReplyIDs == nil || m.width <= 0 || m.height <= 0 {
+		return
+	}
+	seen := make(map[string]bool, len(m.previousReplyIDs))
+	for _, id := range m.previousReplyIDs {
+		seen[id] = true
+	}
+	m.previousReplyIDs = nil
+	for i := range m.tabs {
+		tab := &m.tabs[i]
+		comments := make(map[string]review.Comment)
+		if tab.state != nil {
+			for _, comment := range tab.state.Comments {
+				comments[comment.ID] = comment
+			}
+		}
+		for _, target := range m.commentTargets(i) {
+			replies := comments[target.id].Replies
+			for j := len(replies) - 1; j >= 0; j-- {
+				reply := replies[j]
+				if seen[reply.ID] || reply.Author == m.author {
+					continue
+				}
+				if target.scope != "file" && m.visualLineIndex(tab, lineRef{line: target.line, side: target.side}) < 0 {
+					break
+				}
+				if m.threadScrolls == nil {
+					m.threadScrolls = make(map[threadViewKey]threadScroll)
+				}
+				m.threadScrolls[threadViewKey{path: tab.path, id: target.id}] = threadScroll{revealReply: reply.ID}
+				m.hideComments = false
+				m.recalculateLayout()
+				m.selectComment(i, target)
+				return
+			}
+		}
+	}
 }
