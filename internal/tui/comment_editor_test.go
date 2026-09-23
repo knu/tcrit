@@ -783,8 +783,11 @@ func TestEditReplyModalKeepsDeleteButtonVisibleWithLongThread(t *testing.T) {
 		t.Fatal("long reference content is not scrollable")
 	}
 	before := ansi.Strip(rendered)
-	if !strings.Contains(before, "last line") {
-		t.Fatal("combined reference region does not initially show the latest reply")
+	if !strings.Contains(before, "long reply body") {
+		t.Fatal("combined reference region does not initially show the preceding reply")
+	}
+	if strings.Contains(before, "edit me") || strings.Contains(before, "last line") {
+		t.Fatal("combined reference region includes the reply being edited")
 	}
 	app = wheelMouse(app, referenceRegion.rect.left, referenceRegion.rect.top, tea.MouseWheelUp)
 	if app.modalReferenceOffset >= referenceRegion.action.scrollMaxOffset {
@@ -909,6 +912,18 @@ func TestEnterAddsThenEditsOwnCurrentRoundReply(t *testing.T) {
 	}
 	if targets := app.modalDeleteTargets(); len(targets) != 1 || targets[0].replyID != added.ID {
 		t.Fatalf("delete targets = %+v, want added reply", targets)
+	}
+	app.width, app.height = 128, 40
+	app.recalculateLayout()
+	app.modalTextarea.SetValue("revised follow-up")
+	background := lipgloss.NewStyle().Width(app.width).Height(app.height).Render("")
+	rendered, _ := app.renderWithModalLayout(background)
+	plain := ansi.Strip(rendered)
+	if strings.Count(plain, "follow-up") != 1 || !strings.Contains(plain, "revised follow-up") {
+		t.Errorf("edited reply should appear only in the textarea:\n%s", plain)
+	}
+	if !strings.Contains(plain, "addressed") {
+		t.Error("edit modal should preserve the preceding reply")
 	}
 }
 

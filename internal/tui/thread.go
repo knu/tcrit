@@ -34,15 +34,14 @@ func (m *AppModel) layoutThread(author, body string, replies []review.Reply, edi
 	}
 	appendComment(author, "Comment — "+name, body)
 	for i, reply := range replies {
+		if editingID != "" && reply.ID == editingID {
+			continue
+		}
 		name := reply.Author
 		if name == "" {
 			name = "anonymous"
 		}
-		prefix := "↳"
-		if editingID != "" && reply.ID == editingID {
-			prefix = ">"
-		}
-		header := prefix + " " + name + " " + commentLineStyle.Bold(false).Render(fmt.Sprintf("(#%d)", i+1))
+		header := "↳ " + name + " " + commentLineStyle.Bold(false).Render(fmt.Sprintf("(#%d)", i+1))
 		appendComment(reply.Author, header, reply.Body)
 	}
 	return layout
