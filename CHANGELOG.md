@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.4
+
+### Changed
+
+- New review rounds focus the first visible thread, in file and display order, with a reply added by another author since the previous submission.  The thread expands and scrolls to its latest new reply, including resolved threads and file comments.  Without a new reply, or when resuming an unfinished round, the starting position is unchanged.  `[` / `]` navigation is unchanged.
+- File tabs show both added and deleted line counts, such as `(+12 -5)`, omitting zero counts.
+- Syntax highlighting reuses the lexer, style, and formatter within each file, substantially reducing startup time for diffs with many deleted lines while preserving rendered output.
+- Refactored TUI internals and consolidated overlapping tests without changing their intended behavior.
+
 ## 0.9.3
 
 ### Added
