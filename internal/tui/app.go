@@ -2237,8 +2237,19 @@ func (m *AppModel) tabLabels() []tabLabel {
 		if basenames[label] > 1 {
 			label = t.path
 		}
+		var counts []string
 		if n := len(t.changedLines); n > 0 {
-			label += " " + tabChangeCount.Render(fmt.Sprintf("(+%d)", n))
+			counts = append(counts, tabAddedCount.Render(fmt.Sprintf("+%d", n)))
+		}
+		deleted := 0
+		for _, lines := range t.deletedAfter {
+			deleted += len(lines)
+		}
+		if deleted > 0 {
+			counts = append(counts, tabDeletedCount.Render(fmt.Sprintf("-%d", deleted)))
+		}
+		if len(counts) > 0 {
+			label += " (" + strings.Join(counts, " ") + ")"
 		}
 		labels[i] = tabLabel{text: label}
 	}

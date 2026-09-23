@@ -297,8 +297,10 @@ var (
 				Align(lipgloss.Right)
 
 	// Change count in tab labels
-	tabChangeCount = lipgloss.NewStyle().
+	tabAddedCount = lipgloss.NewStyle().
 			Foreground(lipgloss.Green)
+	tabDeletedCount = lipgloss.NewStyle().
+			Foreground(lipgloss.Red)
 
 	// Context box in comment/edit modals
 	contextBoxStyle = lipgloss.NewStyle().
