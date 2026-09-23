@@ -1,0 +1,680 @@
+package tui
+
+import (
+	"fmt"
+	"regexp"
+	"strings"
+
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+
+	gitpkg "github.com/knu/tcrit/internal/git"
+)
+
+func expandDisplayTabs(s string) string {
+	return strings.ReplaceAll(s, "\t", strings.Repeat(" ", displayTabWidth))
+}
+
+func documentDisplayLine(t *FileTab, index int, fallback string) string {
+	if !t.isMarkdown && t.chromaLines != nil && index < len(t.chromaLines) {
+		return expandDisplayTabs(t.chromaLines[index])
+	}
+	return expandDisplayTabs(fallback)
+}
+
+// rebuildContent renders the document line-by-line with cursor, selection,
+// line numbers, and bordered inline annotations.
+func (m *AppModel) rebuildContent() {
+	if len(m.tabs) == 0 {
+		m.contentViewport.SetContent("")
+		return
+	}
+	t := m.tab()
+	m.contentLayout = newRenderedContentLayout()
+
+	// Collect annotations keyed by the line they appear AFTER
+	annosByEndLine := make(map[int][]annotation)
+	oldAnnosByEndLine := make(map[int][]annotation)
+	if t.state != nil {
+		for _, c := range t.state.Comments {
+			if c.Scope == "file" {
+				continue
+			}
+			endAt := c.EndAt()
+			if c.Side == "old" {
+				oldAnnosByEndLine[endAt] = append(oldAnnosByEndLine[endAt], newAnnotation(c))
+			} else {
+				annosByEndLine[endAt] = append(annosByEndLine[endAt], newAnnotation(c))
+			}
+		}
+	}
+
+	// Count how many comments cover each line (for overlap detection)
+	annotatedLines := make(map[int]int)
+	oldAnnotatedLines := make(map[int]int)
+	if t.state != nil {
+		for _, c := range t.state.Comments {
+			if c.Scope == "file" {
+				continue
+			}
+			lines := annotatedLines
+			if c.Side == "old" {
+				lines = oldAnnotatedLines
+			}
+			for l := c.StartLine; l <= c.EndAt(); l++ {
+				lines[l]++
+			}
+		}
+	}
+
+	selStart, selEnd := m.selectionRange()
+	selSide := m.selectionSide()
+
+	// Determine which lines to highlight from the selected annotation.
+	sidebarHighlightStart, sidebarHighlightEnd, sidebarHighlightSide := m.highlightedCommentLines()
+
+	contentWidth := m.contentViewport.Width()
+	boxWidth := contentWidth - gutterWidth
+	if boxWidth < 20 {
+		boxWidth = 20
+	}
+
+	textWidth := contentWidth - gutterWidth - 1
+	if textWidth < 10 {
+		textWidth = 10
+	}
+
+	// Use cached syntax highlighting
+	isMarkdown := t.isMarkdown
+	// Detect table blocks so we can align columns across rows
+	var sourceLines []string
+	if t.doc != nil {
+		sourceLines = t.doc.Lines
+	}
+	tableBlocks := detectTableBlocks(sourceLines)
+	tableBlockMap := make(map[int]*tableBlock)
+	for i := range tableBlocks {
+		tb := &tableBlocks[i]
+		for l := tb.startLine; l <= tb.endLine; l++ {
+			tableBlockMap[l] = tb
+		}
+	}
+
+	var b strings.Builder
+	b.Grow(len(sourceLines) * 200) // pre-allocate to reduce allocations
+	layout := newRenderedContentLayout()
+	appendAnnotation := func(ann annotation, focused bool, target contentMouseTarget) {
+		box, button := m.renderAnnotationBox(ann, boxWidth, focused)
+		button.translate(0, len(layout.rows))
+		button.id = ann.id
+		layout.actions = append(layout.actions, button)
+		layout.appendBlock(&b, box, target)
+	}
+	if !m.hideComments {
+		for idx, ann := range m.annotationsAfterLine(0, "") {
+			focused := m.focused == contentPane && t.cursorOnAnnotation && t.cursorLine == 0 && t.cursorAnnoIdx == idx
+			appendAnnotation(ann, focused, contentMouseTarget{annotation: true, annotationIndex: idx})
+		}
+	}
+	if t.isBinary || t.doc == nil {
+		if t.isBinary {
+			layout.appendBlock(&b, "\n  Binary file changed — cannot display content.", contentMouseTarget{})
+		} else if t.outsideChanges {
+			layout.appendBlock(&b, "\n  Added file removed — no longer part of the changes.", contentMouseTarget{})
+		}
+		m.contentLayout = layout
+		m.contentViewport.SetContent(b.String())
+		return
+	}
+	renderDeleted := func(afterLine int) {
+		dels := t.deletedAfter[afterLine]
+		cachedHL := t.deletedLineCache[afterLine]
+		for di, del := range dels {
+			target := contentMouseTarget{line: del.OldLineNum, side: "old"}
+			isCursor := t.cursorSide == "old" && del.OldLineNum == t.cursorLine
+			isSelected := t.selecting && selSide == "old" && del.OldLineNum >= selStart && del.OldLineNum <= selEnd
+			isSidebarHighlight := sidebarHighlightSide == "old" && del.OldLineNum >= sidebarHighlightStart && del.OldLineNum <= sidebarHighlightEnd
+
+			marker := diffDeletedGutter.Render("-")
+			switch {
+			case del.OldLineNum == m.hoveredGutterLine && m.hoveredGutterSide == "old":
+				marker = commentGutterMarker.Render(">")
+			case isCursor && !t.cursorOnAnnotation:
+				marker = cursorMarker.Render(">")
+			case isSelected:
+				marker = selectedMarker.Render("|")
+			case isSidebarHighlight:
+				marker = cursorMarker.Render(">")
+			case oldAnnotatedLines[del.OldLineNum] > 1:
+				marker = gutterOverlap.Render("◆")
+			case oldAnnotatedLines[del.OldLineNum] == 1:
+				marker = annotationGutter.Render("■")
+			}
+
+			numStyle := diffDeletedLineNum
+			if isCursor {
+				numStyle = cursorLineNumStyle
+			} else if isSelected {
+				numStyle = selectedLineNumStyle
+			}
+			num := numStyle.Render(fmt.Sprintf("%d", del.OldLineNum))
+			var cached string
+			if di < len(cachedHL) {
+				cached = cachedHL[di]
+			}
+			for wi, content := range deletedDisplayLines(del.Content, cached, del.Inline, isMarkdown, textWidth) {
+				if isSelected {
+					content = inlineBackground(selectedLineBg, ansi.Strip(content))
+				} else if isSidebarHighlight {
+					content = inlineBackground(sidebarHighlightBg, ansi.Strip(content))
+				}
+				if wi == 0 {
+					layout.appendBlock(&b, fmt.Sprintf("%s%s %s", marker, num, content), target)
+				} else {
+					layout.appendBlock(&b, fmt.Sprintf(" %s %s", continuationGutter, content), target)
+				}
+			}
+			for idx, ann := range oldAnnosByEndLine[del.OldLineNum] {
+				if m.hideComments {
+					break
+				}
+				focused := m.focused == contentPane && t.cursorOnAnnotation && isCursor && t.cursorAnnoIdx == idx
+				appendAnnotation(ann, focused, contentMouseTarget{
+					line: del.OldLineNum, side: "old", annotation: true, annotationIndex: idx,
+				})
+			}
+		}
+	}
+	for i, line := range t.doc.Lines {
+		lineNum := i + 1
+		lineTarget := contentMouseTarget{line: lineNum}
+
+		// Render deleted lines that appear before this line
+		renderDeleted(lineNum - 1)
+		if !t.doc.HasLine(lineNum) {
+			if lineNum == 1 || t.doc.HasLine(lineNum-1) {
+				layout.appendBlock(&b, "       ⋯ context not included in diff", contentMouseTarget{})
+			}
+			continue
+		}
+
+		isCursor := t.cursorSide == "" && lineNum == t.cursorLine
+		isSelected := t.selecting && selSide == "" && lineNum >= selStart && lineNum <= selEnd
+		isSidebarHighlight := sidebarHighlightSide == "" && sidebarHighlightStart > 0 && lineNum >= sidebarHighlightStart && lineNum <= sidebarHighlightEnd
+		isChanged := t.changedLines != nil && t.changedLines[lineNum]
+		inlineChanges := t.inlineChanges[lineNum]
+
+		// Marker column
+		var marker string
+		if lineNum == m.hoveredGutterLine && m.hoveredGutterSide == "" {
+			marker = commentGutterMarker.Render(">")
+		} else if isCursor && !t.cursorOnAnnotation {
+			marker = cursorMarker.Render(">")
+		} else if isSelected {
+			marker = selectedMarker.Render("|")
+		} else if isSidebarHighlight {
+			marker = cursorMarker.Render(">")
+		} else if count, ok := annotatedLines[lineNum]; ok && count > 0 {
+			if count > 1 {
+				marker = gutterOverlap.Render("◆")
+			} else {
+				marker = annotationGutter.Render("■")
+			}
+		} else if isChanged {
+			marker = diffAddedGutter.Render("+")
+		} else {
+			marker = " "
+		}
+
+		// Line number
+		var numStr string
+		if isCursor {
+			numStr = cursorLineNumStyle.Render(fmt.Sprintf("%d", lineNum))
+		} else if isSelected {
+			numStr = selectedLineNumStyle.Render(fmt.Sprintf("%d", lineNum))
+		} else {
+			numStr = lineNumStyle.Render(fmt.Sprintf("%d", lineNum))
+		}
+
+		// Check if this line is part of a table block
+		if len(inlineChanges) > 0 && !isSelected && !isSidebarHighlight {
+			for wi, styledLine := range inlineDiffDisplayLines(inlineChanges, isMarkdown, textWidth, diffCommonTextBg, diffAddedTextBg) {
+				if wi == 0 {
+					layout.appendBlock(&b, fmt.Sprintf("%s%s %s", marker, numStr, styledLine), lineTarget)
+				} else {
+					layout.appendBlock(&b, fmt.Sprintf(" %s %s", continuationGutter, styledLine), lineTarget)
+				}
+			}
+		} else if tb, inTable := tableBlockMap[lineNum]; inTable {
+			var styledLine string
+			if reTableSep.MatchString(line) {
+				styledLine = formatTableSep(tb.colWidths)
+			} else {
+				isHeader := lineNum == tb.startLine
+				styledLine = formatTableRow(line, tb.colWidths, isHeader)
+			}
+
+			if isSelected {
+				styledLine = inlineBackground(selectedLineBg, styledLine)
+			} else if isSidebarHighlight {
+				styledLine = inlineBackground(sidebarHighlightBg, styledLine)
+			} else if isChanged {
+				styledLine = inlineBackground(diffChangedLineBg, styledLine)
+			}
+
+			wrappedLines := strings.Split(lipgloss.Wrap(expandDisplayTabs(styledLine), textWidth, ""), "\n")
+			for wi, wrappedLine := range wrappedLines {
+				if wi == 0 {
+					layout.appendBlock(&b, fmt.Sprintf("%s%s %s", marker, numStr, wrappedLine), lineTarget)
+				} else {
+					layout.appendBlock(&b, fmt.Sprintf(" %s %s", continuationGutter, wrappedLine), lineTarget)
+				}
+			}
+		} else {
+			// Get the display content: Chroma-highlighted or raw
+			displayLine := documentDisplayLine(t, i, line)
+
+			styleFunc := func(s string) string { return s }
+			if isMarkdown {
+				styleFunc = func(s string) string { return highlightMarkdown(s) }
+			}
+			if isSelected {
+				styleFunc = func(s string) string { return inlineBackground(selectedLineBg, s) }
+			} else if isSidebarHighlight {
+				styleFunc = func(s string) string { return inlineBackground(sidebarHighlightBg, s) }
+			} else if isChanged {
+				base := styleFunc
+				styleFunc = func(s string) string { return inlineBackground(diffChangedLineBg, base(s)) }
+			}
+
+			wrapped := lipgloss.Wrap(displayLine, textWidth, "")
+			wrappedLines := strings.Split(wrapped, "\n")
+			for wi, wl := range wrappedLines {
+				if wi == 0 {
+					layout.appendBlock(&b, fmt.Sprintf("%s%s %s", marker, numStr, styleFunc(wl)), lineTarget)
+				} else {
+					layout.appendBlock(&b, fmt.Sprintf(" %s %s", continuationGutter, styleFunc(wl)), lineTarget)
+				}
+			}
+		}
+
+		// Render inline annotations after this line
+		if anns, ok := annosByEndLine[lineNum]; ok {
+			for idx, ann := range anns {
+				if m.hideComments {
+					break
+				}
+				focused := m.focused == contentPane && t.cursorOnAnnotation && t.cursorSide == "" && t.cursorLine == lineNum && t.cursorAnnoIdx == idx
+				appendAnnotation(ann, focused, contentMouseTarget{
+					line: lineNum, annotation: true, annotationIndex: idx,
+				})
+			}
+		}
+	}
+	renderDeleted(t.doc.LineCount())
+	if t.doc.Known != nil {
+		layout.appendBlock(&b, "       ⋯ remaining context not included in diff", contentMouseTarget{})
+	}
+
+	m.contentLayout = layout
+	m.contentViewport.SetContent(b.String())
+}
+
+// renderAnnotationBox renders a bordered annotation box indented under the gutter.
+func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused bool) (string, commentHeaderRegion) {
+	collapsed := ann.resolved && !m.showResolved && !focused
+	var lineLabel string
+	if ann.scope == "file" {
+		lineLabel = "File"
+	} else if ann.endLine > ann.line {
+		lineLabel = fmt.Sprintf("L%d-%d", ann.line, ann.endLine)
+	} else {
+		lineLabel = fmt.Sprintf("L%d", ann.line)
+	}
+	if ann.side == "old" {
+		lineLabel += " (deleted)"
+	}
+
+	var boxContent strings.Builder
+	label := inlineLabelComment.Render("comment")
+	lineRef := commentLineStyle.Render(lineLabel)
+	header := fmt.Sprintf("%s %s", label, lineRef)
+	if len(ann.replies) > 0 {
+		header += commentLineStyle.Render(fmt.Sprintf(" · %d replies", len(ann.replies)))
+	}
+	header, button := renderCommentHeader(header, ann.resolved, m.canDeleteComment(ann.id), max(1, maxWidth-4))
+	boxContent.WriteString(header)
+	if !collapsed {
+		boxContent.WriteString("\n")
+		boxContent.WriteString(m.renderThread(threadViewKey{id: ann.id}, ann.author, ann.body, ann.replies, max(1, maxWidth-4), focused))
+	}
+	boxStyle := inlineCommentBox
+
+	if focused {
+		boxStyle = boxStyle.Border(lipgloss.ThickBorder()).BorderForeground(commentFocusedBorderColor)
+	}
+	box := boxStyle.Width(maxWidth).Render(boxContent.String())
+
+	var prefix string
+	if focused {
+		cursor := lipgloss.NewStyle().Width(2).Render(cursorMarker.Render(">"))
+		prefix = cursor + strings.Repeat(" ", gutterWidth-2)
+	} else {
+		prefix = strings.Repeat(" ", gutterWidth)
+	}
+
+	var b strings.Builder
+	for _, line := range strings.Split(box, "\n") {
+		b.WriteString(prefix + line + "\n")
+	}
+	button.translate(gutterWidth+2, 1)
+	return b.String(), button
+}
+
+// renderCommentHeader keeps the resolve button intact when the header wraps.
+func renderCommentHeader(label string, resolved, deletable bool, width int) (string, commentHeaderRegion) {
+	button := inlineLabelComment.Render("☐ Resolve")
+	if resolved {
+		button = resolvedBadge.Render("☑︎ Resolved")
+	}
+	header := lipgloss.Wrap(expandDisplayTabs(label), width, "")
+	rows := strings.Split(header, "\n")
+	x, y := lipgloss.Width(rows[len(rows)-1])+1, len(rows)-1
+	buttonWidth := lipgloss.Width("☑︎ Resolved")
+	deleteButton := lipgloss.NewStyle().Foreground(lipgloss.Red).Render("x")
+	actionsWidth := buttonWidth
+	if deletable {
+		actionsWidth += 1 + lipgloss.Width(deleteButton)
+	}
+	if x+actionsWidth > width {
+		header += "\n"
+		x, y = 0, y+1
+	} else {
+		header += " "
+	}
+	header += lipgloss.NewStyle().Width(buttonWidth).Render(button)
+	region := commentHeaderRegion{resolve: mouseRect{left: x, top: y, right: x + buttonWidth, bottom: y + 1}}
+	if deletable {
+		deleteX := max(x+buttonWidth+1, width-lipgloss.Width(deleteButton))
+		header += strings.Repeat(" ", deleteX-x-buttonWidth) + deleteButton
+		region.delete = mouseRect{left: deleteX, top: y, right: deleteX + lipgloss.Width(deleteButton), bottom: y + 1}
+	}
+	return header, region
+}
+
+var (
+	reBold       = regexp.MustCompile(`\*\*(.+?)\*\*`)
+	reItalic     = regexp.MustCompile(`(?:^|[^*])\*([^*]+?)\*(?:[^*]|$)`)
+	reCode       = regexp.MustCompile("`([^`]+)`")
+	reLink       = regexp.MustCompile(`\[([^\]]+)\]\([^)]+\)`)
+	reListItem   = regexp.MustCompile(`^(\s*[-*+]\s)(.*)$`)
+	reCheckbox   = regexp.MustCompile(`^(\s*[-*+]\s)\[([ xX])\]\s(.*)$`)
+	reNumList    = regexp.MustCompile(`^(\s*\d+\.\s)(.*)$`)
+	reBlockquote = regexp.MustCompile(`^(\s*>\s?)(.*)$`)
+	reHr         = regexp.MustCompile(`^(\s*)([-*_]{3,})\s*$`)
+	reTableRow   = regexp.MustCompile(`^\s*\|.*\|\s*$`)
+	reTableSep   = regexp.MustCompile(`^\s*\|[\s:]*[-]+[\s:|-]*\|\s*$`)
+)
+
+// highlightMarkdown applies markdown syntax highlighting to a single line.
+func highlightMarkdown(line string) string {
+	trimmed := strings.TrimSpace(line)
+
+	if reHr.MatchString(line) {
+		return mdHrStyle.Render("─────────────────────────────────")
+	}
+
+	if strings.HasPrefix(trimmed, "#### ") {
+		return mdH4Style.Render(line)
+	}
+	if strings.HasPrefix(trimmed, "### ") {
+		return mdH3Style.Render(line)
+	}
+	if strings.HasPrefix(trimmed, "## ") {
+		return mdH2Style.Render(line)
+	}
+	if strings.HasPrefix(trimmed, "# ") {
+		return mdH1Style.Render(line)
+	}
+
+	if reTableSep.MatchString(line) {
+		return mdTableSepStyle.Render(line)
+	}
+	if reTableRow.MatchString(line) {
+		cells := strings.Split(line, "|")
+		var parts []string
+		for i, cell := range cells {
+			if i == 0 || i == len(cells)-1 {
+				parts = append(parts, cell)
+			} else {
+				parts = append(parts, highlightInline(cell))
+			}
+		}
+		return strings.Join(parts, mdTablePipe.Render("|"))
+	}
+
+	if loc := reBlockquote.FindStringSubmatchIndex(line); loc != nil {
+		rest := line[loc[4]:loc[5]]
+		return mdBlockquoteBar.Render("▎") + " " + mdBlockquoteStyle.Render(rest)
+	}
+
+	if loc := reCheckbox.FindStringSubmatchIndex(line); loc != nil {
+		indent := line[loc[2]:loc[3]]
+		checked := line[loc[4]:loc[5]]
+		rest := line[loc[6]:loc[7]]
+		if checked == "x" || checked == "X" {
+			return indent + mdCheckboxDone.Render("✓") + " " + mdCheckboxDoneText.Render(rest)
+		}
+		return indent + mdCheckboxOpen.Render("☐") + " " + highlightInline(rest)
+	}
+
+	if loc := reListItem.FindStringSubmatchIndex(line); loc != nil {
+		indent := line[loc[2]:loc[3]]
+		rest := line[loc[4]:loc[5]]
+		return mdListMarkerStyle.Render(indent) + highlightInline(rest)
+	}
+	if loc := reNumList.FindStringSubmatchIndex(line); loc != nil {
+		marker := line[loc[2]:loc[3]]
+		rest := line[loc[4]:loc[5]]
+		return mdListMarkerStyle.Render(marker) + highlightInline(rest)
+	}
+
+	return highlightInline(line)
+}
+
+func inlineBackground(style lipgloss.Style, content string) string {
+	bgAnsi := bgToAnsi(style.GetBackground())
+	if bgAnsi == "" {
+		return style.Render(content)
+	}
+	var patched strings.Builder
+	patched.Grow(len(content) + len(bgAnsi))
+	reapply := false
+	parser := ansi.GetParser()
+	defer ansi.PutParser(parser)
+	parser.SetHandler(ansi.Handler{HandleCsi: func(cmd ansi.Cmd, params ansi.Params) {
+		if cmd != 'm' {
+			return
+		}
+		reapply = len(params) == 0
+		params.ForEach(0, func(_ int, param int, _ bool) {
+			switch {
+			case param == 0 || param == 49:
+				reapply = true
+			case param == 48, param >= 40 && param <= 47, param >= 100 && param <= 107:
+				reapply = false
+			}
+		})
+	}})
+	for i := range len(content) {
+		parser.Advance(content[i])
+		patched.WriteByte(content[i])
+		if reapply {
+			patched.WriteString(bgAnsi)
+			reapply = false
+		}
+	}
+	return bgAnsi + patched.String() + "\033[0m"
+}
+
+func inlineDiffDisplayLines(segments []gitpkg.InlineSegment, isMarkdown bool, width int, base, changed lipgloss.Style) []string {
+	var b strings.Builder
+	for _, segment := range segments {
+		content := segment.Content
+		if isMarkdown {
+			content = highlightMarkdown(content)
+		}
+		style := base
+		if segment.Changed {
+			style = changed
+		}
+		b.WriteString(inlineBackground(style, content))
+	}
+	return strings.Split(lipgloss.Wrap(expandDisplayTabs(b.String()), width, ""), "\n")
+}
+
+func deletedDisplayLines(content, cached string, inline []gitpkg.InlineSegment, isMarkdown bool, width int) []string {
+	if len(inline) > 0 {
+		return inlineDiffDisplayLines(inline, isMarkdown, width, diffCommonTextBg, diffDeletedTextBg)
+	}
+	display := content
+	if cached != "" {
+		display = cached
+	}
+	lines := strings.Split(lipgloss.Wrap(expandDisplayTabs(display), width, ""), "\n")
+	for i := range lines {
+		if isMarkdown {
+			lines[i] = highlightMarkdown(lines[i])
+		}
+		lines[i] = inlineBackground(diffDeletedLineBg, lines[i])
+	}
+	return lines
+}
+
+// tableBlock represents a contiguous range of markdown table lines.
+type tableBlock struct {
+	startLine int
+	endLine   int
+	colWidths []int
+}
+
+func detectTableBlocks(lines []string) []tableBlock {
+	var blocks []tableBlock
+	inTable := false
+	var current tableBlock
+
+	for i, line := range lines {
+		isTable := reTableRow.MatchString(line) || reTableSep.MatchString(line)
+		if isTable {
+			if !inTable {
+				inTable = true
+				current = tableBlock{startLine: i + 1}
+			}
+			current.endLine = i + 1
+
+			if !reTableSep.MatchString(line) {
+				cells := parseTableCells(line)
+				for len(current.colWidths) < len(cells) {
+					current.colWidths = append(current.colWidths, 0)
+				}
+				for ci, cell := range cells {
+					if len(cell) > current.colWidths[ci] {
+						current.colWidths[ci] = len(cell)
+					}
+				}
+			}
+		} else {
+			if inTable {
+				blocks = append(blocks, current)
+				inTable = false
+			}
+		}
+	}
+	if inTable {
+		blocks = append(blocks, current)
+	}
+	return blocks
+}
+
+func parseTableCells(line string) []string {
+	line = strings.TrimSpace(line)
+	line = strings.Trim(line, "|")
+	parts := strings.Split(line, "|")
+	cells := make([]string, len(parts))
+	for i, p := range parts {
+		cells[i] = strings.TrimSpace(p)
+	}
+	return cells
+}
+
+func formatTableRow(line string, colWidths []int, isHeader bool) string {
+	cells := parseTableCells(line)
+	pipe := mdTablePipe.Render("│")
+
+	var parts []string
+	for ci := 0; ci < len(colWidths); ci++ {
+		w := colWidths[ci]
+		cell := ""
+		if ci < len(cells) {
+			cell = cells[ci]
+		}
+		padded := lipgloss.NewStyle().Width(w).Render(cell)
+		if isHeader {
+			parts = append(parts, mdTableHeaderStyle.Render(" "+padded+" "))
+		} else {
+			parts = append(parts, mdTableCellStyle.Render(" "+padded+" "))
+		}
+	}
+
+	return pipe + strings.Join(parts, pipe) + pipe
+}
+
+func formatTableSep(colWidths []int) string {
+	pipe := mdTablePipe.Render("│")
+	var parts []string
+	for _, w := range colWidths {
+		parts = append(parts, mdTableSepStyle.Render(strings.Repeat("─", w+2)))
+	}
+	return pipe + strings.Join(parts, mdTablePipe.Render("┼")) + pipe
+}
+
+func highlightInline(line string) string {
+	// Render links before injecting any ANSI styles. CSI sequences also start
+	// with "[", so running the Markdown link regexp afterward can mistake an
+	// escape sequence followed by a link for part of the link label.
+	line = reLink.ReplaceAllStringFunc(line, func(match string) string {
+		idx := strings.Index(match, "](")
+		if idx < 0 {
+			return match
+		}
+		text := match[1:idx]
+		return mdLinkStyle.Render(text)
+	})
+
+	line = reCode.ReplaceAllStringFunc(line, func(match string) string {
+		inner := match[1 : len(match)-1]
+		return mdCodeStyle.Render(" " + inner + " ")
+	})
+
+	line = reBold.ReplaceAllStringFunc(line, func(match string) string {
+		inner := match[2 : len(match)-2]
+		return mdBoldStyle.Render(inner)
+	})
+
+	line = reItalic.ReplaceAllStringFunc(line, func(match string) string {
+		start := 0
+		end := len(match)
+		if match[0] != '*' {
+			start = 1
+		}
+		if match[end-1] != '*' {
+			end--
+		}
+		inner := match[start+1 : end-1]
+		prefix := match[:start]
+		suffix := match[end:]
+		return prefix + mdItalicStyle.Render(inner) + suffix
+	})
+
+	return line
+}

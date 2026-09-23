@@ -59,14 +59,6 @@ var (
 			Background(lipgloss.Red).
 			Padding(0, 1)
 
-	focusedBorder = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(accent)
-
-	blurredBorder = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(subtle)
-
 	commentStyle = lipgloss.NewStyle().
 			Foreground(muted).
 			PaddingLeft(1)
