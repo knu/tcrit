@@ -8,6 +8,7 @@
 
 ## Key changes from upstream
 
+- **File references and editor navigation** — click `@path/to/file L40` in comments or replies to jump to the source.  `alt+g` asks for a line number; locations outside the review offer to open in `$EDITOR`.  `alt+e` opens the current file at the cursor line directly.  VS Code-style `--goto` and traditional `+LINE FILE` editors are supported.
 - **Read diffs without comment boxes** — press `H` to hide inline comments and replace the sidebar with a narrow gutter, giving the source more space.  A `💬` marks commented lines, including deleted lines; click a marker to open its thread.  Press `H` again to restore comments; the `h` setting for resolved comments is preserved.  Opening the sidebar with `s` or jumping to a file comment restores the sidebar.  Comment editors still show the full thread.
 - **[Crit](https://crit.md/)-compatible agent workflow** — review commands block until the reviewer finishes, print an agent-facing result, and support iterative rounds through `tcrit --session <id>`; each round closes the TUI and its dedicated pane or tab, and the next round restores saved state in a new process.
 - **Native Herdr and tmux workflows** — reviews open in a full-width Herdr tab or a tmux split; tcrit finds the invoking context from process ancestry even when tools such as Codex do not inherit multiplexer environment variables.
@@ -301,6 +302,8 @@ Tcrit resolves the Herdr workspace, tab, and pane or the tmux server and pane fr
 | `j` / `k`                             | Move down / up through current and deleted lines |
 | `ctrl+d` / `ctrl+u` / `PgDn` / `PgUp` | Half page down / up                      |
 | `g` / `G` / `Home` / `End`            | Jump to top / bottom                     |
+| `alt+e` (`M-e`)                       | Open the current file at the cursor line in `$EDITOR`, if it exists on disk |
+| `alt+g` (`M-g`)                       | Enter a line number; jump there or confirm opening it in `$EDITOR` if absent from the review |
 | `enter`                               | Add comment at current line              |
 | `f`                                   | Comment on the file or reply to its existing thread |
 | `v`                                   | Visual select mode (multi-line comments) |
@@ -316,6 +319,12 @@ Tcrit resolves the Herdr workspace, tab, and pane or the tmux server and pane fr
 | `q`                                   | Finish review (Approve when no unresolved comments remain) |
 
 Ignore whitespace is off by default and lasts for the current TUI run.  It ignores changes in spaces, tabs, carriage returns (CR, `\r`, including LF ↔ CRLF changes), and other ASCII whitespace within a line, including inside strings; it still shows added or deleted blank lines.  The header indicates when it is enabled.  Existing comments on ignored old-side lines retain their context, and files remain available even if all their changes are ignored.
+
+**File references:** Comments and replies recognize `@path/to/file` with an optional space followed by `L` and a positive line number.  Click an underlined reference to navigate.  No boundary is required after the digits: `@file L40にある通り` and `@file L40-45` both target line 40.  Paths are relative to the review's working directory, or absolute, and use ASCII letters, digits, `.`, `_`, `-`, and `/`; extensionless names such as `@Makefile` are supported.  A backslash escapes the next character, including spaces and backslashes: `@my\ file.md L40` refers to `my file.md`.  Escapes cannot cross a newline.  The `@` must start the body or follow whitespace.  Only existing regular files become links.  File completion is not yet provided.
+
+Line numbers refer to the new side of the review.  Unchanged lines available in a complete file are valid destinations; lines missing from a partial supplied diff are not.  A reference without a line opens the file's tab at its start.  If the file or line is unavailable in the review, a confirmation dialog offers to open it in `$EDITOR`, with Cancel selected by default.  TCrit does not check whether the requested line exists on disk.  Missing files are never created through these actions.  The shortcuts apply outside comment editors and other dialogs.
+
+`$EDITOR` may include quoted arguments, which are preserved.  With a line number, TCrit probes `--help` once per editor setting during the TUI run: an advertised `--goto` option selects `--goto FILE:LINE`; otherwise it uses `+LINE FILE`.  Help output on either stream is accepted, including nonzero exits such as nvi's unsupported-option response; a timed-out probe falls back to `+LINE FILE`.  Without a line number it passes only the filename.  An unset `$EDITOR` defaults to `vi`.
 
 **Comment dialogs:**
 

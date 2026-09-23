@@ -1,10 +1,13 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/mattn/go-shellwords"
@@ -42,6 +45,12 @@ func (m *AppModel) openExternalEditor() tea.Cmd {
 }
 
 func externalEditorCommand(path string) (*exec.Cmd, error) {
+	return sourceEditorCommand(path, 0)
+}
+
+var editorGotoCache sync.Map
+
+func sourceEditorCommand(path string, line int) (*exec.Cmd, error) {
 	editor := strings.TrimSpace(os.Getenv("EDITOR"))
 	if editor == "" {
 		editor = "vi"
@@ -53,7 +62,44 @@ func externalEditorCommand(path string) (*exec.Cmd, error) {
 	if len(args) == 0 {
 		return nil, fmt.Errorf("$EDITOR is empty")
 	}
-	return exec.Command(args[0], append(args[1:], path)...), nil
+	if line > 0 {
+		if editorSupportsGoto(editor, args) {
+			args = append(args, "--goto", fmt.Sprintf("%s:%d", path, line))
+		} else {
+			args = append(args, fmt.Sprintf("+%d", line), path)
+		}
+	} else {
+		args = append(args, path)
+	}
+	return exec.Command(args[0], args[1:]...), nil
+}
+
+func editorSupportsGoto(editor string, args []string) bool {
+	if cached, ok := editorGotoCache.Load(editor); ok {
+		return cached.(bool)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	helpArgs := append(append([]string(nil), args[1:]...), "--help")
+	cmd := exec.CommandContext(ctx, args[0], helpArgs...)
+	cmd.WaitDelay = 200 * time.Millisecond
+	output, _ := cmd.CombinedOutput()
+	supported := ctx.Err() == nil && helpHasGoto(string(output))
+	editorGotoCache.Store(editor, supported)
+	return supported
+}
+
+func helpHasGoto(help string) bool {
+	for _, line := range strings.Split(help, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 1 && strings.TrimSuffix(fields[0], ",") == "-g" {
+			fields = fields[1:]
+		}
+		if len(fields) > 0 && strings.TrimSuffix(fields[0], ",") == "--goto" {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *AppModel) finishExternalEdit(msg editorFinishedMsg) {

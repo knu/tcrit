@@ -25,7 +25,7 @@ func (m *AppModel) layoutThread(author, body string, replies []review.Reply, edi
 		}
 		layout.starts = append(layout.starts, len(layout.lines))
 		style := m.commentAuthorStyle(author)
-		content := style.Bold(true).Render(header) + "\n" + style.Render(body)
+		content := style.Bold(true).Render(header) + "\n" + style.Render(m.linkFileReferences(body))
 		layout.lines = append(layout.lines, strings.Split(lipgloss.Wrap(expandDisplayTabs(content), max(1, width), ""), "\n")...)
 	}
 	name := author
@@ -144,7 +144,7 @@ func (m *AppModel) renderLatestComment(author, body string, replies []review.Rep
 		name = "anonymous"
 	}
 	style := m.commentAuthorStyle(author)
-	content := style.Bold(true).Render(name+": ") + style.Render(body)
+	content := style.Bold(true).Render(name+": ") + style.Render(m.linkFileReferences(body))
 	lines := strings.Split(lipgloss.Wrap(expandDisplayTabs(content), max(1, width), ""), "\n")
 	if len(lines) > height {
 		lines = append(lines[:height], footerStyle.Render("↓"))

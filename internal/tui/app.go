@@ -9,6 +9,7 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -38,6 +39,8 @@ const (
 	deleteConfirmModal
 	finishModal
 	helpModal
+	gotoLineModal
+	openSourceModal
 )
 
 // FinishEvent is emitted on the finish channel when the reviewer finishes a
@@ -118,6 +121,9 @@ type AppModel struct {
 	pendingDelete        int
 	modalFocus           int  // focus index within the active modal
 	newFeedback          bool // true after adding or editing a comment in this round
+	lineInput            textinput.Model
+	pendingLocation      sourceLocation
+	locationError        string
 
 	err error
 }
@@ -410,6 +416,19 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.focusNewReply()
 		return m, nil
 
+	case sourceEditorReadyMsg:
+		if msg.err != nil {
+			m.locationError = msg.err.Error()
+			return m, nil
+		}
+		return m, tea.ExecProcess(msg.cmd, func(err error) tea.Msg { return sourceEditorFinishedMsg{err: err} })
+
+	case sourceEditorFinishedMsg:
+		if msg.err != nil {
+			m.locationError = fmt.Sprintf("running $EDITOR: %v", msg.err)
+		}
+		return m, nil
+
 	case editorFinishedMsg:
 		m.killRing.interrupt()
 		m.finishExternalEdit(msg)
@@ -441,6 +460,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	var cmd tea.Cmd
+	if m.modal == gotoLineModal {
+		m.lineInput, cmd = m.lineInput.Update(msg)
+		return m, cmd
+	}
 	if m.modal == commentModal || m.modal == fileCommentModal || m.modal == replyModal || m.modal == editModal {
 		before := m.modalTextarea.Value()
 		m.modalTextarea, cmd = m.modalTextarea.Update(msg)
@@ -461,6 +484,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.modal == gotoLineModal || m.modal == openSourceModal {
+		return m.handleLocationModal(msg)
+	}
+	m.locationError = ""
 	if m.hoveredGutterLine != 0 {
 		m.hoveredGutterLine = 0
 		m.hoveredGutterSide = ""
@@ -497,6 +524,13 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	t := m.tab()
+	if msg.String() == "alt+e" {
+		m.locationError = ""
+		return m, m.openSourceEditor(sourceLocation{path: t.path, line: max(1, t.cursorLine)})
+	}
+	if msg.String() == "alt+g" {
+		return m, m.openGotoLine()
+	}
 
 	if msg.String() == "ctrl+pgup" || msg.String() == "ctrl+pgdown" {
 		direction := 1
@@ -2107,9 +2141,13 @@ func (m AppModel) View() tea.View {
 	v := tea.NewView(full)
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeAllMotion
-	if c := m.modalTextarea.Cursor(); c != nil {
+	cursor := m.modalTextarea.Cursor()
+	if m.modal == gotoLineModal {
+		cursor = m.lineInput.Cursor()
+	}
+	if c := cursor; c != nil {
 		for _, region := range layout.modalRegions {
-			if !region.action.textarea {
+			if !region.action.textarea && !region.action.lineInput {
 				continue
 			}
 			c.X += region.rect.left
@@ -2334,6 +2372,9 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 	}
 	m.hoveredGutterLine = 0
 	m.hoveredGutterSide = ""
+	if m.modal == gotoLineModal || m.modal == openSourceModal {
+		return m.handleLocationModalMouse(mouse)
+	}
 	if m.isTextModal() {
 		return m.handleTextModalMouse(mouse)
 	}
@@ -2348,6 +2389,11 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 	}
 	if m.modal != noModal {
 		return m, nil
+	}
+	if !m.tab().selecting && !m.tabSearching {
+		if location, ok := m.sourceReferenceAt(mouse.X, mouse.Y); ok {
+			return m, m.navigateSource(location)
+		}
 	}
 	if rect, ok := m.footerFinishRect(); ok && rect.contains(mouse) {
 		m.openFinishModal()
@@ -2493,6 +2539,7 @@ func (m *AppModel) selectTab(index int) {
 }
 
 type modalMouseAction struct {
+	lineInput       bool
 	focus           int
 	deleteIndex     int
 	textarea        bool
@@ -2987,6 +3034,9 @@ func (m *AppModel) renderTabBar() string {
 }
 
 func (m AppModel) renderFooter() string {
+	if m.locationError != "" {
+		return footerStyle.Width(m.width).Render(m.locationError)
+	}
 	t := m.tabs[m.activeTab]
 	k := func(key, desc string) string {
 		return footerKeyStyle.Render(key) + " " + footerStyle.Render(desc)
@@ -3079,6 +3129,8 @@ func (m AppModel) renderHelp(innerWidth int) string {
 		{keys: "[/]", desc: "comments"},
 	}, columnWidth)
 	codeReview := renderHelpGroup("Code review / search", []helpItem{
+		{keys: "alt+e", desc: "editor"},
+		{keys: "alt+g", desc: "go to line"},
 		{keys: "tab/S-tab", desc: "files"},
 		{keys: "1-9", desc: "file tab"},
 		{keys: "/", desc: "search"},
@@ -3289,6 +3341,11 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 	innerWidth := modalWidth - 6
 
 	switch m.modal {
+	case gotoLineModal, openSourceModal:
+		content, locationRegions := m.locationModalContent(innerWidth)
+		regions = append(regions, locationRegions...)
+		modalContent = frameStyle.Width(modalWidth).Render(content)
+
 	case helpModal:
 		title := modalTitleStyle.MarginBottom(0).Render("Keyboard Help  (? / esc to close)")
 		modalContent = frameStyle.Width(modalWidth).Render(
