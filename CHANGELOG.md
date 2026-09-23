@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.5
+
+### Added
+
+- **File references and source navigation** — comments and replies link existing `@path/to/file` references, with optional ` L40` line numbers and backslash escapes for paths containing spaces.  Click to jump within the review or confirm opening other locations in `$EDITOR`.  `alt+g` asks for a line number, and `alt+e` opens the current file at the cursor line.  Editor navigation supports both `--goto FILE:LINE` and `+LINE FILE`.
+
+### Changed
+
+- Bundled agent skills distinguish recoverable launch failures from interruptions after the TUI opens.  They keep waiting for review submission unless the host can automatically resume the agent and preserve the result, and clarify completion notifications and nested wait handling.
+- Check previously unhandled errors in CLI setup, socket cleanup, and tests; simplify test code and clear all lint findings.
+
+### Fixed
+
+- Reply editors omit the reply being edited from the reference thread, so its saved body is not duplicated above the input field.  Other replies and their original numbering remain visible.
+
 ## 0.9.4
 
 ### Changed
