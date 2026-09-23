@@ -38,11 +38,15 @@ For a supplied diff, use `tcrit --diff=changes.diff` or `tcrit --diff changes.di
 
 `--scope=staged` is equivalent to `--staged`; `--scope=unstaged` is equivalent to `--unstaged`.  Conflicting scope flags are rejected.  `--scope=A..B` compares two committed snapshots; `--scope=A...B` compares their merge base with B.  B can be omitted to mean HEAD (`--scope=main..` or `--scope=main...`).  `--scope` cannot be combined with a document or `--diff`.  It stays fixed for that session; each new review has independent comment storage, even with identical scope arguments.  Use the session ID from the finish prompt on comment commands (`tcrit comments --session <id>` and `tcrit comment --session <id>`, including replies and bulk input).  Reconnecting with `--session <id>` retains the selected scope.  Committed comparisons read the right endpoint, which may differ from files on disk.  Without explicit flags, the scope is all; a clean working tree does not fall back to committed changes.
 
-## Step 2: Launch the review and block
+## Step 2: Launch the review and wait for the reviewer
 
-Run the command from Step 1 and wait for it to finish.  Each new invocation creates an independent saved session.  Record the working directory, session ID printed at startup, and command-runner handle.  `tcrit status` lists saved sessions in the current directory.
+Run the command from Step 1.  Each new invocation creates an independent saved session.  Record the working directory, session ID printed at startup, and command-runner handle.  `tcrit status` lists saved sessions in the current directory.
 
-TCrit opens a Herdr tab or tmux pane and closes it at the end of each round, including rounds with unresolved comments.  Give the blocking command a long timeout (at least 10 minutes).  If the runner returns an execution handle, poll it until completion.  Wait for the reviewer to finish before editing.
+TCrit opens a Herdr tab or tmux pane and closes it at the end of each round, including rounds with unresolved comments.  Use a long command lifetime when supported (at least 10 minutes).  For a yielded execution handle, use completion notifications or the longest bounded wait the host permits instead of frequent short polls.  Human review is an input wait: announce that the review is open, then report state changes rather than repeating unchanged waiting messages.
+
+If the host preserves the running command and its completion output across turns, you may return a pending-review response while leaving the review open.  Retain the directory, session ID, and execution handle for continuation.  On the next turn, collect the original command's result; do not launch another review or use `--session` while that command is still running.  If the result cannot be recovered, report the limitation instead of inferring approval from a missing saved session.
+
+Wait for the reviewer to submit the round before editing reviewed content.  Elapsed time, yielding a turn, and silence are not approval.
 
 When the user cancels or replaces the task, run `tcrit stop --session <id>` and collect the original command's result.  This preserves saved comments and round context; cancellation is not approval.  Resume with `tcrit --session <id>` from the original directory only when the user explicitly asks in chat.  Keep earlier review data when starting a different task; `clear` is only for explicitly requested deletion.
 
@@ -50,7 +54,12 @@ Without a supported multiplexer, ask the user to run the command in their termin
 
 ## Step 3: Read the result
 
-Check the exit status first.  On nonzero exit, read any new saved comments and replies, preserve work and session state, and report the interruption in chat.  Then end the turn and wait for explicit chat instructions; do not act on the comments or restart TCrit automatically.  Only exit status 0 enters the continuation flow below.
+Check the exit status first.  For a nonzero exit, distinguish a launch failure from an interrupted review:
+
+- **Failed before the reviewer could use the TUI:** diagnose the startup error.  A sandbox or permission error may be retried through the host's normal escalation mechanism without asking the user to request the review again.  Confirm the failed command has exited and inspect `tcrit status` before retrying; a printed session ID alone does not mean the TUI opened.  After correcting the cause, reuse the saved session with `--session <id>` if one was created, or rerun the original command otherwise.  If another review is running, the launch state is uncertain, escalation is denied, or the error persists, preserve state and report the blocker rather than retrying unchanged.
+- **Interrupted after the TUI opened, or cancelled by the user:** read any new saved comments and replies, preserve work and session state, and report the interruption in chat.  Then end the turn and wait for explicit chat instructions; do not act on the comments or restart TCrit automatically.
+
+Only exit status 0 enters the continuation flow below.
 
 Read the finish prompt and `approved: true` or `approved: false`.  Check all returned threads, including resolved comments and replies, for new instructions before continuing.  Approval may already have deleted the saved review, so use the returned thread contents.
 

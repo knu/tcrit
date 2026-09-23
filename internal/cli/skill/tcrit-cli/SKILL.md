@@ -42,7 +42,7 @@ tcrit comment --session <id> --json --file .tmp/replies.json --author 'Claude Co
 
 `--scope` stays fixed for a session.  Identical scope arguments, document paths, or plan names can have independent session IDs.  `--plan <slug>` selects a plan only when its name is unambiguous; prefer the ID.
 
-To resume, run `tcrit --session <id>` from its original directory.  After a nonzero review exit, read new saved comments and replies, then wait for explicit chat instructions before continuing work or resuming TCrit.  Resuming restores the saved plan or diff input.  To replace that input, use `tcrit plan --session <id> <file>` or `tcrit --diff=<file> --session <id>`.  The `/tcrit` skill covers the interactive review loop.
+To resume a stopped session, run `tcrit --session <id>` from its original directory.  If a command is still waiting for the reviewer, retain its execution handle and collect that command's result instead.  The `/tcrit` skill distinguishes retryable launch failures from interrupted reviews that require explicit chat instructions to resume.  Resuming restores the saved plan or diff input.  To replace that input, use `tcrit plan --session <id> <file>` or `tcrit --diff=<file> --session <id>`.  The `/tcrit` skill covers the interactive review loop.
 
 ## Review file format
 
