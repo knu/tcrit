@@ -42,7 +42,15 @@ For a supplied diff, use `tcrit --diff=changes.diff` or `tcrit --diff changes.di
 
 Run the Step 1 command; retain its working directory, session ID, and execution handle.  TCrit opens a Herdr tab or tmux pane and closes it after each round.  Without a supported multiplexer, ask the user to run it in their terminal and return the session ID for reading results.
 
-Allow at least 10 minutes of command lifetime when supported.  Announce the open review, then report state changes.  Wait on the original handle using completion notifications or long bounded waits.  End the turn while waiting only if the host is known to automatically resume the agent on completion without another user message and preserve the result.  Otherwise keep waiting within this turn; a persistent handle alone is insufficient.  After any interruption, collect the original result before launching another review.
+Treat human review as an input wait.  Announce the open review, then report state changes; repeat an unchanged waiting notice only when higher-priority host instructions require it.
+
+Allow at least 10 minutes of command lifetime when supported.  Choose the wait mechanism from the tools actually exposed by the host:
+
+- **Blocking execution:** keep the original command call pending until it returns.  Its execution timeout is a process-lifetime limit, not a polling interval.
+- **Background task or yielded session:** retain its handle and use completion notifications or the longest bounded wait permitted by the host's responsiveness requirements.  A wait returning without completion does not mean the review ended.
+- **Nested execution tools only:** if an outer orchestration call wraps a wait on that task or session, let the outer call outlast the inner wait plus overhead (for example, 60 seconds outside and 50 seconds inside).  If the outer call still yields, wait on its handle before issuing another inner wait.  Avoid short polls at either layer; hosts without this wrapper use the preceding mechanisms directly.
+
+End the turn while waiting only if the host is known to automatically resume the agent on completion without another user message and preserve the result.  Otherwise keep waiting within this turn; a persistent handle alone is insufficient.  After any interruption, collect the original result before launching another review.
 
 Keep reviewed content unchanged until submission.  On task cancellation or replacement, run `tcrit stop --session <id>` and collect the result.  Preserve saved reviews; use `clear` only for explicitly requested deletion.
 
