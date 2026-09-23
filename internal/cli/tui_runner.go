@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -68,8 +69,12 @@ func runTUISession(cfg *config.Config, sess *review.Session, mode *reviewMode, s
 		}
 		listener = ln
 		defer func() {
-			ln.Close()
-			os.Remove(sock)
+			if err := ln.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+				fmt.Fprintf(os.Stderr, "tcrit: closing review socket: %v\n", err)
+			}
+			if err := os.Remove(sock); err != nil && !os.IsNotExist(err) {
+				fmt.Fprintf(os.Stderr, "tcrit: removing review socket: %v\n", err)
+			}
 		}()
 
 		sess.Meta.PID = os.Getpid()

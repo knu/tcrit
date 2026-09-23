@@ -230,12 +230,12 @@ func generateCodeLines(n int, seed string) []string {
 func mutateLines(lines []string) []string {
 	out := make([]string, 0, len(lines)+len(lines)/10)
 	for i, line := range lines {
-		switch {
-		case i%15 == 3: // ~7% deleted
+		switch i % 15 {
+		case 3: // ~7% deleted
 			continue
-		case i%15 == 7: // ~7% modified
+		case 7: // ~7% modified
 			out = append(out, line+" // modified")
-		case i%15 == 11: // ~7% inserted (original kept + new line)
+		case 11: // ~7% inserted (original kept + new line)
 			out = append(out, line)
 			out = append(out, fmt.Sprintf("\t// inserted after line %d", i))
 		default:

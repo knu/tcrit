@@ -10,7 +10,9 @@ func TestLoad(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.md")
 	content := "# Title\n\nLine 2\nLine 3\n"
-	os.WriteFile(path, []byte(content), 0644)
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	doc, err := Load(path)
 	if err != nil {
@@ -34,7 +36,9 @@ func TestLoad(t *testing.T) {
 func TestLineAt(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.md")
-	os.WriteFile(path, []byte("line one\nline two\nline three"), 0644)
+	if err := os.WriteFile(path, []byte("line one\nline two\nline three"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	doc, _ := Load(path)
 

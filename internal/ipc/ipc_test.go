@@ -2,6 +2,7 @@ package ipc
 
 import (
 	"bufio"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -16,9 +17,14 @@ func TestReviewCycleRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	done := make(chan struct{})
+	t.Cleanup(func() {
+		closeTestSocket(t, ln)
+		<-done
+	})
 
 	go func() {
+		defer close(done)
 		for {
 			conn, err := ln.Accept()
 			if err != nil {
@@ -28,16 +34,18 @@ func TestReviewCycleRoundTrip(t *testing.T) {
 			// keep accepting until a real review-cycle arrives.
 			req, err := ReadRequest(bufio.NewReader(conn))
 			if err != nil || req.Type != "review-cycle" {
-				conn.Close()
+				closeTestSocket(t, conn)
 				continue
 			}
-			WriteMessage(conn, FinishPayload{
+			if err := WriteMessage(conn, FinishPayload{
 				Type:     "finish",
 				Approved: false,
 				Prompt:   "fix things",
 				Comments: []review.ListedComment{{Scope: "line", Comment: review.Comment{ID: "c_1"}}},
-			})
-			conn.Close()
+			}); err != nil {
+				t.Errorf("writing finish payload: %v", err)
+			}
+			closeTestSocket(t, conn)
 			return
 		}
 	}()
@@ -60,12 +68,18 @@ func TestReviewCycleServerCloseWithoutFinish(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	done := make(chan struct{})
+	t.Cleanup(func() {
+		closeTestSocket(t, ln)
+		<-done
+	})
 	go func() {
+		defer close(done)
 		conn, err := ln.Accept()
 		if err != nil {
 			return
 		}
-		conn.Close()
+		closeTestSocket(t, conn)
 	}()
 
 	if _, err := ReviewCycle(sock); err == nil {
@@ -79,13 +93,13 @@ func TestListenReplacesStaleSocket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ln.Close() // leaves the socket file behind on some platforms
+	closeTestSocket(t, ln) // leaves the socket file behind on some platforms
 
 	ln2, err := Listen(sock)
 	if err != nil {
 		t.Fatalf("expected stale socket replacement, got %v", err)
 	}
-	ln2.Close()
+	closeTestSocket(t, ln2)
 }
 
 func TestListenRejectsLiveSocket(t *testing.T) {
@@ -94,14 +108,19 @@ func TestListenRejectsLiveSocket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	done := make(chan struct{})
+	t.Cleanup(func() {
+		closeTestSocket(t, ln)
+		<-done
+	})
 	go func() {
+		defer close(done)
 		for {
 			conn, err := ln.Accept()
 			if err != nil {
 				return
 			}
-			conn.Close()
+			closeTestSocket(t, conn)
 		}
 	}()
 
@@ -129,6 +148,17 @@ func shortSockPath(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
+	t.Cleanup(func() {
+		if err := os.RemoveAll(dir); err != nil {
+			t.Errorf("removing socket directory: %v", err)
+		}
+	})
 	return filepath.Join(dir, "s.sock")
+}
+
+func closeTestSocket(t *testing.T, socket io.Closer) {
+	t.Helper()
+	if err := socket.Close(); err != nil {
+		t.Errorf("closing socket: %v", err)
+	}
 }

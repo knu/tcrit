@@ -35,7 +35,9 @@ type FinishPayload struct {
 func Listen(path string) (net.Listener, error) {
 	if _, err := os.Stat(path); err == nil {
 		if conn, err := net.DialTimeout("unix", path, 200*time.Millisecond); err == nil {
-			conn.Close()
+			if err := conn.Close(); err != nil {
+				return nil, fmt.Errorf("closing review session probe: %w", err)
+			}
 			return nil, fmt.Errorf("another review session is already listening on %s", path)
 		}
 		if err := os.Remove(path); err != nil {
@@ -55,7 +57,9 @@ func Alive(path string) bool {
 	if err != nil {
 		return false
 	}
-	conn.Close()
+	if err := conn.Close(); err != nil {
+		fmt.Fprintf(os.Stderr, "tcrit: closing review session probe: %v\n", err)
+	}
 	return true
 }
 

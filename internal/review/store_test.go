@@ -16,7 +16,9 @@ func setupStateDir(t *testing.T) {
 
 func TestSessionRoundTrip(t *testing.T) {
 	setupStateDir(t)
-	os.WriteFile("plan.md", []byte("# Test\n"), 0o644)
+	if err := os.WriteFile("plan.md", []byte("# Test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	sess, err := OpenDocSession("", "plan.md")
 	if err != nil {
@@ -129,7 +131,9 @@ func TestSessionUpdatePreservesConcurrentReplies(t *testing.T) {
 
 func TestSessionKeyPathNormalization(t *testing.T) {
 	setupStateDir(t)
-	os.WriteFile("plan.md", []byte("# Test\n"), 0o644)
+	if err := os.WriteFile("plan.md", []byte("# Test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	rel, err := OpenDocSession("", "plan.md")
 	if err != nil {
@@ -195,7 +199,9 @@ func TestUnresolvedComments(t *testing.T) {
 
 func TestSessionClearRemovesFolderAndRegistryEntry(t *testing.T) {
 	setupStateDir(t)
-	os.WriteFile("plan.md", []byte("# Test\n"), 0o644)
+	if err := os.WriteFile("plan.md", []byte("# Test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	sess, err := OpenDocSession("", "plan.md")
 	if err != nil {

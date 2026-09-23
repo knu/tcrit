@@ -208,12 +208,12 @@ func spawnTUIHerdrTab(mode *reviewMode, herdr herdrContext) (herdrLaunch, error)
 	}
 	launch := herdrLaunch{bin: herdrBin, tab: response.Result.Tab.TabID, sourceTab: herdr.tab}
 	if launch.tab == "" {
-		return herdrLaunch{}, fmt.Errorf("Herdr tab response did not include tab and pane IDs")
+		return herdrLaunch{}, fmt.Errorf("missing tab or pane ID in Herdr tab response")
 	}
 	if response.Result.RootPane.PaneID == "" {
 		launch.close()
 		launch.restoreFocus()
-		return herdrLaunch{}, fmt.Errorf("Herdr tab response did not include tab and pane IDs")
+		return herdrLaunch{}, fmt.Errorf("missing tab or pane ID in Herdr tab response")
 	}
 
 	if err := runCommand(exec.Command(herdrBin, "pane", "run", response.Result.RootPane.PaneID, "exec "+tuiCmd)); err != nil {

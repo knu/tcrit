@@ -544,6 +544,9 @@ func init() {
 	var deprecatedDetach, deprecatedWait bool
 	reviewCmd.Flags().BoolVar(&deprecatedDetach, "detach", false, "deprecated: no-op")
 	reviewCmd.Flags().BoolVar(&deprecatedWait, "wait", false, "deprecated: no-op")
-	reviewCmd.Flags().MarkHidden("detach")
-	reviewCmd.Flags().MarkHidden("wait")
+	for _, name := range []string{"detach", "wait"} {
+		if err := reviewCmd.Flags().MarkHidden(name); err != nil {
+			panic(err)
+		}
+	}
 }
