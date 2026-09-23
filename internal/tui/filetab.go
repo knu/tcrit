@@ -87,14 +87,15 @@ func (ft *FileTab) ensureHighlightCache() {
 	if ft.isMarkdown {
 		return
 	}
-	ft.chromaLines = highlightCode(ft.path, ft.doc.Content)
+	highlight := newCodeHighlighter(ft.path)
+	ft.chromaLines = highlight(ft.doc.Content)
 
 	// Pre-highlight deleted lines
 	ft.deletedLineCache = make(map[int][]string)
 	for afterLine, dels := range ft.deletedAfter {
 		highlighted := make([]string, len(dels))
 		for i, del := range dels {
-			hl := highlightCode(ft.path, del.Content)
+			hl := highlight(del.Content)
 			if len(hl) > 0 {
 				highlighted[i] = hl[0]
 			} else {
