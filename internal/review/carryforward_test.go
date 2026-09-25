@@ -13,7 +13,7 @@ func carryOne(t *testing.T, c Comment, prev, next string) Comment {
 	return out[0]
 }
 
-func TestCarryForwardRemintsComment(t *testing.T) {
+func TestCarryForwardPreservesCommentIdentity(t *testing.T) {
 	orig := Comment{
 		ID: "c_old111", StartLine: 2, EndLine: 2, Anchor: "line two",
 		Body: "fix", Author: "Human", ReviewRound: 1, Resolved: true, ResolvedRound: 1,
@@ -23,8 +23,8 @@ func TestCarryForwardRemintsComment(t *testing.T) {
 
 	got := carryOne(t, orig, content, content)
 
-	if got.ID == orig.ID || got.ID == "" {
-		t.Errorf("expected a fresh ID, got %q", got.ID)
+	if got.ID != orig.ID {
+		t.Errorf("expected stable ID %q, got %q", orig.ID, got.ID)
 	}
 	if !got.CarriedForward {
 		t.Error("expected CarriedForward")

@@ -14,6 +14,88 @@ import (
 // optional Ldigits suffix has no trailing boundary, so L40に and L40-45 work.
 var fileReferencePattern = regexp.MustCompile(`(^|\s)@((?:[A-Za-z0-9._/-]|\\[^\r\n])+)(?: +L([0-9]+))?`)
 
+var commentReferencePattern = regexp.MustCompile(`\bc_[a-f0-9]{6,}\b`)
+
+func (m *AppModel) copyReference() {
+	text := m.selectedCommentID()
+	if text == "" {
+		t := m.tab()
+		if m.focused != contentPane || t.path == "" || strings.ContainsAny(t.path, "\r\n") {
+			return
+		}
+		var path strings.Builder
+		for _, r := range t.path {
+			switch {
+			case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', strings.ContainsRune("._/-", r):
+			default:
+				path.WriteByte('\\')
+			}
+			path.WriteRune(r)
+		}
+		text = "@" + path.String()
+		if t.cursorSide != "old" && t.doc != nil && t.doc.HasLine(t.cursorLine) {
+			text += " L" + strconv.Itoa(t.cursorLine)
+		}
+	}
+	m.killRing.interrupt()
+	m.killRing.add(text, false)
+	m.killRing.interrupt()
+	m.locationError = "Copied to kill ring: " + text
+}
+
+func (m *AppModel) commentReferenceTab(id string) (int, bool) {
+	index := -1
+	for i, t := range m.tabs {
+		if t.state == nil {
+			continue
+		}
+		for _, c := range t.state.Comments {
+			if c.ID == id {
+				if index >= 0 {
+					return 0, false
+				}
+				index = i
+			}
+		}
+	}
+	return index, index >= 0
+}
+
+func (m *AppModel) linkCommentReferences(body string) string {
+	return commentReferencePattern.ReplaceAllStringFunc(body, func(id string) string {
+		if _, ok := m.commentReferenceTab(id); !ok {
+			return id
+		}
+		uri := url.URL{Scheme: "tcrit", Host: "comment", RawQuery: url.Values{"id": {id}}.Encode()}
+		return ansi.SetHyperlink(uri.String()) + "\x1b[4m" + id + "\x1b[24m" + ansi.ResetHyperlink()
+	})
+}
+
+func (m *AppModel) navigateCommentReference(uri string) bool {
+	u, err := url.Parse(uri)
+	if err != nil || u.Scheme != "tcrit" || u.Host != "comment" {
+		return false
+	}
+	id := u.Query().Get("id")
+	i, ok := m.commentReferenceTab(id)
+	if !ok {
+		return false
+	}
+	if m.hideComments {
+		m.hideComments = false
+		m.recalculateLayout()
+	}
+	m.tab().selecting = false
+	m.tabs[i].selecting = false
+	for _, target := range m.commentTargets(i) {
+		if target.id == id {
+			m.selectComment(i, target)
+			return true
+		}
+	}
+	return false
+}
+
 func unescapeReferencePath(path string) string {
 	var out strings.Builder
 	escaped := false
@@ -48,7 +130,7 @@ func (m *AppModel) linkFileReferences(body string) string {
 			}
 		}
 		start := match[4] - 1 // include @, preserve the preceding whitespace
-		out.WriteString(body[end:start])
+		out.WriteString(m.linkCommentReferences(body[end:start]))
 		uri := url.URL{Scheme: "tcrit", Host: "source", RawQuery: url.Values{
 			"path": {path}, "line": {strconv.Itoa(line)},
 		}.Encode()}
@@ -59,7 +141,7 @@ func (m *AppModel) linkFileReferences(body string) string {
 		out.WriteString(ansi.ResetHyperlink())
 		end = match[1]
 	}
-	out.WriteString(body[end:])
+	out.WriteString(m.linkCommentReferences(body[end:]))
 	return out.String()
 }
 
@@ -75,17 +157,16 @@ func sourceLink(uri string) (sourceLocation, bool) {
 
 // Read the composed terminal cell rather than estimating offsets in the raw
 // comment. Canvas preserves links through wrapping, clipping and wide glyphs.
-func (m *AppModel) sourceReferenceAt(x, y int) (sourceLocation, bool) {
+func (m *AppModel) referenceAt(x, y int) string {
 	if m.width <= 0 || m.height <= 0 || m.tab().state == nil {
-		return sourceLocation{}, false
+		return ""
 	}
 	screen, _ := m.renderReviewScreen()
 	canvas := lipgloss.NewCanvas(m.width, m.height)
 	canvas.Compose(lipgloss.NewLayer(screen))
 	cell := canvas.CellAt(x, y)
 	if cell == nil {
-		return sourceLocation{}, false
+		return ""
 	}
-	location, ok := sourceLink(cell.Link.URL)
-	return location, ok && regularFile(m.sourcePath(location.path))
+	return cell.Link.URL
 }

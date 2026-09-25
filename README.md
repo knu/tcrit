@@ -9,7 +9,7 @@
 ## Key changes from upstream
 
 - **Clipboard images in comments** — `ctrl+v` pastes an image into a comment or reply as a Markdown attachment, falling back to text when no image is available.  macOS supports copied image files and bitmaps through AppKit; Linux uses `wl-paste` or `xclip`.  Images survive review rounds and stop/resume.  After approval, the agent reads the final images and clears the completed session.
-- **File references and editor navigation** — click `@path/to/file L40` in comments or replies to jump to the source.  `alt+g` asks for a line number; locations outside the review offer to open in `$EDITOR`.  `alt+e` opens the current file at the cursor line directly.  VS Code-style `--goto` and traditional `+LINE FILE` editors are supported.
+- **Source and thread references** — `alt+w` copies the current source reference or focused thread's comment ID to the kill ring; paste it in a comment or reply with `ctrl+y`.  Click `@path/to/file L40` to jump to the source, or a comment ID such as `c_a3f8b2` to open that thread across files and review rounds.  `alt+g` asks for a line number; locations outside the review offer to open in `$EDITOR`.  `alt+e` opens the current file at the cursor line directly.  VS Code-style `--goto` and traditional `+LINE FILE` editors are supported.
 - **Read diffs without comment boxes** — press `H` to hide inline comments and replace the sidebar with a narrow gutter, giving the source more space.  A `💬` marks commented lines, including deleted lines; click a marker to open its thread.  Press `H` again to restore comments; the `h` setting for resolved comments is preserved.  Opening the sidebar with `s` or jumping to a file comment restores the sidebar.  Comment editors keep the reference thread visible, omitting the reply currently being edited.
 - **[Crit](https://crit.md/)-compatible agent workflow** — review commands block until the reviewer finishes, print an agent-facing result, and support iterative rounds through `tcrit --session <id>`; each round closes the TUI and its dedicated pane or tab, and the next round restores saved state in a new process.
 - **Native Herdr and tmux workflows** — reviews open in a full-width Herdr tab or a tmux split; tcrit finds the invoking context from process ancestry even when tools such as Codex do not inherit multiplexer environment variables.
@@ -306,6 +306,7 @@ Tcrit resolves the Herdr workspace, tab, and pane or the tmux server and pane fr
 | `ctrl+d` / `ctrl+u` / `PgDn` / `PgUp` | Half page down / up                      |
 | `g` / `G` / `Home` / `End`            | Jump to top / bottom                     |
 | `alt+e` (`M-e`)                       | Open the current file at the cursor line in `$EDITOR`, if it exists on disk |
+| `alt+w` (`M-w`)                       | Copy the current source reference or focused thread's ID to the kill ring |
 | `alt+g` (`M-g`)                       | Enter a line number; jump there or confirm opening it in `$EDITOR` if absent from the review |
 | `enter`                               | Add comment at current line              |
 | `f`                                   | Comment on the file or reply to its existing thread |
@@ -328,6 +329,10 @@ Ignore whitespace is off by default and lasts for the current TUI run.  It ignor
 Line numbers refer to the new side of the review.  Unchanged lines available in a complete file are valid destinations; lines missing from a partial supplied diff are not.  A reference without a line opens the file's tab at its start.  If the file or line is unavailable in the review, a confirmation dialog offers to open it in `$EDITOR`, with Cancel selected by default.  TCrit does not check whether the requested line exists on disk.  Missing files are never created through these actions.  The shortcuts apply outside comment editors and other dialogs.
 
 `$EDITOR` may include quoted arguments, which are preserved.  With a line number, TCrit probes `--help` once per editor setting during the TUI run: an advertised `--goto` option selects `--goto FILE:LINE`; otherwise it uses `+LINE FILE`.  Help output on either stream is accepted, including nonzero exits such as nvi's unsupported-option response; a timed-out probe falls back to `+LINE FILE`.  Without a line number it passes only the filename.  An unset `$EDITOR` defaults to `vi`.
+
+**Copying references:** Outside dialogs, `alt+w` (`M-w`) adds a separate kill-ring entry for the current source line (`@path L42`) or focused thread (`c_a3f8b2`), including sidebar threads.  Paste with `ctrl+y` in a comment or reply and cycle earlier entries with `alt+y`.  Source paths are escaped automatically.  Deleted source lines and files without a current source line produce a file reference without a line number; paths containing newlines cannot be copied in this notation.
+
+**Thread references:** A comment ID such as `c_a3f8b2` in a comment or reply links to that thread in the current review, including when surrounded by backticks.  Clicking it switches files as needed, reveals hidden comments, and focuses the thread, including resolved threads.  Comment IDs stay unchanged across review rounds.  Unknown or ambiguous IDs remain plain text; references to other sessions and individual replies are not supported.
 
 **Comment dialogs:**
 

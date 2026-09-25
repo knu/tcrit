@@ -7,14 +7,14 @@ import (
 )
 
 // This file ports crit's round carry-forward: when a new round starts,
-// every comment is re-minted with a new ID and CarriedForward set, its line
+// every comment keeps its ID with CarriedForward set, its line
 // range is remapped through an LCS diff of the file contents, and the
 // stored anchor text verifies (or corrects) the result, flagging Drifted
 // when the anchored text no longer exists.
 
 // CarryForwardFile maps a file's comments onto the file's new content.
 // prevContent is the content the comments were authored against; now stamps
-// UpdatedAt on the re-minted comments.
+// UpdatedAt on the carried comments.
 func CarryForwardFile(comments []Comment, prevContent, newContent, now string) []Comment {
 	if len(comments) == 0 {
 		return comments
@@ -66,11 +66,11 @@ func CarryForwardPartial(comments []Comment, changed bool, now string) []Comment
 	return out
 }
 
-// carryForwardComment re-mints a comment for the next round while retaining
-// its original authoring round, resolution state, and replies.
+// carryForwardComment retains the comment's identity, original authoring round,
+// resolution state, and replies for the next round.
 func carryForwardComment(old Comment, now string) Comment {
 	return Comment{
-		ID:             RandomCommentID(),
+		ID:             old.ID,
 		StartLine:      old.StartLine,
 		EndLine:        old.EndLine,
 		Side:           old.Side,

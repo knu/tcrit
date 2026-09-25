@@ -595,8 +595,8 @@ func TestRoundStart_ReloadsCommentsAndAdvancesRound(t *testing.T) {
 	if !comments[0].Resolved {
 		t.Error("expected reloaded comment to be resolved")
 	}
-	if !comments[0].CarriedForward || comments[0].ID == "c_test01" {
-		t.Errorf("expected a re-minted carried-forward comment, got %+v", comments[0])
+	if !comments[0].CarriedForward || comments[0].ID != "c_test01" {
+		t.Errorf("expected a carried-forward comment with the same ID, got %+v", comments[0])
 	}
 }
 

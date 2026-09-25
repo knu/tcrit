@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -10,6 +11,130 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/knu/tcrit/internal/review"
 )
+
+func TestCopyReferenceAndYank(t *testing.T) {
+	app := setupAppWithDoc(t, "one\ntwo\n")
+	app.tab().path = "dir/日本 file\\(x).go"
+	app.tab().cursorLine = 2
+	editorMeta(&app, 'w')
+	want := `@dir/\日\本\ file\\\(x\).go L2`
+	if len(app.killRing.entries) != 1 || app.killRing.entries[0] != want {
+		t.Fatalf("ring = %#v, want %q", app.killRing.entries, want)
+	}
+	app.tab().state.Comments = []review.Comment{{ID: "c_abcdef", Scope: "file", Body: "thread"}}
+	app.focused = commentPane
+	app.updateCommentSidebar()
+	editorMeta(&app, 'w')
+	editorMeta(&app, 'w')
+	if len(app.killRing.entries) != 3 || app.killRing.entries[0] != "c_abcdef" || app.killRing.entries[1] != "c_abcdef" {
+		t.Fatalf("copies should be separate entries: %#v", app.killRing.entries)
+	}
+	app.modal = replyModal
+	app.modalTextarea.Focus()
+	editorControl(&app, 'y')
+	if app.modalTextarea.Value() != "c_abcdef" {
+		t.Fatalf("yank = %q", app.modalTextarea.Value())
+	}
+	editorMeta(&app, 'y')
+	editorMeta(&app, 'y')
+	if app.modalTextarea.Value() != want {
+		t.Fatalf("rotated yank = %q", app.modalTextarea.Value())
+	}
+	before := len(app.killRing.entries)
+	editorMeta(&app, 'w')
+	if len(app.killRing.entries) != before {
+		t.Fatal("copy shortcut ran inside editor")
+	}
+}
+
+func TestCopySourceReferenceWithoutNewSideLine(t *testing.T) {
+	for _, old := range []bool{false, true} {
+		app := setupAppWithDoc(t, "one\n")
+		app.tab().path = "file.go"
+		app.tab().cursorLine = 0
+		if old {
+			app.tab().cursorLine, app.tab().cursorSide = 1, "old"
+		}
+		editorMeta(&app, 'w')
+		if app.killRing.entries[0] != "@file.go" {
+			t.Fatalf("invalid new-side line copied: %q", app.killRing.entries[0])
+		}
+	}
+}
+
+func TestCommentReferenceNavigation(t *testing.T) {
+	for _, scope := range []string{"line", "file"} {
+		t.Run(scope, func(t *testing.T) {
+			app := setupAppWithDoc(t, "source\n")
+			second := setupAppWithDoc(t, "target\n")
+			app.tabs = append(app.tabs, second.tabs[0])
+			app.multiFile = true
+			app.tabs[1].state.Comments = []review.Comment{{ID: "c_abcdef", Scope: scope, StartLine: 1, EndLine: 1, Body: "target", Resolved: true}}
+			body := "see `c_abcdef` and c_000000 and xc_abcdef and c_abcdef0"
+			rendered := app.linkFileReferences(body)
+			if ansi.Strip(rendered) != body || strings.Count(rendered, "tcrit://comment") != 1 {
+				t.Fatalf("unexpected reference rendering: %q", rendered)
+			}
+			app.hideComments = true
+			if !app.navigateCommentReference("tcrit://comment?id=c_abcdef") {
+				t.Fatal("reference did not navigate")
+			}
+			if app.activeTab != 1 || app.hideComments || app.selectedCommentID() != "c_abcdef" || !app.tab().state.Comments[0].Resolved {
+				t.Fatal("reference did not focus the resolved target")
+			}
+			editorMeta(&app, 'w')
+			if app.killRing.entries[0] != "c_abcdef" {
+				t.Fatal("focused inline thread did not copy its ID")
+			}
+		})
+	}
+}
+
+func TestRenderedCommentReferenceClick(t *testing.T) {
+	app := setupAppWithDoc(t, strings.Repeat("line\n", 20))
+	app.width, app.height = 100, 35
+	app.recalculateLayout()
+	app.tab().state.Comments = []review.Comment{
+		{ID: "c_123456", StartLine: 1, EndLine: 1, Body: "source", Replies: []review.Reply{{Body: "see `c_abcdef`"}}},
+		{ID: "c_abcdef", StartLine: 15, EndLine: 15, Body: "target", Resolved: true},
+	}
+	app.tab().cursorLine, app.tab().cursorOnAnnotation = 1, true
+	app.rebuildContent()
+	app.updateCommentSidebar()
+	screen, _ := app.renderReviewScreen()
+	canvas := lipgloss.NewCanvas(app.width, app.height)
+	canvas.Compose(lipgloss.NewLayer(screen))
+	for y := 0; y < app.height; y++ {
+		for x := 0; x < app.contentViewport.Width(); x++ {
+			cell := canvas.CellAt(x, y)
+			if cell == nil {
+				continue
+			}
+			u, err := url.Parse(cell.Link.URL)
+			if err != nil || u.Host != "comment" {
+				continue
+			}
+			app, cmd := clickMouseCmd(app, x, y)
+			if cmd != nil || app.selectedCommentID() != "c_abcdef" {
+				t.Fatal("rendered thread reference did not navigate")
+			}
+			return
+		}
+	}
+	t.Fatal("thread reference was not rendered")
+}
+
+func TestAmbiguousCommentReference(t *testing.T) {
+	app := setupAppWithDoc(t, "one\n")
+	second := setupAppWithDoc(t, "two\n")
+	app.tabs = append(app.tabs, second.tabs[0])
+	for i := range app.tabs {
+		app.tabs[i].state.Comments = []review.Comment{{ID: "c_abcdef", Scope: "file", Body: "same ID"}}
+	}
+	if app.linkFileReferences("c_abcdef") != "c_abcdef" || app.navigateCommentReference("tcrit://comment?id=c_abcdef") {
+		t.Fatal("ambiguous reference must not select an arbitrary thread")
+	}
+}
 
 func TestFileReferenceSyntax(t *testing.T) {
 	t.Chdir(t.TempDir())

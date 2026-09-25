@@ -550,6 +550,10 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "alt+g" {
 		return m, m.openGotoLine()
 	}
+	if msg.String() == "alt+w" {
+		m.copyReference()
+		return m, nil
+	}
 
 	if msg.String() == "ctrl+pgup" || msg.String() == "ctrl+pgdown" {
 		direction := 1
@@ -2416,7 +2420,11 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 		return m, nil
 	}
 	if !m.tab().selecting && !m.tabSearching {
-		if location, ok := m.sourceReferenceAt(mouse.X, mouse.Y); ok {
+		uri := m.referenceAt(mouse.X, mouse.Y)
+		if m.navigateCommentReference(uri) {
+			return m, nil
+		}
+		if location, ok := sourceLink(uri); ok && regularFile(m.sourcePath(location.path)) {
 			return m, m.navigateSource(location)
 		}
 	}
@@ -3154,8 +3162,8 @@ func (m AppModel) renderHelp(innerWidth int) string {
 		{keys: "[/]", desc: "comments"},
 	}, columnWidth)
 	codeReview := renderHelpGroup("Code review / search", []helpItem{
-		{keys: "alt+e", desc: "editor"},
-		{keys: "alt+g", desc: "go to line"},
+		{keys: "alt+e/g", desc: "editor/line"},
+		{keys: "alt+w", desc: "copy ref"},
 		{keys: "tab/S-tab", desc: "files"},
 		{keys: "1-9", desc: "file tab"},
 		{keys: "/", desc: "search"},
