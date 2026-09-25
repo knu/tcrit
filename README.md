@@ -88,7 +88,7 @@ The finish output includes resolved threads and replies, even on approval, so fi
 
 If the review is interrupted after the TUI opens, the agent reads any new saved comments and replies, preserves the work and session, and reports the interruption in chat.  It then waits for explicit chat instructions before making changes or restarting TCrit.  Launch failures before the TUI is usable may be corrected and retried.
 
-While waiting for review, the agent retains the execution handle until submission.  It may end its turn only when the host is known to automatically resume it on completion and preserve the result.  Waiting notices report state changes, subject to the host's notification requirements.
+The agent waits once for review submission, with a bounded timeout and no file changes or polling loop.  If the wait expires, it leaves TCrit running, retains the execution handle and recoverable output, and ends its turn.  Send `hey` after submitting to resume if the host does not resume the agent automatically.  The timeout ends only the agent's wait, not the review process.
 
 Run the installer from your home directory to install globally, or from a repository root to install for that project only.
 
