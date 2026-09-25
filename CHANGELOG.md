@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.10.0
+
+### Added
+
+- **Clipboard images in comments and replies** — `ctrl+v` pastes copied image files or bitmap data on macOS through AppKit, and images on Linux through `wl-paste` or `xclip`.  When no image is available, it falls back to text.  Attachments support PNG, JPEG, GIF, and WebP up to 5 MiB each; Escape cancels a pending paste.
+- Image attachments persist across review rounds and stop/resume.  The agent reads images in the final review result before running the printed session cleanup command.  The TUI shows Markdown references rather than inline image previews.
+
+### Changed
+
+- Bundled agent skills reduce excessive token use during human review waits by keeping waits inside tools and avoiding repeated reasoning and status polling.  They now bound the overall wait to ten minutes, then preserve the running review and recoverable output; `hey` resumes result collection when the host cannot resume the agent automatically.
+- CI runs formatting checks, vet, and tests on both Linux and macOS, including the AppKit clipboard tests.  The required `test` check succeeds only when both platforms pass.
+- Updated Go to 1.27.1, Go dependencies, and Harden-Runner.
+
 ## 0.9.5
 
 ### Added
