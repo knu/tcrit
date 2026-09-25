@@ -13,8 +13,12 @@ on:
 permissions: {}
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  test-platform:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: read
     steps:
@@ -46,3 +50,14 @@ jobs:
       - run: go vet ./...
 
       - run: go test ./...
+
+  # Keep the required check stable for branch protection and Mergify.
+  test:
+    needs: test-platform
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all platforms to pass
+        env:
+          RESULT: ${{ needs.test-platform.result }}
+        run: test "$RESULT" = success
