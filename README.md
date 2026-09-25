@@ -8,6 +8,7 @@
 
 ## Key changes from upstream
 
+- **Clipboard images in comments** — `ctrl+v` pastes an image into a comment or reply as a Markdown attachment, falling back to text when no image is available.  Images survive review rounds and stop/resume.  After approval, the agent reads the final images and clears the completed session.
 - **File references and editor navigation** — click `@path/to/file L40` in comments or replies to jump to the source.  `alt+g` asks for a line number; locations outside the review offer to open in `$EDITOR`.  `alt+e` opens the current file at the cursor line directly.  VS Code-style `--goto` and traditional `+LINE FILE` editors are supported.
 - **Read diffs without comment boxes** — press `H` to hide inline comments and replace the sidebar with a narrow gutter, giving the source more space.  A `💬` marks commented lines, including deleted lines; click a marker to open its thread.  Press `H` again to restore comments; the `h` setting for resolved comments is preserved.  Opening the sidebar with `s` or jumping to a file comment restores the sidebar.  Comment editors keep the reference thread visible, omitting the reply currently being edited.
 - **[Crit](https://crit.md/)-compatible agent workflow** — review commands block until the reviewer finishes, print an agent-facing result, and support iterative rounds through `tcrit --session <id>`; each round closes the TUI and its dedicated pane or tab, and the next round restores saved state in a new process.
@@ -339,7 +340,7 @@ When editing an existing reply, its saved body is omitted from the reference thr
 | `alt+s` | Insert a suggestion block and select its code for replacement |
 | `ctrl+y` | Yank the latest kill at the cursor, replacing selected text |
 | `alt+y` | After a yank or yank-pop, replace the yanked text with the next older kill; wrap at the end |
-| `ctrl+v` | Paste text from the clipboard on the machine running TCrit    |
+| `ctrl+v` | Paste an image or text from the host's clipboard              |
 | `ctrl+k` | Kill the selection, or text from the cursor to line end; at line end, kill the next newline |
 | `ctrl+u` | Kill the selection, or text back to line start; at line start, kill the previous newline |
 | `ctrl+w` / `alt+Backspace` | Kill the selection or the previous word |
@@ -349,7 +350,9 @@ When editing an existing reply, its saved body is omitted from the reference thr
 
 The kill ring holds up to 60 entries, shared across comment and reply dialogs during the current TUI run.  Consecutive kills combine into one entry in text order.  Other keys, mouse actions, or pasted input end the sequence and disable yank-pop until the next `ctrl+y`.  Ordinary Delete/Backspace do not add entries.  `alt` is the terminal's Meta modifier (`M-y` / `M-s`); configure your terminal to send Meta for these shortcuts.
 
-The kill ring is independent of the system clipboard.  `ctrl+v` uses the host's clipboard (`pbpaste` on macOS).  When TCrit runs over SSH, this is the remote host's clipboard.  The input box has no undo/redo; use `ctrl+o` to edit in your external editor when you need those commands.
+The kill ring is independent of the system clipboard.  `ctrl+v` first checks for an image, then falls back to text.  On macOS, AppKit reads copied image files and clipboard bitmaps and converts them to PNG.  On Linux, image paste requires `wl-paste` on Wayland or `xclip` on X11.  PNG, JPEG, GIF, and WebP attachments are limited to 5 MiB each.  Press Escape to cancel a pending paste.  When TCrit runs over SSH, it reads the remote host's clipboard.  The input box has no undo/redo; use `ctrl+o` to edit in your external editor when you need those commands.
+
+Images are stored in the review session's `attachments/` directory; comments contain `![clipboard image](attachments/<id>.png)` references.  The TUI displays the reference, without an inline image preview.  Files remain available across rounds and stop/resume, including images from discarded drafts.  With the default `cleanup_on_approve` setting, approval defers deletion until the agent has read the images and runs the printed `tcrit clear --session <id>` command.  For a review without an agent, run that command yourself after reading the result.  Clearing a session removes all its attachments; disabling approval cleanup retains them with the rest of the review.
 
 **Code review only:**
 

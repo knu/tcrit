@@ -331,7 +331,7 @@ func printFinish(payload *ipc.FinishPayload) {
 }
 
 func cleanupOnApprove(cfg *config.Config, sess *review.Session) {
-	if !cfg.CleanupOnApprove {
+	if !cfg.CleanupOnApprove || sess.HasAttachments() {
 		return
 	}
 	if err := sess.Clear(); err != nil {

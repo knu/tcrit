@@ -103,6 +103,9 @@ type AppModel struct {
 	contentViewport   viewport.Model
 	commentViewport   viewport.Model
 	modalTextarea     textarea.Model
+	clipboardID       uint64
+	clipboardPending  bool
+	clipboardStatus   string
 	killRing          killRing
 	mouseSelecting    bool
 	hoveredGutterLine int
@@ -357,6 +360,18 @@ func codeDiff(path, ref string, staged bool) (*gitpkg.DiffInfo, error) {
 }
 
 func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.clipboardPending {
+		switch input := msg.(type) {
+		case tea.KeyPressMsg:
+			if input.String() == "esc" || input.String() == "ctrl+c" {
+				m.clipboardPending = false
+				m.clipboardStatus = ""
+			}
+			return m, nil
+		case tea.PasteMsg, tea.MouseClickMsg, tea.MouseMotionMsg, tea.MouseReleaseMsg, tea.MouseWheelMsg:
+			return m, nil
+		}
+	}
 	switch msg := msg.(type) {
 	case tea.BackgroundColorMsg:
 		initAdaptiveStyles(msg.IsDark())
@@ -428,6 +443,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.locationError = fmt.Sprintf("running $EDITOR: %v", msg.err)
 		}
 		return m, nil
+
+	case clipboardImageMsg:
+		cmd := m.finishClipboardImage(msg)
+		return m, cmd
 
 	case editorFinishedMsg:
 		m.killRing.interrupt()
@@ -1550,6 +1569,7 @@ func (m *AppModel) doFinish() (tea.Model, tea.Cmd) {
 }
 
 func (m *AppModel) handleTextModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	m.clipboardStatus = ""
 	focusCount := 3
 	if m.canSuggest() {
 		focusCount++
@@ -1596,6 +1616,11 @@ func (m *AppModel) handleTextModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "ctrl+s":
 		m.modalSubmit()
+		return m, nil
+	case "ctrl+v":
+		if m.modalFocus == 0 {
+			return m, m.pasteClipboardImage()
+		}
 		return m, nil
 	case "ctrl+o":
 		if m.modalFocus == 0 {
@@ -3143,7 +3168,7 @@ func (m AppModel) renderHelp(innerWidth int) string {
 	columns := lipgloss.JoinHorizontal(lipgloss.Top, general, "  ", navigation, "  ", codeReview)
 	contexts := renderHelpGroup("Selection and dialogs", []helpItem{
 		{keys: "↑/↓,j/k · enter/v/esc · ctrl+PgUp/PgDn", desc: "extend · comment/toggle/cancel selection · scroll thread"},
-		{keys: "ctrl+s/o · alt+s · tab/S-tab · enter/esc", desc: "save/edit · suggest · focus · activate/close"},
+		{keys: "ctrl+s/o/v · alt+s · tab/S-tab · enter/esc", desc: "save/edit/paste · suggest · focus · activate/close"},
 		{keys: "ctrl+k/u/w,alt+d · ctrl+y · alt+y", desc: "kill · yank · rotate kills"},
 		{keys: "y/n/esc · ←/→,h/l,tab/shift+tab · enter", desc: "confirm/cancel · focus · activate finish dialog"},
 	}, innerWidth)
@@ -3388,7 +3413,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 					},
 				})
 			}
-			content, textareaRegion := layoutModalTextarea(content, m.modalTextarea.View(), innerWidth)
+			content, textareaRegion := layoutModalTextarea(content, m.clipboardTextareaView(), innerWidth)
 			contentRegions = append(contentRegions, textareaRegion)
 			buttons, buttonRegions := layoutModalButtonRow(buttonSpecs, innerWidth, strings.Count(content, "\n"))
 			content += buttons
@@ -3409,7 +3434,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		title := modalTitleStyle.Render("Add File Comment")
 		path := contextBoxStyle.Width(innerWidth - 2).Render(m.tab().path)
 		prefix, textareaRegion := layoutModalTextarea(
-			title+"\n"+path+"\n\n", m.modalTextarea.View(), innerWidth)
+			title+"\n"+path+"\n\n", m.clipboardTextareaView(), innerWidth)
 		regions = append(regions, textareaRegion)
 		buttons, buttonRegions := layoutModalButtonRow([]modalButtonSpec{
 			{rendered: m.renderModalButton("Save", "ctrl+s", m.modalFocus == 1), action: modalMouseAction{focus: 1}},
@@ -3477,7 +3502,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 					},
 				})
 			}
-			content, textareaRegion := layoutModalTextarea(content, m.modalTextarea.View(), innerWidth)
+			content, textareaRegion := layoutModalTextarea(content, m.clipboardTextareaView(), innerWidth)
 			contentRegions = append(contentRegions, textareaRegion)
 			buttonY := strings.Count(content, "\n")
 			buttonRow, buttonRegions := layoutModalButtonRow(buttonSpecs, innerWidth, buttonY)

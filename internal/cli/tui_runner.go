@@ -251,10 +251,17 @@ func buildFinishPayload(cfg *config.Config, sess *review.Session, mode *reviewMo
 		NextRoundCmd:      nextCmd,
 	}
 
+	finishPrompt := prompt.RenderFinish(cfg.Prompts, cfg.ProjectRoot, ctx)
+	if sess.HasAttachments() {
+		finishPrompt += fmt.Sprintf("\n\nImage attachments: resolve Markdown attachments/ paths relative to %q. Read referenced images with your image-viewing tool, including images in resolved comments and replies.", sess.Dir)
+		if approved && cfg.CleanupOnApprove {
+			finishPrompt += fmt.Sprintf("\nAfter reading the images and recording any remaining instructions, run `tcrit clear --session %s` from the original working directory to delete this completed review and its images. Approval cleanup is deferred until this command; do not leave the images behind.", sess.Key)
+		}
+	}
 	return ipc.FinishPayload{
 		Type:        "finish",
 		Approved:    approved,
-		Prompt:      prompt.RenderFinish(cfg.Prompts, cfg.ProjectRoot, ctx),
+		Prompt:      finishPrompt,
 		Comments:    all,
 		NextCommand: nextCmd,
 	}
