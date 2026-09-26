@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"syscall"
 )
@@ -18,21 +19,29 @@ func Run(args []string, wrapped bool) error {
 		return err
 	}
 	prefix := contextArgs(os.Getenv)
-	if len(prefix) > 0 && interactive(args) {
-		start := exec.Command(bin, "app-server", "daemon", "start")
-		start.Stdin = os.Stdin
-		output, startErr := start.CombinedOutput()
-		if unsupportedDaemon(startErr, output) {
-			return syscall.Exec(bin, append([]string{bin}, args...), os.Environ())
+	if len(prefix) > 0 {
+		switch modeForArgs(args) {
+		case daemonLaunch:
+			start := exec.Command(bin, "app-server", "daemon", "start")
+			start.Stdin = os.Stdin
+			output, startErr := start.CombinedOutput()
+			if unsupportedDaemon(startErr, output) {
+				return syscall.Exec(bin, append([]string{bin}, args...), os.Environ())
+			}
+			if _, err := os.Stderr.Write(output); err != nil {
+				return fmt.Errorf("write Codex daemon output: %w", err)
+			}
+			if startErr != nil {
+				return fmt.Errorf("start Codex daemon: %w", startErr)
+			}
+			prefix = append(prefix, "--remote", "unix://")
+			fallthrough
+		case localAttach:
+			// tcrit codex can invoke the bundled wrapper through PATH.
+			if len(args) < len(prefix) || !slices.Equal(args[:len(prefix)], prefix) {
+				args = append(prefix, args...)
+			}
 		}
-		if _, err := os.Stderr.Write(output); err != nil {
-			return fmt.Errorf("write Codex daemon output: %w", err)
-		}
-		if startErr != nil {
-			return fmt.Errorf("start Codex daemon: %w", startErr)
-		}
-		prefix = append(prefix, "--remote", "unix://")
-		args = append(prefix, args...)
 	}
 	return syscall.Exec(bin, append([]string{bin}, args...), os.Environ())
 }

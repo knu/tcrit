@@ -13,28 +13,39 @@ func TestDaemonArgumentInjectionPolicy(t *testing.T) {
 	for _, tt := range []struct {
 		name string
 		args []string
-		want bool
+		want launchMode
 	}{
-		{"default interactive launch", nil, true},
-		{"resume session", []string{"resume", "--last"}, true},
-		{"fork session", []string{"fork", "session", "a prompt"}, true},
-		{"config value is not a command", []string{"-c", `model="exec"`, "resume"}, true},
-		{"model value is not a command", []string{"--model", "exec", "hello"}, true},
-		{"attached option value", []string{"-mexec", "resume"}, true},
-		{"literal prompt after separator", []string{"--", "--remote"}, true},
-		{"exec stays unchanged", []string{"exec", "--", "resume"}, false},
-		{"management command after options", []string{"-c", "a=b", "update"}, false},
-		{"explicit embedded mode", []string{"resume", "--no-daemon"}, false},
-		{"explicit remote connection", []string{"resume", "--remote=unix://"}, false},
-		{"help stays unchanged", []string{"resume", "--help"}, false},
-		{"profile owns connection settings", []string{"--profile", "personal"}, false},
-		{"unknown option stays unchanged", []string{"--unknown", "resume"}, false},
-		{"incomplete option stays unchanged", []string{"--config"}, false},
-		{"image values before literal prompt", []string{"--image", "a.png", "b.png", "--", "prompt"}, true},
+		{"default interactive launch", nil, daemonLaunch},
+		{"resume session", []string{"resume", "--last"}, daemonLaunch},
+		{"fork session", []string{"fork", "session", "a prompt"}, daemonLaunch},
+		{"config value is not a command", []string{"-c", `model="exec"`, "resume"}, daemonLaunch},
+		{"model value is not a command", []string{"--model", "exec", "hello"}, daemonLaunch},
+		{"attached option value", []string{"-mexec", "resume"}, daemonLaunch},
+		{"literal prompt after separator", []string{"--", "--remote"}, daemonLaunch},
+		{"exec stays unchanged", []string{"exec", "--", "resume"}, passthrough},
+		{"management command after options", []string{"-c", "a=b", "update"}, passthrough},
+		{"explicit embedded mode", []string{"resume", "--no-daemon"}, passthrough},
+		{"explicit local connection", []string{"resume", "--remote=unix://"}, localAttach},
+		{"explicit socket path", []string{"--remote", "unix:///tmp/codex.sock", "resume", "session-id"}, localAttach},
+		{"network connection", []string{"--remote=ws://localhost:1234", "resume"}, passthrough},
+		{"missing remote value", []string{"--remote"}, passthrough},
+		{"empty remote value", []string{"--remote="}, passthrough},
+		{"duplicate remote", []string{"--remote=unix://", "--remote=unix:///tmp/other.sock"}, passthrough},
+		{"literal remote prompt", []string{"--", "--remote=unix:///tmp/codex.sock"}, daemonLaunch},
+		{"remote config value", []string{"-c", "--remote=unix://"}, daemonLaunch},
+		{"local agents", []string{"--remote=unix://", "agents"}, passthrough},
+		{"local with profile", []string{"--remote=unix://", "--profile", "personal"}, passthrough},
+		{"local without daemon", []string{"--remote=unix://", "--no-daemon"}, passthrough},
+		{"local unknown flag", []string{"--remote=unix://", "--unknown"}, passthrough},
+		{"help stays unchanged", []string{"resume", "--help"}, passthrough},
+		{"profile owns connection settings", []string{"--profile", "personal"}, passthrough},
+		{"unknown option stays unchanged", []string{"--unknown", "resume"}, passthrough},
+		{"incomplete option stays unchanged", []string{"--config"}, passthrough},
+		{"image values before literal prompt", []string{"--image", "a.png", "b.png", "--", "prompt"}, daemonLaunch},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := interactive(tt.args); got != tt.want {
-				t.Fatalf("interactive(%q) = %v, want %v", tt.args, got, tt.want)
+			if got := modeForArgs(tt.args); got != tt.want {
+				t.Fatalf("modeForArgs(%q) = %v, want %v", tt.args, got, tt.want)
 			}
 		})
 	}
@@ -162,24 +173,30 @@ exit 23
 		startExit  string
 		startError string
 		wantExit   int
-		adapt      bool
+		adapt      string
 		entry      string
 	}{
-		{"interactive", []string{"resume", "--last", "a prompt"}, "0", "", 23, true, "wrapper"},
-		{"update", []string{"update"}, "0", "", 23, false, "wrapper"},
-		{"explicit remote", []string{"--remote", "ws://example:1234"}, "0", "", 23, false, "wrapper"},
-		{"no daemon", []string{"--no-daemon", "", "a b"}, "0", "", 23, false, "wrapper"},
-		{"start failure", nil, "9", "daemon could not start", 1, true, "wrapper"},
-		{"start status two", nil, "2", "invalid configuration", 1, true, "wrapper"},
-		{"unsupported daemon", []string{"resume", "--last", "a prompt"}, "2", "error: unrecognized subcommand 'daemon'", 23, true, "wrapper"},
-		{"unsupported app server", nil, "2", "error: unrecognized subcommand 'app-server'", 23, true, "wrapper"},
-		{"unsupported start", nil, "2", "error: unrecognized subcommand 'start'", 23, true, "wrapper"},
-		{"app server without daemon", nil, "2", "error: unexpected argument 'daemon' found", 23, true, "wrapper"},
-		{"unrelated parser error", nil, "2", "error: unrecognized subcommand 'other'", 1, true, "wrapper"},
-		{"wrong failure status", nil, "1", "error: unrecognized subcommand 'daemon'", 1, true, "wrapper"},
-		{"subcommand", []string{"resume", "--last"}, "0", "", 23, true, "subcommand"},
-		{"foreign before", []string{"fork", "session", "a b"}, "0", "", 23, true, "before"},
-		{"foreign after", []string{"resume", "--last"}, "0", "", 23, true, "after"},
+		{"interactive", []string{"resume", "--last", "a prompt"}, "0", "", 23, "daemon", "wrapper"},
+		{"update", []string{"update"}, "0", "", 23, "", "wrapper"},
+		{"explicit remote", []string{"--remote", "ws://example:1234"}, "0", "", 23, "", "wrapper"},
+		{"local reconnect", []string{"--remote", "unix:///tmp/codex socket.sock", "resume", "session-id"}, "0", "", 23, "local", "wrapper"},
+		{"local reconnect attached", []string{"resume", "session-id", "--remote=unix:///tmp/codex.sock"}, "0", "", 23, "local", "wrapper"},
+		{"local default socket", []string{"--remote=unix://", "resume", "--last"}, "0", "", 23, "local", "wrapper"},
+		{"local subcommand reconnect", []string{"--remote", "unix:///tmp/codex.sock", "resume", "session-id"}, "0", "", 23, "local", "subcommand"},
+		{"local agents", []string{"--remote", "unix:///tmp/codex.sock", "agents"}, "0", "", 23, "", "wrapper"},
+		{"local help", []string{"--remote", "unix:///tmp/codex.sock", "resume", "--help"}, "0", "", 23, "", "wrapper"},
+		{"no daemon", []string{"--no-daemon", "", "a b"}, "0", "", 23, "", "wrapper"},
+		{"start failure", nil, "9", "daemon could not start", 1, "daemon", "wrapper"},
+		{"start status two", nil, "2", "invalid configuration", 1, "daemon", "wrapper"},
+		{"unsupported daemon", []string{"resume", "--last", "a prompt"}, "2", "error: unrecognized subcommand 'daemon'", 23, "daemon", "wrapper"},
+		{"unsupported app server", nil, "2", "error: unrecognized subcommand 'app-server'", 23, "daemon", "wrapper"},
+		{"unsupported start", nil, "2", "error: unrecognized subcommand 'start'", 23, "daemon", "wrapper"},
+		{"app server without daemon", nil, "2", "error: unexpected argument 'daemon' found", 23, "daemon", "wrapper"},
+		{"unrelated parser error", nil, "2", "error: unrecognized subcommand 'other'", 1, "daemon", "wrapper"},
+		{"wrong failure status", nil, "1", "error: unrecognized subcommand 'daemon'", 1, "daemon", "wrapper"},
+		{"subcommand", []string{"resume", "--last"}, "0", "", 23, "daemon", "subcommand"},
+		{"foreign before", []string{"fork", "session", "a b"}, "0", "", 23, "daemon", "before"},
+		{"foreign after", []string{"resume", "--last"}, "0", "", 23, "daemon", "after"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			log := filepath.Join(dir, tt.name+".log")
@@ -214,13 +231,15 @@ exit 23
 				t.Fatal(err)
 			}
 			var want []string
-			if tt.adapt {
+			if tt.adapt == "daemon" {
 				want = append(want, "app-server", "daemon", "start", "")
 			}
 			if tt.wantExit == 23 {
-				if tt.adapt && tt.startExit == "0" {
+				if tt.adapt != "" && tt.startExit == "0" {
 					want = append(want, contextArgs(os.Getenv)...)
-					want = append(want, "--remote", "unix://")
+					if tt.adapt == "daemon" {
+						want = append(want, "--remote", "unix://")
+					}
 				}
 				want = append(want, tt.args...)
 				want = append(want, "")
