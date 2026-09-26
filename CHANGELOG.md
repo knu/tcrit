@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.11.0
+
+### Added
+
+- **File path completion in comment editors** — typing `@` and a path character at the start of a line or after whitespace lists the entries of that directory, one level at a time, below the `@` or above it when the screen is short.  Candidates match fuzzily; `tab` accepts the first one, Up/Down with `enter` accept a chosen one, and `esc` closes the list.  A file completes with a trailing space; a directory completes with `/` and lists its entries.
+- **Fuzzy file selector** — `alt+p` opens a dialog with a search field over the review's file tabs.  Space-separated words must all match, and basename matches rank first.  Up/Down or `ctrl+p` / `ctrl+n` choose, `enter` switches tabs, and the dialog keeps a fixed size while typing.
+
+### Changed
+
+- File references accept unescaped letters, digits, and combining marks of any script; non-ASCII punctuation still ends a reference.  Prose may follow a path directly without a space, as full-width text commonly does in some languages; the longest leading part naming an existing file is linked.  Copied and completed paths escape underscores at word boundaries so names such as `__init__.py` survive Markdown rendering; both spellings are recognized.
+- Added `github.com/sahilm/fuzzy` as a direct dependency for fuzzy matching.
+
+### Removed
+
+- The `/` tab search.  The key is reserved for a future in-source search.
+
 ## 0.10.0
 
 ### Added
