@@ -2134,9 +2134,10 @@ func (m AppModel) View() tea.View {
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeAllMotion
 	cursor := m.modalTextarea.Cursor()
-	if m.modal == gotoLineModal {
+	switch m.modal {
+	case gotoLineModal:
 		cursor = m.lineInput.Cursor()
-	} else if m.modal == fileSelectModal {
+	case fileSelectModal:
 		cursor = m.fileSelect.input.Cursor()
 	}
 	if c := cursor; c != nil {
