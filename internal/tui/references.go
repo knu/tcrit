@@ -5,14 +5,17 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
-// Match crit's bare @path syntax, also allowing extensionless files. Only the
-// optional Ldigits suffix has no trailing boundary, so L40に and L40-45 work.
-var fileReferencePattern = regexp.MustCompile(`(^|\s)@((?:[A-Za-z0-9._/-]|\\[^\r\n])+)(?: +L([0-9]+))?`)
+// Match crit's bare @path syntax, also allowing extensionless files and
+// unescaped letters, marks and digits from any script. Only the optional
+// Ldigits suffix has no trailing boundary, so L40に and L40-45 work.
+var fileReferencePattern = regexp.MustCompile(`(^|[\s\p{Z}])@((?:[\p{L}\p{M}\p{N}._/-]|\\[^\r\n])+)(?: +L([0-9]+))?`)
 
 var commentReferencePattern = regexp.MustCompile(`\bc_[a-f0-9]{6,}\b`)
 
@@ -23,16 +26,7 @@ func (m *AppModel) copyReference() {
 		if m.focused != contentPane || t.path == "" || strings.ContainsAny(t.path, "\r\n") {
 			return
 		}
-		var path strings.Builder
-		for _, r := range t.path {
-			switch {
-			case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', strings.ContainsRune("._/-", r):
-			default:
-				path.WriteByte('\\')
-			}
-			path.WriteRune(r)
-		}
-		text = "@" + path.String()
+		text = "@" + escapeReferencePath(t.path)
 		if t.cursorSide != "old" && t.doc != nil && t.doc.HasLine(t.cursorLine) {
 			text += " L" + strconv.Itoa(t.cursorLine)
 		}
@@ -96,6 +90,64 @@ func (m *AppModel) navigateCommentReference(uri string) bool {
 	return false
 }
 
+func referenceWordRune(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsMark(r) || unicode.IsNumber(r)
+}
+
+// escapeReferencePath writes path in the @path notation. Letters, marks and
+// digits of any script pass through, as does an underscore between two of
+// them; everything else is escaped so it neither ends the reference nor acts
+// as Markdown punctuation in other renderers.
+func escapeReferencePath(path string) string {
+	runes := []rune(path)
+	var out strings.Builder
+	for i, r := range runes {
+		plain := referenceWordRune(r) || strings.ContainsRune("./-", r)
+		if r == '_' {
+			plain = i > 0 && i+1 < len(runes) && referenceWordRune(runes[i-1]) && referenceWordRune(runes[i+1])
+		}
+		if !plain {
+			out.WriteByte('\\')
+		}
+		out.WriteRune(r)
+	}
+	return out.String()
+}
+
+// resolveReferencePath returns the longest prefix of the escaped reference
+// text naming a regular file, so prose in scripts without word spacing can
+// follow a path directly (@main.goを参照). Only unescaped non-ASCII runes are
+// dropped; ASCII terminators are explicit in the notation.
+func (m *AppModel) resolveReferencePath(raw string) (string, int) {
+	path := unescapeReferencePath(raw)
+	if regularFile(m.sourcePath(path)) {
+		return path, len(raw)
+	}
+	var cuts []int
+	for i := 0; i < len(raw); {
+		r, size := utf8.DecodeRuneInString(raw[i:])
+		if r == '\\' {
+			_, next := utf8.DecodeRuneInString(raw[i+size:])
+			i += size + next
+			continue
+		}
+		if r >= utf8.RuneSelf {
+			cuts = append(cuts, i)
+		}
+		i += size
+	}
+	for j := len(cuts) - 1; j >= 0; j-- {
+		if cuts[j] == 0 {
+			break
+		}
+		path := unescapeReferencePath(raw[:cuts[j]])
+		if regularFile(m.sourcePath(path)) {
+			return path, cuts[j]
+		}
+	}
+	return "", 0
+}
+
 func unescapeReferencePath(path string) string {
 	var out strings.Builder
 	escaped := false
@@ -117,9 +169,12 @@ func (m *AppModel) linkFileReferences(body string) string {
 		if match[1] < len(body) && body[match[1]] == '\\' {
 			continue // incomplete escape, not a reference to the shorter prefix
 		}
-		path := unescapeReferencePath(body[match[4]:match[5]])
-		if !regularFile(m.sourcePath(path)) {
+		path, used := m.resolveReferencePath(body[match[4]:match[5]])
+		if used == 0 {
 			continue
+		}
+		if used < match[5]-match[4] {
+			match[1], match[5], match[6] = match[4]+used, match[4]+used, -1
 		}
 		line := 0
 		if match[6] >= 0 {

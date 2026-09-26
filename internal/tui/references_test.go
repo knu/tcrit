@@ -17,7 +17,7 @@ func TestCopyReferenceAndYank(t *testing.T) {
 	app.tab().path = "dir/日本 file\\(x).go"
 	app.tab().cursorLine = 2
 	editorMeta(&app, 'w')
-	want := `@dir/\日\本\ file\\\(x\).go L2`
+	want := `@dir/日本\ file\\\(x\).go L2`
 	if len(app.killRing.entries) != 1 || app.killRing.entries[0] != want {
 		t.Fatalf("ring = %#v, want %q", app.killRing.entries, want)
 	}
@@ -155,6 +155,8 @@ func TestFileReferenceSyntax(t *testing.T) {
 		{"text @file  L999999x", 999999, true},
 		{"@file\nL40", 0, true},
 		{"@file\tL40", 0, true},
+		{"@file\u3000L40", 0, true},
+		{"@file。", 0, true},
 		{"@file L0", 0, false},
 		{"@file L9999999999999999999999999999", 0, false},
 		{"name@file.ext", 0, false},
@@ -247,6 +249,9 @@ func TestEscapedFileReferences(t *testing.T) {
 		{`back\slash.go`, `@back\\slash.go L40-45`},
 		{"file(@name).go", `@file\(\@name\).go L40`},
 		{"日本.md", `@\日\本.md L40`},
+		{"日本.md", `@日本.md L40`},
+		{"__init__.py", `@\_\_init\_\_.py L40`},
+		{"__init__.py", `@__init__.py L40`},
 	} {
 		t.Run(tt.path, func(t *testing.T) {
 			if err := os.WriteFile(tt.path, []byte("x"), 0600); err != nil {
@@ -271,6 +276,72 @@ func TestEscapedFileReferences(t *testing.T) {
 	for _, body := range []string{"@prefix\\", "@prefix\\\nnext"} {
 		if strings.Contains(app.linkFileReferences(body), "tcrit://") {
 			t.Fatal("incomplete escape linked a shorter filename")
+		}
+	}
+}
+
+func TestEscapeReferencePath(t *testing.T) {
+	for _, tt := range []struct{ path, want string }{
+		{"dir/x_test.go", "dir/x_test.go"},
+		{"__init__.py", `\_\_init\_\_.py`},
+		{"src/_private/foo_.txt", `src/\_private/foo\_.txt`},
+		{"my _file", `my\ \_file`},
+		{"日本_語.md", "日本_語.md"},
+		{"日本 語（1）.md", `日本\ 語\（1\）.md`},
+		{"a*b`c[d].go", `a\*b\` + "`" + `c\[d\].go`},
+		{"全角\u3000空白", `全角\` + "\u3000" + `空白`},
+	} {
+		if got := escapeReferencePath(tt.path); got != tt.want {
+			t.Errorf("escape(%q) = %q, want %q", tt.path, got, tt.want)
+		}
+		if got := unescapeReferencePath(escapeReferencePath(tt.path)); got != tt.path {
+			t.Errorf("round trip of %q = %q", tt.path, got)
+		}
+	}
+}
+
+func TestFileReferenceFollowedByProse(t *testing.T) {
+	t.Chdir(t.TempDir())
+	app := NewApp("file", AppConfig{})
+	for _, path := range []string{"日本.md", "main.go"} {
+		if err := os.WriteFile(path, []byte("x"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tt := range []struct{ body, path string }{
+		{"@日本.mdを見て", "日本.md"},
+		{"@main.goを参照。", "main.go"},
+		{"@main.go L3の後", "main.go"},
+		{"@main.goの L3", "main.go"},
+		{"@missing.goを参照", ""},
+	} {
+		rendered := app.linkFileReferences(tt.body)
+		if ansi.Strip(rendered) != tt.body {
+			t.Fatalf("rendering changed text: %q", rendered)
+		}
+		canvas := lipgloss.NewCanvas(40, 1)
+		canvas.Compose(lipgloss.NewLayer(rendered))
+		var linked string
+		for x := 0; x < 40; x++ {
+			cell := canvas.CellAt(x, 0)
+			if cell == nil || cell.Link.URL == "" {
+				continue
+			}
+			location, ok := sourceLink(cell.Link.URL)
+			if !ok || location.path != tt.path {
+				t.Fatalf("%q linked %#v", tt.body, location)
+			}
+			linked += cell.Content
+		}
+		want := ""
+		if tt.path != "" {
+			want = "@" + tt.path
+			if strings.Contains(tt.body, " L3の") {
+				want += " L3"
+			}
+		}
+		if linked != want {
+			t.Errorf("%q linked text = %q, want %q", tt.body, linked, want)
 		}
 	}
 }
