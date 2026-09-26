@@ -107,6 +107,7 @@ type AppModel struct {
 	clipboardPending  bool
 	clipboardStatus   string
 	killRing          killRing
+	completion        completionState
 	mouseSelecting    bool
 	hoveredGutterLine int
 	hoveredGutterSide string
@@ -360,6 +361,18 @@ func codeDiff(path, ref string, staged bool) (*gitpkg.DiffInfo, error) {
 }
 
 func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	model, cmd := m.update(msg)
+	switch app := model.(type) {
+	case AppModel:
+		app.refreshCompletion()
+		return app, cmd
+	case *AppModel:
+		app.refreshCompletion()
+	}
+	return model, cmd
+}
+
+func (m AppModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.clipboardPending {
 		switch input := msg.(type) {
 		case tea.KeyPressMsg:
@@ -1574,6 +1587,9 @@ func (m *AppModel) doFinish() (tea.Model, tea.Cmd) {
 
 func (m *AppModel) handleTextModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.clipboardStatus = ""
+	if m.handleCompletionKey(msg) {
+		return m, nil
+	}
 	focusCount := 3
 	if m.canSuggest() {
 		focusCount++
@@ -1681,6 +1697,7 @@ func (m *AppModel) discardTextModal() {
 	m.modalInitial = ""
 	m.modalTextarea.Blur()
 	m.modalTextarea.Reset()
+	m.completion = completionState{}
 }
 
 func (m *AppModel) resumeTextModal() {
@@ -3177,7 +3194,7 @@ func (m AppModel) renderHelp(innerWidth int) string {
 	contexts := renderHelpGroup("Selection and dialogs", []helpItem{
 		{keys: "↑/↓,j/k · enter/v/esc · ctrl+PgUp/PgDn", desc: "extend · comment/toggle/cancel selection · scroll thread"},
 		{keys: "ctrl+s/o/v · alt+s · tab/S-tab · enter/esc", desc: "save/edit/paste · suggest · focus · activate/close"},
-		{keys: "ctrl+k/u/w,alt+d · ctrl+y · alt+y", desc: "kill · yank · rotate kills"},
+		{keys: "ctrl+k/u/w,alt+d · ctrl+y/alt+y · @path,tab", desc: "kill · yank · complete"},
 		{keys: "y/n/esc · ←/→,h/l,tab/shift+tab · enter", desc: "confirm/cancel · focus · activate finish dialog"},
 	}, innerWidth)
 
@@ -3620,11 +3637,14 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 
 	background = dimRendered(background, bgW, bgH)
 
-	bgLayer := lipgloss.NewLayer(background)
-	modalLayer := lipgloss.NewLayer(modalContent).X(mx).Y(my).Z(1)
-
-	comp := lipgloss.NewCompositor(bgLayer, modalLayer)
-	return comp.Render(), regions
+	layers := []*lipgloss.Layer{
+		lipgloss.NewLayer(background),
+		lipgloss.NewLayer(modalContent).X(mx).Y(my).Z(1),
+	}
+	if menu := m.completionLayer(regions, bgW, bgH); menu != nil {
+		layers = append(layers, menu)
+	}
+	return lipgloss.NewCompositor(layers...).Render(), regions
 }
 
 func dimRendered(s string, w, h int) string {
