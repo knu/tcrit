@@ -64,6 +64,8 @@ Handle the command outcome before continuing:
 
 If the result cannot be recovered, report that limitation.  Silence, elapsed time, and missing saved data are not approval.
 
+If Codex's background server has lost the invoking terminal context, ask the user to resume Codex from their tmux pane or Herdr terminal with `tcrit codex resume`.  The bundled `codex` wrapper also preserves this context when placed before the original Codex in PATH.  A Codex session ID alone does not identify its terminal; do not guess terminal identifiers or relaunch Codex from the agent's shell tool.  After the user resumes the conversation, retry the saved TCrit review by its session ID.
+
 Locate feedback using `path`, line range, and `anchor` (the original text).  Treat `drifted: true` line numbers as approximate; focus on `quote` when present.  Outside the finish prompt, `tcrit comments --session <id> --json` lists unresolved comments.  Use the session ID for all comment commands, including supplied-diff reviews, replies, and bulk input.
 
 For image attachments, follow the finish prompt's base directory and open referenced images with your image-viewing tool, including those in resolved threads.  On approval, after reading them and recording any remaining instructions, run the cleanup command printed by TCrit.  This is the approval cleanup step; it deletes the completed session and its images.  If image reading fails, preserve the session and report the failure.  Unapproved rounds and stopped reviews retain attachments.

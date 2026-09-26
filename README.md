@@ -8,11 +8,12 @@
 
 ## Key changes from upstream
 
+- **Codex daemon support** — `tcrit codex` preserves the invoking tmux or Herdr context in Codex's shell tools while using its local background server.  An optional `codex` wrapper makes this automatic and chains with other PATH wrappers, including tfil.
 - **Clipboard images in comments** — `ctrl+v` pastes an image into a comment or reply as a Markdown attachment, falling back to text when no image is available.  macOS supports copied image files and bitmaps through AppKit; Linux uses `wl-paste` or `xclip`.  Images survive review rounds and stop/resume.  After approval, the agent reads the final images and clears the completed session.
 - **Source and thread references** — `alt+w` copies the current source reference or focused thread's comment ID to the kill ring; paste it in a comment or reply with `ctrl+y`.  Click `@path/to/file L40` to jump to the source, or a comment ID such as `c_a3f8b2` to open that thread across files and review rounds.  `alt+g` asks for a line number; locations outside the review offer to open in `$EDITOR`.  `alt+e` opens the current file at the cursor line directly.  VS Code-style `--goto` and traditional `+LINE FILE` editors are supported.  Typing `@` and a path character in a comment or reply lists matching files one directory level at a time; `tab` completes with the first candidate.
 - **Read diffs without comment boxes** — press `H` to hide inline comments and replace the sidebar with a narrow gutter, giving the source more space.  A `💬` marks commented lines, including deleted lines; click a marker to open its thread.  Press `H` again to restore comments; the `h` setting for resolved comments is preserved.  Opening the sidebar with `s` or jumping to a file comment restores the sidebar.  Comment editors keep the reference thread visible, omitting the reply currently being edited.
 - **[Crit](https://crit.md/)-compatible agent workflow** — review commands block until the reviewer finishes, print an agent-facing result, and support iterative rounds through `tcrit --session <id>`; each round closes the TUI and its dedicated pane or tab, and the next round restores saved state in a new process.
-- **Native Herdr and tmux workflows** — reviews open in a full-width Herdr tab or a tmux split; tcrit finds the invoking context from process ancestry even when tools such as Codex do not inherit multiplexer environment variables.
+- **Native Herdr and tmux workflows** — reviews open in a full-width Herdr tab or a tmux split; tcrit finds the invoking context from process ancestry when command runners remain in the terminal's process tree, even without multiplexer environment variables.  The Codex wrapper carries that context across its shared daemon.
 - **CritJSON review state and CLI** — comments use [Crit](https://crit.md/)-compatible `review.json` data, with `tcrit comment` and `tcrit comments` for automation.
 - **Independent saved sessions** — every new review gets its own ID, even for the same directory, scope, or plan name. `tcrit stop --session <id>` preserves state; `tcrit --session <id>` resumes it after process exit.
 - **Fixed review scopes** — choose `--scope=all|staged|unstaged` or a committed comparison such as `--scope=main..HEAD` / `--scope=main...`.  Each scope keeps its comments in a separate session and stays visible in the TUI header.  The default is `all`; `--staged` and `--unstaged` are shortcuts.
@@ -78,6 +79,34 @@ Make sure `$GOPATH/bin` (defaults to `~/go/bin`) is in your `PATH`:
 ```bash
 export PATH="$PATH:$(go env GOPATH)/bin"
 ```
+
+### Codex with a background server
+
+> [!WARNING]
+> [Codex 0.157.0](https://github.com/openai/codex/releases/tag/rust-v0.157.0) enabled automatic background-server startup by default.  Its shell tools no longer share the invoking terminal's process ancestry, so TCrit cannot recover the tmux or Herdr context from that ancestry.  Start Codex through `tcrit codex` or the bundled wrapper when using tmux or Herdr.
+
+From your tmux pane or Herdr terminal:
+
+```bash
+tcrit codex
+tcrit codex resume
+```
+
+For Codex versions that support `app-server daemon start`, TCrit starts the local daemon if needed, connects with `--remote unix://`, and passes the current terminal identifiers through per-thread `shell_environment_policy.set` overrides.  You do not need to run an app-server manually or edit `config.toml`.  The daemon is shared and stays running after the CLI exits; TCrit does not restart or update it.
+
+Release archives include both `tcrit` and a small `codex` wrapper in the same directory.  To build and install both with Go:
+
+```bash
+go install github.com/knu/tcrit/cmd/...@latest
+```
+
+Use a separate installation directory if your original Codex is already in `GOBIN`; installing the wrapper under the same filename would replace it.  Put the wrapper's directory before the original Codex directory in `PATH`.  It searches only after itself and skips aliases of itself.  Other wrappers, such as tfil, must also search forward in `PATH`; with that behavior, either order works.  The original Codex installation and its update mechanism remain separate.
+
+The [mise GitHub backend](https://mise.jdx.dev/dev-tools/backends/github.html#bin_path) exposes both binaries from the release archive.  Activate the installed tool with `mise use github:knu/tcrit`, and check `type -a codex` to confirm the wrapper precedes the original binary.  Use `mise activate` so the actual installation directories appear in `PATH`.  TCrit skips mise shims when looking for Codex because they can select the same wrapper again.  A wrapper invoked by an absolute path must also be present in `PATH` to locate its successor.  To expose only `tcrit` and use the explicit subcommand, configure `"github:knu/tcrit" = { version = "latest", filter_bins = "tcrit" }` in mise's `[tools]` table.
+
+Automatic context forwarding applies to normal interactive launches, `resume`, and `fork` when terminal identifiers are available.  `--no-daemon`, explicit `--remote`, `--oss`, and `--profile` are passed through unchanged, as are management commands, help, and unknown options.  Put flags before `--`; arguments after it remain literal.  TCrit attempts `app-server daemon start` directly.  If an older CLI exits with status 2 and reports an unrecognized subcommand or unexpected argument in that command path, it starts Codex with the original arguments and environment, without daemon options or terminal overrides.  Other startup failures remain errors and retain their diagnostic output.  `--no-daemon` is available when you deliberately want an embedded session.
+
+If terminal detection fails and another `codex` precedes the bundled wrapper in PATH, TCrit reports both paths and suggests moving the wrapper first.  With mise, place `github:knu/tcrit` before the tool providing the original Codex in `[tools]`, reactivate the shell, and check `type -a codex`.  Resume Codex from the intended tmux pane or Herdr terminal after changing the order; the daemon's inherited PATH may differ from your current shell.
 
 ### Manual skill install
 
@@ -289,7 +318,7 @@ Opens a full-screen terminal UI with syntax-highlighted markdown, a comment side
 
 When `tcrit review` runs inside Herdr, the TUI automatically opens in a dedicated full-width tab. Inside tmux, it opens in a side-by-side split pane. In both cases the invoking command blocks until you finish the review — the same feedback loop as [crit](https://github.com/tomasz-tomczyk/crit), with a TUI in place of the browser.
 
-Tcrit resolves the Herdr workspace, tab, and pane or the tmux server and pane from the invoking process tree. This also works with agents such as Codex that do not preserve the multiplexer environment in command runners. When multiplexers are nested, the nearest one in the process ancestry owns the review.
+Tcrit resolves the Herdr workspace, tab, and pane or the tmux server and pane from the invoking process tree.  This also works when command runners omit multiplexer environment variables but remain in the terminal's process tree.  For Codex's shared daemon, use the [Codex wrapper](#codex-with-a-background-server).  When multiplexers are nested, the nearest one in the process ancestry owns the review.
 
 ### How document review works
 

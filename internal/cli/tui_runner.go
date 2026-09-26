@@ -44,7 +44,7 @@ func runTUISession(cfg *config.Config, sess *review.Session, mode *reviewMode, s
 	if mode.patch != nil && !serving {
 		tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 		if err != nil {
-			return nil, fmt.Errorf("opening review terminal: %w", err)
+			return nil, withCodexWrapperHint(fmt.Errorf("opening review terminal: %w", err))
 		}
 		defer func() {
 			if err := tty.Close(); err != nil {

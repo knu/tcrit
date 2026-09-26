@@ -200,7 +200,7 @@ func runReviewFlow(cfg *config.Config, sess *review.Session, mode *reviewMode) e
 		return nil
 	}
 
-	return fmt.Errorf("no Herdr or tmux session and no terminal to open the TUI in; run inside Herdr or tmux, or have the reviewer run `tcrit%s` in a terminal", reviewArgSuffix(mode))
+	return withCodexWrapperHint(fmt.Errorf("no Herdr or tmux session and no terminal to open the TUI in; run inside Herdr or tmux, or have the reviewer run `tcrit%s` in a terminal", reviewArgSuffix(mode)))
 }
 
 func reviewArgSuffix(mode *reviewMode) string {

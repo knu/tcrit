@@ -1,10 +1,22 @@
 version: 2
 
 builds:
-  - main: ./cmd/tcrit/
+  - id: tcrit
+    main: ./cmd/tcrit/
     binary: tcrit
     ldflags:
       - -s -w -X github.com/knu/tcrit/internal/cli.version=v{{.Version}}
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+  - id: codex
+    main: ./cmd/codex/
+    binary: codex
+    ldflags:
+      - -s -w
     goos:
       - darwin
       - linux

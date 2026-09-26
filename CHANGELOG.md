@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Codex launch wrappers** — `tcrit codex` and the bundled `codex` binary preserve tmux and Herdr context through per-thread shell settings.  [Codex 0.157.0](https://github.com/openai/codex/releases/tag/rust-v0.157.0) enabled automatic background-server startup by default, separating shell tools from the terminal process ancestry TCrit used for detection.  The wrappers start and connect to the local daemon when supported, pass through older CLIs, and chain with forward-searching PATH wrappers such as tfil.
+- When terminal detection fails, suggest correcting PATH order if another `codex` precedes TCrit's bundled wrapper, including `[tools]` ordering for mise.
+
 ## 0.11.0
 
 ### Added
