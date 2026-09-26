@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -157,4 +158,23 @@ func computeChangeChunks(diff *gitpkg.DiffInfo) []changeChunk {
 	chunks = append(chunks, changeChunk{startLine: start, endLine: end})
 
 	return chunks
+}
+
+// changeCounts renders the "(+N -M)" summary shown after a file name.
+func (t *FileTab) changeCounts() string {
+	var counts []string
+	if n := len(t.changedLines); n > 0 {
+		counts = append(counts, tabAddedCount.Render(fmt.Sprintf("+%d", n)))
+	}
+	deleted := 0
+	for _, lines := range t.deletedAfter {
+		deleted += len(lines)
+	}
+	if deleted > 0 {
+		counts = append(counts, tabDeletedCount.Render(fmt.Sprintf("-%d", deleted)))
+	}
+	if len(counts) == 0 {
+		return ""
+	}
+	return "(" + strings.Join(counts, " ") + ")"
 }

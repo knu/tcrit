@@ -322,7 +322,7 @@ func TestHelpModalShowsAllShortcutGroupsAndCloses(t *testing.T) {
 	rendered := app.renderWithModal(background)
 	for _, want := range []string{
 		"Keyboard Help", "General", "Navigation", "Code review", "Selection and dialogs",
-		"↑/↓,j/k", "PgUp/PgDn", "Home/End,g/G,</>", "tab/S-tab", "ctrl+s", "ctrl+PgUp/PgDn", "y/n/esc", "Backspace",
+		"↑/↓,j/k", "PgUp/PgDn", "Home/End,g/G,</>", "tab/S-tab", "ctrl+s", "ctrl+PgUp/PgDn", "y/n/esc", "alt+p",
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Errorf("help modal does not contain %q", want)

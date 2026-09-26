@@ -69,7 +69,7 @@ func TestWhitespaceKeyInInput(t *testing.T) {
 			case "comment":
 				m.openLineComment()
 			case "search":
-				m = pressKey(m, '/')
+				m, _ = updateApp(m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModAlt})
 			case "help":
 				m = pressKey(m, '?')
 			}
@@ -86,7 +86,7 @@ func TestWhitespaceKeyInInput(t *testing.T) {
 			if mode == "comment" && m.modalTextarea.Value() != "w" {
 				t.Fatal("w not entered")
 			}
-			if mode == "search" && m.tabSearch != "w" {
+			if mode == "search" && m.fileSelect.input.Value() != "w" {
 				t.Fatal("w not searched")
 			}
 		})

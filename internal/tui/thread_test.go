@@ -460,10 +460,10 @@ func TestHideCommentsShortcutPreservesInput(t *testing.T) {
 		}
 	}
 	app := newCommentNavigationTestApp()
-	app = pressKey(app, '/')
-	app = pressKey(app, 'H')
-	if app.tabSearch != "H" || app.hideComments {
-		t.Fatal("fold shortcut intercepted tab search")
+	app, _ = updateApp(app, tea.KeyPressMsg{Code: 'p', Mod: tea.ModAlt})
+	app, _ = updateApp(app, tea.KeyPressMsg{Code: 'H', Text: "H"})
+	if app.fileSelect.input.Value() != "H" || app.hideComments {
+		t.Fatal("fold shortcut intercepted the file selector")
 	}
 }
 
@@ -535,10 +535,10 @@ func TestFoldShortcutPreservesInputAndDialogs(t *testing.T) {
 		}
 	}
 	app := newCommentNavigationTestApp()
-	app = pressKey(app, '/')
-	app = pressKey(app, 'h')
-	if app.tabSearch != "h" || app.showResolved {
-		t.Fatal("fold shortcut intercepted tab search")
+	app, _ = updateApp(app, tea.KeyPressMsg{Code: 'p', Mod: tea.ModAlt})
+	app, _ = updateApp(app, tea.KeyPressMsg{Code: 'h', Text: "h"})
+	if app.fileSelect.input.Value() != "h" || app.showResolved {
+		t.Fatal("fold shortcut intercepted the file selector")
 	}
 }
 

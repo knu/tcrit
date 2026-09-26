@@ -41,6 +41,7 @@ const (
 	helpModal
 	gotoLineModal
 	openSourceModal
+	fileSelectModal
 )
 
 // FinishEvent is emitted on the finish channel when the reviewer finishes a
@@ -71,12 +72,10 @@ type AppModel struct {
 	modal         modalType
 
 	// Multi-file tabs (code review mode)
-	tabs         []FileTab
-	activeTab    int
-	multiFile    bool // true when in code review mode
-	tabSearching bool
-	tabSearch    string
-	tabMatches   []int // indices of matching tabs during search
+	tabs       []FileTab
+	activeTab  int
+	multiFile  bool // true when in code review mode
+	fileSelect fileSelectState
 
 	// Single-file mode (legacy)
 	filePath string
@@ -496,6 +495,11 @@ func (m AppModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lineInput, cmd = m.lineInput.Update(msg)
 		return m, cmd
 	}
+	if m.modal == fileSelectModal {
+		m.fileSelect.input, cmd = m.fileSelect.input.Update(msg)
+		m.refreshFileSelect()
+		return m, cmd
+	}
 	if m.modal == commentModal || m.modal == fileCommentModal || m.modal == replyModal || m.modal == editModal {
 		before := m.modalTextarea.Value()
 		m.modalTextarea, cmd = m.modalTextarea.Update(msg)
@@ -518,6 +522,9 @@ func (m AppModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.modal == gotoLineModal || m.modal == openSourceModal {
 		return m.handleLocationModal(msg)
+	}
+	if m.modal == fileSelectModal {
+		return m.handleFileSelectModal(msg)
 	}
 	m.locationError = ""
 	if m.hoveredGutterLine != 0 {
@@ -544,10 +551,6 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleFinishModal(msg)
 	}
 
-	// Tab search input mode
-	if m.tabSearching {
-		return m.handleTabSearch(msg)
-	}
 	if len(m.tabs) == 0 {
 		if key.Matches(msg, keys.Quit) {
 			m.openFinishModal()
@@ -566,6 +569,9 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "alt+w" {
 		m.copyReference()
 		return m, nil
+	}
+	if msg.String() == "alt+p" && m.multiFile {
+		return m, m.openFileSelect()
 	}
 
 	if msg.String() == "ctrl+pgup" || msg.String() == "ctrl+pgdown" {
@@ -720,13 +726,6 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.multiFile && m.focused == contentPane && !t.selecting {
-		switch {
-		case key.Matches(msg, keys.TabSearch):
-			m.tabSearching = true
-			m.tabSearch = ""
-			m.tabMatches = nil
-			return m, nil
-		}
 		// Number keys 1-9 for direct tab access
 		if s := msg.String(); len(s) == 1 && s[0] >= '1' && s[0] <= '9' {
 			idx := int(s[0]-'0') - 1
@@ -1774,59 +1773,6 @@ func (m *AppModel) handleDeleteConfirmModal(msg tea.KeyPressMsg) (tea.Model, tea
 	return m, nil
 }
 
-func (m *AppModel) handleTabSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		m.tabSearching = false
-		m.tabSearch = ""
-		m.tabMatches = nil
-		return m, nil
-	case "enter":
-		if len(m.tabMatches) > 0 {
-			m.activeTab = m.tabMatches[0]
-			m.rebuildContent()
-			m.updateCommentSidebar()
-		}
-		m.tabSearching = false
-		m.tabSearch = ""
-		m.tabMatches = nil
-		return m, nil
-	case "backspace":
-		if len(m.tabSearch) > 0 {
-			m.tabSearch = m.tabSearch[:len(m.tabSearch)-1]
-			m.updateTabSearchMatches()
-		}
-		return m, nil
-	case "tab":
-		// Cycle to next match
-		if len(m.tabMatches) > 1 {
-			// Rotate matches
-			m.tabMatches = append(m.tabMatches[1:], m.tabMatches[0])
-		}
-		return m, nil
-	default:
-		s := msg.String()
-		if len(s) == 1 && s[0] >= ' ' && s[0] <= '~' {
-			m.tabSearch += s
-			m.updateTabSearchMatches()
-		}
-		return m, nil
-	}
-}
-
-func (m *AppModel) updateTabSearchMatches() {
-	m.tabMatches = nil
-	if m.tabSearch == "" {
-		return
-	}
-	query := strings.ToLower(m.tabSearch)
-	for i, t := range m.tabs {
-		if strings.Contains(strings.ToLower(t.path), query) {
-			m.tabMatches = append(m.tabMatches, i)
-		}
-	}
-}
-
 func (m *AppModel) recalculateLayout() {
 	headerHeight := m.headerHeight()
 	tabBarHeight := m.tabBarHeight()
@@ -2190,6 +2136,8 @@ func (m AppModel) View() tea.View {
 	cursor := m.modalTextarea.Cursor()
 	if m.modal == gotoLineModal {
 		cursor = m.lineInput.Cursor()
+	} else if m.modal == fileSelectModal {
+		cursor = m.fileSelect.input.Cursor()
 	}
 	if c := cursor; c != nil {
 		for _, region := range layout.modalRegions {
@@ -2325,19 +2273,8 @@ func (m *AppModel) tabLabels() []tabLabel {
 		if basenames[label] > 1 {
 			label = t.path
 		}
-		var counts []string
-		if n := len(t.changedLines); n > 0 {
-			counts = append(counts, tabAddedCount.Render(fmt.Sprintf("+%d", n)))
-		}
-		deleted := 0
-		for _, lines := range t.deletedAfter {
-			deleted += len(lines)
-		}
-		if deleted > 0 {
-			counts = append(counts, tabDeletedCount.Render(fmt.Sprintf("-%d", deleted)))
-		}
-		if len(counts) > 0 {
-			label += " (" + strings.Join(counts, " ") + ")"
+		if counts := t.changeCounts(); counts != "" {
+			label += " " + counts
 		}
 		labels[i] = tabLabel{text: label}
 	}
@@ -2421,6 +2358,9 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 	if m.modal == gotoLineModal || m.modal == openSourceModal {
 		return m.handleLocationModalMouse(mouse)
 	}
+	if m.modal == fileSelectModal {
+		return m.handleFileSelectMouse(mouse)
+	}
 	if m.isTextModal() {
 		return m.handleTextModalMouse(mouse)
 	}
@@ -2436,7 +2376,7 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 	if m.modal != noModal {
 		return m, nil
 	}
-	if !m.tab().selecting && !m.tabSearching {
+	if !m.tab().selecting {
 		uri := m.referenceAt(mouse.X, mouse.Y)
 		if m.navigateCommentReference(uri) {
 			return m, nil
@@ -2451,7 +2391,7 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 	}
 
 	headerHeight := m.headerHeight()
-	if m.multiFile && !m.tabSearching && mouse.Y >= headerHeight && mouse.Y < headerHeight+m.tabBarHeight() {
+	if m.multiFile && mouse.Y >= headerHeight && mouse.Y < headerHeight+m.tabBarHeight() {
 		labels := m.tabLabels()
 		for i := range labels {
 			labels[i].rendered = m.renderTab(labels, i, i == 0)
@@ -2590,6 +2530,8 @@ func (m *AppModel) selectTab(index int) {
 
 type modalMouseAction struct {
 	lineInput       bool
+	pick            bool
+	pickIndex       int
 	focus           int
 	deleteIndex     int
 	textarea        bool
@@ -3021,16 +2963,6 @@ func (m *AppModel) handleTextModalWheel(mouse tea.Mouse) (tea.Model, tea.Cmd) {
 
 // renderTabBar renders the tab bar for multi-file mode.
 func (m *AppModel) renderTabBar() string {
-	if m.tabSearching {
-		prompt := tabSearchPromptStyle.Render("/")
-		query := m.tabSearch
-		matchInfo := ""
-		if m.tabSearch != "" {
-			matchInfo = fmt.Sprintf(" (%d matches)", len(m.tabMatches))
-		}
-		return prompt + query + footerStyle.Render(matchInfo)
-	}
-
 	labels := m.tabLabels()
 	for i := range labels {
 		rendered := m.renderTab(labels, i, i == 0)
@@ -3181,12 +3113,11 @@ func (m AppModel) renderHelp(innerWidth int) string {
 	codeReview := renderHelpGroup("Code review / search", []helpItem{
 		{keys: "alt+e/g", desc: "editor/line"},
 		{keys: "alt+w", desc: "copy ref"},
+		{keys: "alt+p", desc: "open file"},
 		{keys: "tab/S-tab", desc: "files"},
 		{keys: "1-9", desc: "file tab"},
-		{keys: "/", desc: "search"},
 		{keys: "n/N", desc: "diff/open"},
-		{keys: "Backspace", desc: "filter"},
-		{keys: "tab", desc: "next match"},
+		{keys: "↑/↓", desc: "choose file"},
 		{keys: "enter/esc", desc: "open/cancel"},
 	}, columnWidth)
 
@@ -3378,22 +3309,19 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 	var regions []modalMouseRegion
 	bgW := lipgloss.Width(background)
 	bgH := lipgloss.Height(background)
-	modalWidth := m.width * 2 / 3
-	if m.modal == helpModal {
-		modalWidth = m.width - 4
-	}
-	if modalWidth < 50 {
-		modalWidth = 50
-	}
-	if modalWidth > m.width-4 {
-		modalWidth = m.width - 4
-	}
+	modalWidth := m.modalWidth()
 	innerWidth := modalWidth - 6
 
 	switch m.modal {
 	case gotoLineModal, openSourceModal:
 		content, locationRegions := m.locationModalContent(innerWidth)
 		regions = append(regions, locationRegions...)
+		modalContent = frameStyle.Width(modalWidth).Render(content)
+
+	case fileSelectModal:
+		// Size the list for the whole tab set, which is fixed while it is open.
+		content, fileRegions := m.fileSelectModalContent(innerWidth, min(len(m.tabs), 20, max(3, bgH-12)))
+		regions = append(regions, fileRegions...)
 		modalContent = frameStyle.Width(modalWidth).Render(content)
 
 	case helpModal:
@@ -3645,6 +3573,18 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		layers = append(layers, menu)
 	}
 	return lipgloss.NewCompositor(layers...).Render(), regions
+}
+
+func (m AppModel) modalWidth() int {
+	width := m.width * 2 / 3
+	if m.modal == helpModal {
+		width = m.width - 4
+	}
+	return max(50, min(width, m.width-4))
+}
+
+func (m AppModel) modalInnerWidth() int {
+	return m.modalWidth() - 6
 }
 
 func dimRendered(s string, w, h int) string {

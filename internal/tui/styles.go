@@ -278,9 +278,9 @@ var (
 			Foreground(lipgloss.BrightWhite).
 			Padding(0, 1)
 
-	tabSearchPromptStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(warning)
+	fileMatchStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(warning)
 
 	// Diff gutter markers
 	diffAddedGutter = lipgloss.NewStyle().

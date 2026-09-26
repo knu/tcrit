@@ -20,7 +20,6 @@ type keyMap struct {
 	NextTab          key.Binding
 	NextChange       key.Binding
 	PrevChange       key.Binding
-	TabSearch        key.Binding
 	Resolve          key.Binding
 	FoldResolved     key.Binding
 	HideComments     key.Binding
@@ -48,7 +47,6 @@ var keys = keyMap{
 	NextTab:          key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next tab")),
 	NextChange:       key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "next change/open comment")),
 	PrevChange:       key.NewBinding(key.WithKeys("N"), key.WithHelp("N", "prev change/open comment")),
-	TabSearch:        key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search tabs")),
 	Resolve:          key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "resolve/unresolve")),
 	FoldResolved:     key.NewBinding(key.WithKeys("h"), key.WithHelp("h", "fold/unfold resolved")),
 	HideComments:     key.NewBinding(key.WithKeys("H"), key.WithHelp("H", "hide/show comments")),
