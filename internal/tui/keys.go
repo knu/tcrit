@@ -21,6 +21,7 @@ type keyMap struct {
 	NextChange       key.Binding
 	PrevChange       key.Binding
 	Resolve          key.Binding
+	ResolveNext      key.Binding
 	FoldResolved     key.Binding
 	HideComments     key.Binding
 	IgnoreWhitespace key.Binding
@@ -49,6 +50,7 @@ var keys = keyMap{
 	NextChange:       key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "next change/open comment")),
 	PrevChange:       key.NewBinding(key.WithKeys("N"), key.WithHelp("N", "prev change/open comment")),
 	Resolve:          key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "resolve/unresolve")),
+	ResolveNext:      key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "resolve and go to next")),
 	FoldResolved:     key.NewBinding(key.WithKeys("h"), key.WithHelp("h", "fold/unfold resolved")),
 	HideComments:     key.NewBinding(key.WithKeys("H"), key.WithHelp("H", "hide/show comments")),
 	IgnoreWhitespace: key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "ignore whitespace")),

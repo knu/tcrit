@@ -269,7 +269,7 @@ func TestResolveThreadAdvancesToUnresolved(t *testing.T) {
 					app.updateCommentSidebar()
 				}
 				for _, want := range []string{"first-b", "last-file-a", "last-file-b", "last-a", "first-file", ""} {
-					app = pressKey(app, 'r')
+					app = pressKey(app, 'R')
 					targets := app.commentTargets(app.activeTab)
 					current := app.currentCommentTarget(targets)
 					if want == "" {
@@ -310,10 +310,10 @@ func TestResolveThreadReleasesFocus(t *testing.T) {
 				app.rebuildContent()
 				app.updateCommentSidebar()
 
-				app = pressKey(app, 'r')
+				app = pressKey(app, 'R')
 
 				if !app.tab().state.Comments[0].Resolved {
-					t.Fatal("r did not resolve the thread")
+					t.Fatal("R did not resolve the thread")
 				}
 				if app.focused != contentPane || app.tab().cursorOnAnnotation {
 					t.Fatal("resolved thread retained focus")

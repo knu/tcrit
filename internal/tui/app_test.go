@@ -872,3 +872,49 @@ func TestModalCloseButtonAndOutsideClickDismiss(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveKeysStayOrAdvance(t *testing.T) {
+	app := newCommentNavigationTestApp()
+	app.multiFile = true
+	app.width, app.height = 100, 30
+	app.recalculateLayout()
+	app.tabs[0].cursorLine = 2
+	app.tabs[0].cursorOnAnnotation = true
+	app.rebuildContent()
+	app.updateCommentSidebar()
+
+	app = pressKey(app, 'r')
+	if c := app.tabs[0].state.Comments[0]; !c.Resolved || c.ID != "first-a" {
+		t.Fatalf("r did not resolve first-a: %+v", c)
+	}
+	if app.focused != contentPane || !app.tab().cursorOnAnnotation || app.selectedCommentID() != "first-a" {
+		t.Fatalf("r moved away: focus = %v, selected = %q", app.focused, app.selectedCommentID())
+	}
+	app = pressKey(app, 'r')
+	if app.tabs[0].state.Comments[0].Resolved {
+		t.Fatal("second r did not reopen the thread")
+	}
+
+	app = pressKey(app, 'R')
+	if !app.tabs[0].state.Comments[0].Resolved {
+		t.Fatal("R did not resolve first-a")
+	}
+	if got := app.selectedCommentID(); got != "first-b" {
+		t.Fatalf("R selected %q, want the next unresolved thread first-b", got)
+	}
+
+	// R on an already resolved thread keeps it resolved and still moves on.
+	app.tabs[0].state.Comments[2].Resolved = true // first-c
+	app = pressKey(app, 'N')                      // back onto first-a? no: N goes to the previous stop
+	app.tabs[0].cursorLine, app.tabs[0].cursorOnAnnotation, app.tabs[0].cursorAnnoIdx = 2, true, 0
+	if got := app.selectedCommentID(); got != "first-a" {
+		t.Fatalf("setup selected %q, want first-a", got)
+	}
+	app = pressKey(app, 'R')
+	if !app.tabs[0].state.Comments[0].Resolved {
+		t.Fatal("R reopened an already resolved thread")
+	}
+	if got := app.selectedCommentID(); got != "first-b" {
+		t.Fatalf("R from a resolved thread selected %q, want first-b", got)
+	}
+}

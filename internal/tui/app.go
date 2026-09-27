@@ -861,11 +861,15 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				t.cursorLine, t.cursorSide = last.line, last.side
 			}
 			moved = true
-		case key.Matches(msg, keys.Resolve):
+		case key.Matches(msg, keys.Resolve, keys.ResolveNext):
 			if t.cursorOnAnnotation {
 				anns := m.annotationsAfterLine(t.cursorLine, t.cursorSide)
 				if t.cursorAnnoIdx < len(anns) {
-					m.toggleResolve(anns[t.cursorAnnoIdx].id)
+					if key.Matches(msg, keys.ResolveNext) {
+						m.resolveNext(anns[t.cursorAnnoIdx].id)
+					} else {
+						m.toggleResolve(anns[t.cursorAnnoIdx].id)
+					}
 				}
 				return m, nil
 			}
@@ -937,6 +941,10 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 
 		// Toggle resolution on the selected annotation
+		if key.Matches(msg, keys.ResolveNext) {
+			m.resolveNext(t.sidebarItems[t.sidebarCursor].id)
+			return m, nil
+		}
 		if key.Matches(msg, keys.Resolve) {
 			m.toggleResolve(t.sidebarItems[t.sidebarCursor].id)
 			return m, nil
@@ -1282,7 +1290,22 @@ func (m *AppModel) modalDelete(targetIndex int) {
 
 // toggleResolve flips a comment's resolution state, stamping ResolvedRound
 // with the current round on resolve (mirroring crit's reply semantics).
+// toggleResolve flips the resolution of thread id.  With advance, resolving
+// moves on to the next unresolved thread across files, or returns focus to
+// the source when none remain; otherwise the cursor stays where it is.
+// toggleResolve flips the resolution of thread id in place.
 func (m *AppModel) toggleResolve(id string) {
+	m.resolveThread(id, false)
+}
+
+// resolveNext resolves thread id if it is open, keeps it resolved otherwise,
+// and moves on to the next unresolved thread across files, or returns focus
+// to the source when none remain.
+func (m *AppModel) resolveNext(id string) {
+	m.resolveThread(id, true)
+}
+
+func (m *AppModel) resolveThread(id string, advance bool) {
 	t := m.tab()
 	if t.state == nil {
 		return
@@ -1292,31 +1315,37 @@ func (m *AppModel) toggleResolve(id string) {
 		round = m.session.CJ.ReviewRound
 	}
 	nextTab, next, hasNext := m.adjacentComment(1, false)
-	resolved := false
+	found := false
 	for i := range t.state.Comments {
 		if t.state.Comments[i].ID != id {
 			continue
 		}
 		c := &t.state.Comments[i]
-		if c.Resolved {
+		found = true
+		switch {
+		case c.Resolved && advance:
+			// Already resolved: leave it and just move on.
+		case c.Resolved:
 			c.Resolved = false
 			c.ResolvedRound = 0
-		} else {
+			c.UpdatedAt = review.Now()
+		default:
 			c.Resolved = true
 			c.ResolvedRound = round
-			resolved = true
-			m.focused = contentPane
-			t.cursorOnAnnotation = false
-			t.cursorAnnoIdx = 0
-			if t.cursorLine == 0 {
-				m.moveCursorBy(t, 1, 1)
-			}
+			c.UpdatedAt = review.Now()
 		}
-		c.UpdatedAt = review.Now()
 		break
 	}
+	if advance && found {
+		m.focused = contentPane
+		t.cursorOnAnnotation = false
+		t.cursorAnnoIdx = 0
+		if t.cursorLine == 0 {
+			m.moveCursorBy(t, 1, 1)
+		}
+	}
 	m.persist()
-	if resolved && hasNext && (nextTab != m.activeTab || next.id != id) {
+	if advance && found && hasNext && (nextTab != m.activeTab || next.id != id) {
 		m.selectComment(nextTab, next)
 		return
 	}
@@ -3154,7 +3183,7 @@ func (m AppModel) renderFooter() string {
 			k("f", "file comment"),
 		}
 		if len(t.state.Comments) > 0 {
-			items = append(items, k("r", "resolve/unresolve"))
+			items = append(items, k("r/R", "resolve/+next"))
 		}
 		if m.multiFile {
 			items = append([]string{
@@ -3232,7 +3261,7 @@ func (m AppModel) renderHelp(innerWidth int) string {
 		{keys: "f", desc: "file comment"},
 		{keys: "v", desc: "select"},
 		{keys: "s/t", desc: "sidebar/view"},
-		{keys: "r", desc: "resolve"},
+		{keys: "r/R", desc: "resolve/+next"},
 		{keys: "h/H", desc: "fold/hide"},
 		{keys: "w", desc: "ignore WS"},
 		{keys: "d", desc: "delete comment"},
