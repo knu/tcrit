@@ -27,6 +27,7 @@ type keyMap struct {
 	Delete           key.Binding
 	FileComment      key.Binding
 	Help             key.Binding
+	FileTree         key.Binding
 }
 
 var keys = keyMap{
@@ -54,4 +55,5 @@ var keys = keyMap{
 	Delete:           key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete comment")),
 	FileComment:      key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "comment on file")),
 	Help:             key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
+	FileTree:         key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "switch sidebar view")),
 }

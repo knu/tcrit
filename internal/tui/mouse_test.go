@@ -45,7 +45,7 @@ func TestMouseClickSelectsVisibleOverflowTab(t *testing.T) {
 	fifth := app.tabs[1]
 	fifth.path = "fifth.go"
 	app.tabs = append(app.tabs, fourth, fifth)
-	app.width = 70 // a 50-column content pane beside the 20-column comment pane
+	app.width = 76 // a 50-column content pane beside the 26-column sidebar
 	app.activeTab = 2
 
 	labels := app.tabLabels()
@@ -85,7 +85,7 @@ func TestMouseClickSelectsTabBehindOverflowIndicator(t *testing.T) {
 			app.tabs[i] = template
 			app.tabs[i].path = path
 		}
-		app.width = 44
+		app.width = 50 // a 24-column content pane beside the 26-column sidebar
 		app.activeTab = 4
 		return app
 	}
@@ -840,19 +840,26 @@ func TestMouseClickCommentPaneTabFocusesSidebar(t *testing.T) {
 	app.rebuildContent()
 
 	tabLeft, y := app.contentPaneWidth(), app.headerHeight()+1
-	app = clickMouse(app, tabLeft+app.commentPaneTabWidth(), y)
+	tabs := app.sidebarTabs()
+	tabsWidth := lipgloss.Width(tabs[0]) + lipgloss.Width(tabs[1])
+	app = clickMouse(app, tabLeft+tabsWidth, y)
 	if app.focused != contentPane {
-		t.Fatalf("focus = %v, want content pane after clicking beside the comment tab", app.focused)
+		t.Fatalf("focus = %v, want content pane after clicking beside the sidebar tabs", app.focused)
 	}
 
 	app = clickMouse(app, tabLeft+2, y)
+	if app.focused != commentPane || app.sidebarView != filesView {
+		t.Fatalf("focus = %v, view = %v; want the Files tab focused", app.focused, app.sidebarView)
+	}
 
-	if app.focused != commentPane {
-		t.Fatalf("focus = %v, want comment pane after clicking its tab", app.focused)
+	app = clickMouse(app, tabLeft+lipgloss.Width(tabs[0])+1, y)
+
+	if app.focused != commentPane || app.sidebarView != commentsView {
+		t.Fatalf("focus = %v, view = %v; want the Comments tab focused", app.focused, app.sidebarView)
 	}
 	rows := strings.Split(app.View().Content, "\n")
-	if tabRow := ansi.Strip(rows[y]); !strings.Contains(tabRow, "│ Comments (0) │") {
-		t.Fatalf("tab row = %q, want the comment pane tab", tabRow)
+	if tabRow := ansi.Strip(rows[y]); !strings.Contains(tabRow, "│ Files ││ Comments (0) │") {
+		t.Fatalf("tab row = %q, want the sidebar tabs", tabRow)
 	}
 	if got := ansi.Cut(rows[y], tabLeft, tabLeft+1); !strings.Contains(got, "\x1b[94m") {
 		t.Fatalf("focused comment pane border = %q, want bright blue", got)

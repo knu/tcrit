@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"image/color"
 	"os"
 	"path/filepath"
 	"slices"
@@ -102,6 +103,8 @@ type AppModel struct {
 
 	contentViewport   viewport.Model
 	commentViewport   viewport.Model
+	sidebarView       sidebarView
+	fileTree          fileTree
 	modalTextarea     textarea.Model
 	clipboardID       uint64
 	clipboardPending  bool
@@ -235,6 +238,7 @@ func NewApp(filePath string, cfg AppConfig) AppModel {
 		detached:        os.Getenv("TCRIT_DETACHED") == "1",
 		contentViewport: viewport.New(),
 		commentViewport: viewport.New(),
+		fileTree:        newFileTree(),
 		modalTextarea:   ta,
 	}
 }
@@ -307,6 +311,7 @@ func NewCodeReviewApp(files []gitpkg.FileChange, ref string, cfg AppConfig) AppM
 		detached:        os.Getenv("TCRIT_DETACHED") == "1",
 		contentViewport: viewport.New(),
 		commentViewport: viewport.New(),
+		fileTree:        newFileTree(),
 		modalTextarea:   ta,
 	}
 }
@@ -516,7 +521,11 @@ func (m AppModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case contentPane:
 		m.contentViewport, cmd = m.contentViewport.Update(msg)
 	case commentPane:
-		m.commentViewport, cmd = m.commentViewport.Update(msg)
+		if m.sidebarView == filesView {
+			m.fileTree.viewport, cmd = m.fileTree.viewport.Update(msg)
+		} else {
+			m.commentViewport, cmd = m.commentViewport.Update(msg)
+		}
 	}
 
 	return m, cmd
@@ -575,6 +584,13 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if msg.String() == "alt+p" && m.multiFile {
 		return m, m.openFileSelect()
+	}
+	if key.Matches(msg, keys.FileTree) && !t.selecting {
+		m.toggleSidebarView()
+		return m, nil
+	}
+	if m.focused == commentPane && m.sidebarView == filesView && !t.selecting && m.handleFileTreeKey(msg) {
+		return m, nil
 	}
 
 	if msg.String() == "ctrl+pgup" || msg.String() == "ctrl+pgdown" {
@@ -888,7 +904,7 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Comment pane navigation
-	if m.focused == commentPane && len(t.sidebarItems) > 0 {
+	if m.focused == commentPane && m.sidebarView == commentsView && len(t.sidebarItems) > 0 {
 		sidebarMoved := false
 		switch {
 		case key.Matches(msg, keys.Down):
@@ -983,7 +999,7 @@ func (m *AppModel) selectedCommentID() string {
 			return annotations[t.cursorAnnoIdx].id
 		}
 	case commentPane:
-		if t.sidebarCursor < len(t.sidebarItems) {
+		if m.sidebarView == commentsView && t.sidebarCursor < len(t.sidebarItems) {
 			return t.sidebarItems[t.sidebarCursor].id
 		}
 	}
@@ -1799,6 +1815,8 @@ func (m *AppModel) recalculateLayout() {
 	m.contentViewport.SetHeight(mainHeight)
 	m.commentViewport.SetWidth(max(0, m.commentPanelWidth()-2-paneHorizontalPadding*2))
 	m.commentViewport.SetHeight(mainHeight)
+	m.fileTree.viewport.SetWidth(m.commentViewport.Width())
+	m.fileTree.viewport.SetHeight(mainHeight)
 
 	modalWidth := m.width * 2 / 3
 	if modalWidth < 50 {
@@ -1877,6 +1895,7 @@ func newAnnotation(c review.Comment) annotation {
 }
 
 func (m *AppModel) updateCommentSidebar() {
+	m.syncFileTree()
 	if len(m.tabs) == 0 {
 		m.commentViewport.SetContent("")
 		return
@@ -2173,7 +2192,7 @@ func (m AppModel) renderReviewScreen() (string, renderedScreenLayout) {
 
 	mainRow := contentPane
 	if !m.hideComments {
-		mainRow = lipgloss.JoinHorizontal(lipgloss.Top, contentPane, m.renderCommentPane())
+		mainRow = lipgloss.JoinHorizontal(lipgloss.Top, contentPane, m.renderSidebarPane())
 	}
 
 	footer := m.renderFooter()
@@ -2354,7 +2373,8 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 
 	headerHeight := m.headerHeight()
 	if mouse.Y >= headerHeight && mouse.Y < headerHeight+m.tabBarHeight() {
-		if left := m.contentPaneWidth(); !m.hideComments && mouse.X >= left && mouse.X < left+m.commentPaneTabWidth() {
+		if view, ok := m.sidebarTabAt(mouse.X); ok {
+			m.sidebarView = view
 			m.focused = commentPane
 			m.updateCommentSidebar()
 			m.rebuildContent()
@@ -2445,6 +2465,11 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 			if id := m.gutterComment(mouse.Y - top + m.contentViewport.YOffset()); id != "" {
 				m.openCommentThread(id)
 			}
+			return m, nil
+		}
+		if m.sidebarView == filesView {
+			m.handleFileTreeClick(mouse.Y - top + m.fileTree.viewport.YOffset())
+			m.rebuildContent()
 			return m, nil
 		}
 		wasFocused := m.focused == commentPane
@@ -2736,7 +2761,7 @@ func (m AppModel) commentPanelWidth() int {
 	if m.hideComments {
 		return 4
 	}
-	return max(m.width/4, 20)
+	return max(m.width/4, 26) // room for the Comments and Files tabs
 }
 
 func (m AppModel) gutterComment(row int) string {
@@ -2802,39 +2827,72 @@ func renderPane(tabRow, body string, border lipgloss.Border, style lipgloss.Styl
 
 // commentPaneTabLabel returns the label of the comment pane's tab, truncated
 // to fit the pane.
-func (m AppModel) commentPaneTabLabel() string {
-	label := fmt.Sprintf("Comments (%d)", unresolvedCommentCount(m.tab().state.Comments))
-	return ansi.Truncate(label, max(0, m.commentPanelWidth()-activeTabStyle.GetHorizontalFrameSize()), "…")
+// sidebarBorderColor is the sidebar pane's border color for its focus state.
+func (m AppModel) sidebarBorderColor() color.Color {
+	if m.focused == commentPane {
+		return commentFocusedBorderColor
+	}
+	return commentBorderColor
 }
 
-// commentPaneTabWidth returns the rendered width of the comment pane's tab.
-func (m AppModel) commentPaneTabWidth() int {
-	return lipgloss.Width(m.commentPaneTabLabel()) + activeTabStyle.GetHorizontalFrameSize()
+// sidebarTabs renders the sidebar's tabs in order, marking the active view.
+func (m AppModel) sidebarTabs() []string {
+	labels := []string{
+		"Files",
+		fmt.Sprintf("Comments (%d)", unresolvedCommentCount(m.tab().state.Comments)),
+	}
+	fg := m.sidebarBorderColor()
+	tabs := make([]string, len(labels))
+	for i, label := range labels {
+		style := inactiveTabStyle.BorderForeground(fg)
+		if sidebarView(i) == m.sidebarView {
+			style = activeTabStyle.BorderForeground(fg)
+		}
+		border, _, _, _, _ := style.GetBorder()
+		if i == 0 {
+			border.BottomLeft = "├"
+			if sidebarView(i) == m.sidebarView {
+				border.BottomLeft = "│"
+			}
+		}
+		tabs[i] = style.Border(border).Render(label)
+	}
+	return tabs
 }
 
-// renderCommentPane renders the comment sidebar as a pane with a single
-// "Comments (N)" tab, matching the height of the content pane.  Focus
-// brightens the border color, as with inline comment boxes.
-func (m AppModel) renderCommentPane() string {
+// sidebarTabAt returns the sidebar view whose tab spans screen column x.
+func (m AppModel) sidebarTabAt(x int) (sidebarView, bool) {
+	if m.hideComments {
+		return 0, false
+	}
+	left := m.contentPaneWidth()
+	for i, tab := range m.sidebarTabs() {
+		right := left + lipgloss.Width(tab)
+		if x >= left && x < right {
+			return sidebarView(i), true
+		}
+		left = right
+	}
+	return 0, false
+}
+
+// renderSidebarPane renders the sidebar as a pane with Comments and Files
+// tabs, matching the height of the content pane.  Focus brightens the
+// border color, as with inline comment boxes.
+func (m AppModel) renderSidebarPane() string {
 	width := m.commentPanelWidth()
 	border := lipgloss.RoundedBorder()
-	line := lipgloss.NewStyle().Foreground(commentBorderColor)
-	if m.focused == commentPane {
-		line = line.Foreground(commentFocusedBorderColor)
+	line := lipgloss.NewStyle().Foreground(m.sidebarBorderColor())
+	tabRow := fillTabRow(lipgloss.JoinHorizontal(lipgloss.Top, m.sidebarTabs()...), width, border, line)
+	view := m.commentViewport.View()
+	if m.sidebarView == filesView {
+		view = m.fileTree.viewport.View()
 	}
-	label := activeTabStyle.UnsetBorderStyle().Render(m.commentPaneTabLabel())
-	inner := lipgloss.Width(label)
-	// The tab's bottom-right corner joins the pane's top border, so it is a
-	// sharp corner even on the rounded pane.
-	tab := line.Render(border.TopLeft+strings.Repeat(border.Top, inner)+border.TopRight) + "\n" +
-		line.Render(border.Left) + label + line.Render(border.Right) + "\n" +
-		line.Render(border.Left+strings.Repeat(" ", inner)+lipgloss.NormalBorder().BottomLeft)
-	tabRow := fillTabRow(tab, width, border, line)
 	body := lipgloss.NewStyle().
 		Width(width-2).
 		Height(m.commentViewport.Height()).
 		Padding(0, paneHorizontalPadding).
-		Render(m.commentViewport.View())
+		Render(view)
 	return renderPane(tabRow, body, border, line)
 }
 
@@ -2937,6 +2995,14 @@ func (m *AppModel) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) 
 	}
 	left, top, right, bottom := m.commentBounds()
 	if !m.hideComments && mouse.X >= left && mouse.X < right && mouse.Y >= top && mouse.Y < bottom {
+		if m.sidebarView == filesView {
+			if direction < 0 {
+				m.fileTree.viewport.ScrollUp(3)
+			} else {
+				m.fileTree.viewport.ScrollDown(3)
+			}
+			return m, nil
+		}
 		if i, ok := m.sidebarMouseTarget(mouse.Y - top + m.commentViewport.YOffset()); ok {
 			m.focused = commentPane
 			m.tab().sidebarCursor = i
@@ -3074,6 +3140,7 @@ func (m AppModel) renderFooter() string {
 		items = []string{
 			k("[/]", "prev/next comment"),
 			k("s", "sidebar"),
+			k("t", "files/comments"),
 			k("v", "select lines"),
 			k("enter", "comment"),
 			k("f", "file comment"),
@@ -3156,7 +3223,7 @@ func (m AppModel) renderHelp(innerWidth int) string {
 		{keys: "enter", desc: "comment/open"},
 		{keys: "f", desc: "file comment"},
 		{keys: "v", desc: "select"},
-		{keys: "s", desc: "sidebar"},
+		{keys: "s/t", desc: "sidebar/view"},
 		{keys: "r", desc: "resolve"},
 		{keys: "h/H", desc: "fold/hide"},
 		{keys: "w", desc: "ignore WS"},

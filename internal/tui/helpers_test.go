@@ -39,6 +39,7 @@ func setupAppWithDoc(t *testing.T, content string) AppModel {
 	updated, _ := app.Update(docRenderedMsg{})
 	a := updated.(AppModel)
 	a.contentViewport.SetHeight(5)
+	a.sidebarView = commentsView // most tests exercise the comment sidebar
 	return a
 }
 
@@ -157,6 +158,7 @@ func wheelMouse(app AppModel, x, y int, button tea.MouseButton) AppModel {
 
 func newCommentNavigationTestApp() AppModel {
 	app := NewApp("first.go", AppConfig{})
+	app.sidebarView = commentsView
 	lines := []string{"one", "two", "three", "four"}
 	tab := func(path string, comments ...review.Comment) FileTab {
 		return FileTab{
@@ -222,6 +224,7 @@ func newFinishTestApp(t *testing.T, comments []review.Comment) (AppModel, chan F
 		FinishCh: finishCh,
 	})
 	app.tabs[0].state = &fileReview{Comments: comments}
+	app.sidebarView = commentsView
 	return app, finishCh
 }
 

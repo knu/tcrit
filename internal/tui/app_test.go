@@ -310,7 +310,7 @@ func TestReviewFrameFitsTerminalWithSidebar(t *testing.T) {
 				if left != paneRight+2 || right != width-1 {
 					t.Fatalf("sidebar bounds [%d,%d), want [%d,%d) inside the comment pane", left, right, paneRight+2, width-1)
 				}
-				if got := ansi.Cut(rows[top-1], paneRight+1, width); !strings.HasPrefix(got, "│") || !strings.HasSuffix(got, "╮") {
+				if got := ansi.Cut(rows[top-1], paneRight+1, width); (!strings.HasPrefix(got, "│") && !strings.HasPrefix(got, "├")) || !strings.HasSuffix(got, "╮") {
 					t.Fatalf("comment pane tab row = %q, want its tab joined to the top border", got)
 				}
 				if got := ansi.Cut(rows[bottom], paneRight-1, width); got != "─╯╰"+strings.Repeat("─", width-paneRight-3)+"╯" {

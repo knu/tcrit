@@ -25,6 +25,7 @@
 - **Native input cursor** — comment and reply editors position the real terminal cursor at the insertion point so terminal IMEs can display composition there, including after wrapping and scrolling.
 - **Deleted-line comments** — removed lines, including lines in fully deleted files, can be selected and commented on from the keyboard or gutter.
 - **Mouse-first TUI controls** — click file tabs, code lines, comment threads, sidebar items, dialog actions, and the review-finish button; use the wheel to scroll code and drag the gutter to select line ranges.  Click **☐ Resolve** / **☑︎ Resolved** in a thread header to toggle its resolution, including file comments.  Eligible comments also have a red **x** button at the right edge of the header to request deletion.
+- **File tree sidebar** — the sidebar opens on a **Files** tab: a directory tree of the reviewed files with foldable folders; `t` switches between it and the **Comments** tab.  The tree cursor follows the active file tab and vice versa, unfolding folders as needed.  Each level indents by one column so deep paths stay narrow, and long rows scroll sideways under the cursor.
 - **Fuzzy file switching** — `alt+p` opens a file selector with a search field: candidates are matched fuzzily with basename matches first, `↑` / `↓` choose, and `enter` switches tabs.  `/` is reserved for in-source search.
 - **Combined change and comment navigation** — `n` / `N` visit change hunks and unresolved comments in display order across files, from either pane.  File comments and separate threads on the same line are included; resolved comments are skipped even when unfolded.
 - **Versioned plan reviews** — `tcrit plan` saves immutable revisions and carries comment threads forward as the plan changes.
@@ -348,6 +349,8 @@ Tcrit resolves the Herdr workspace, tab, and pane or the tmux server and pane fr
 | `f`                                   | Comment on the file or reply to its existing thread |
 | `v`                                   | Visual select mode (multi-line comments) |
 | `s`                                   | Toggle comment sidebar                   |
+| `t`                                   | Switch the sidebar between the file tree and comments, and focus it |
+| `j` / `k`, `enter`, `h` / `l`, `←` / `→` (file tree) | Move (moving onto a file opens its tab); toggle a folder or open the file and focus the source; fold a folder or go to its parent / unfold a folder or enter it.  On a row too long for the sidebar, `→` and `l` scroll it to reveal the rest and `←` and `h` scroll back before folding |
 | `[` / `]`                             | Jump to prev / next comment; skip resolved comments unless unfolded with `h` |
 | `h`                                   | Toggle folding resolved comments across all files |
 | `H`                                   | Hide/show comment boxes across all files; show line markers in a narrow right gutter |
@@ -416,7 +419,7 @@ The file selector lists every tab in order when the search field is empty, with 
 
 ## Mouse controls
 
-- Click a file tab, code line, inline comment, sidebar, or sidebar comment to focus it.
+- Click a file tab, code line, inline comment, sidebar, or sidebar comment to focus it.  Click the sidebar's **Comments** or **Files** tab to switch views; in the file tree, click a folder to fold or unfold it and a file to open it.
 - Click **☐ Resolve** in an inline or sidebar thread header to resolve it, or **☑︎ Resolved** to reopen it.  File comments support the same toggle.  Both states reserve the same button width, and collapsed headers keep the reply count without adding the author's name, so the checkbox stays in the same position within the header.  Resolving advances to the next unresolved thread, as with `r`.
 - Click the red **x** to the right of the resolution toggle to delete a comment after confirmation.  It appears only on your own comments from the current round that have no replies, including file comments.
 - Scroll code with the mouse wheel.  Over an inline or sidebar thread, the wheel focuses it and scrolls its full history; at the thread's limit, scrolling continues through the surrounding pane.
