@@ -19,12 +19,16 @@ func (m *AppModel) handleEmptyReviewClick(msg tea.MouseClickMsg) (tea.Model, tea
 		return m, nil
 	}
 	_, regions := m.renderEmptyReview()
+	mouse := msg.Mouse()
+	if dismissesModal(regions, mouse) {
+		return m.handleFinishModal(tea.KeyPressMsg{Code: tea.KeyEscape})
+	}
 	for _, region := range regions {
-		mouse := msg.Mouse()
-		if mouse.X >= region.rect.left && mouse.X < region.rect.right && mouse.Y >= region.rect.top && mouse.Y < region.rect.bottom {
-			m.modalFocus = region.action.focus
-			return m.handleFinishModal(tea.KeyPressMsg{Code: tea.KeyEnter})
+		if region.action.dialog || !region.rect.contains(mouse) {
+			continue
 		}
+		m.modalFocus = region.action.focus
+		return m.handleFinishModal(tea.KeyPressMsg{Code: tea.KeyEnter})
 	}
 	return m, nil
 }

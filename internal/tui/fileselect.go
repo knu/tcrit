@@ -184,6 +184,10 @@ func (m *AppModel) handleFileSelectMouse(mouse tea.Mouse) (tea.Model, tea.Cmd) {
 		if !region.rect.contains(mouse) {
 			continue
 		}
+		if region.action.close {
+			m.closeFileSelect()
+			return m, nil
+		}
 		if region.action.lineInput {
 			cursor := m.fileSelect.input.Cursor()
 			if cursor != nil {
@@ -248,7 +252,8 @@ func renderFileRow(path string, positions []int, suffix string, selected bool) s
 
 func (m AppModel) fileSelectModalContent(width, maxRows int) (string, []modalMouseRegion) {
 	s := m.fileSelect
-	prefix := modalTitleStyle.Render("Open file") + "\n"
+	title, closeRegion := modalTitle("Open file", width)
+	prefix := title + "\n"
 	content := prefix + s.input.View() + "\n\n"
 	regions := []modalMouseRegion{{
 		rect:   mouseRect{top: strings.Count(prefix, "\n"), bottom: strings.Count(prefix, "\n") + 1, right: width},
@@ -276,5 +281,5 @@ func (m AppModel) fileSelectModalContent(width, maxRows int) (string, []modalMou
 	case len(s.matches) > 0:
 		status = fmt.Sprintf("%d of %d files", len(s.matches), len(m.tabs))
 	}
-	return content + footerStyle.Render(status) + "\n" + footerStyle.Render("↑/↓ choose · enter open · esc cancel"), regions
+	return content + footerStyle.Render(status) + "\n" + footerStyle.Render("↑/↓ choose · enter open · esc cancel"), append(regions, closeRegion)
 }

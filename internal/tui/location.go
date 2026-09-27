@@ -194,7 +194,8 @@ func (m *AppModel) confirmSourceEditor() tea.Cmd {
 
 func (m AppModel) locationModalContent(width int) (string, []modalMouseRegion) {
 	if m.modal == gotoLineModal {
-		prefix := modalTitleStyle.Render("Go to line") + "\n"
+		title, closeRegion := modalTitle("Go to line", width)
+		prefix := title + "\n"
 		content := prefix + m.lineInput.View() + "\n\n"
 		if m.locationError != "" {
 			content += lipgloss.Wrap(m.locationError, max(1, width), "") + "\n\n"
@@ -207,17 +208,18 @@ func (m AppModel) locationModalContent(width int) (string, []modalMouseRegion) {
 			{rendered: m.renderModalButton("Go", "enter", m.modalFocus == 1), action: modalMouseAction{focus: 1}},
 			{rendered: m.renderModalButton("Cancel", "esc", m.modalFocus == 2), action: modalMouseAction{focus: 2}},
 		}, width, strings.Count(content, "\n"))
-		return content + buttons, append(regions, buttonRegions...)
+		return content + buttons, append(append(regions, buttonRegions...), closeRegion)
 	}
 	target := m.pendingLocation.path
 	if m.pendingLocation.line > 0 {
 		target += fmt.Sprintf(" L%d", m.pendingLocation.line)
 	}
-	prefix := lipgloss.Wrap(modalTitleStyle.Render("Open in editor?")+"\n"+
+	title, closeRegion := modalTitle("Open in editor?", width)
+	prefix := lipgloss.Wrap(title+"\n"+
 		target+"\nThis location is not in the review.\n\n", max(1, width), "")
 	buttons, regions := layoutModalButtonRow([]modalButtonSpec{
 		{rendered: m.renderModalButton("Open", "y", m.modalFocus == 0), action: modalMouseAction{focus: 0}},
 		{rendered: m.renderModalButton("Cancel", "n / esc", m.modalFocus == 1), action: modalMouseAction{focus: 1}},
 	}, width, strings.Count(prefix, "\n"))
-	return prefix + buttons, regions
+	return prefix + buttons, append(regions, closeRegion)
 }

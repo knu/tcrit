@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -2309,6 +2310,9 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 	}
 	m.hoveredGutterLine = 0
 	m.hoveredGutterSide = ""
+	if m.modal != noModal && m.clickedModalDismiss(mouse) {
+		return m.handleKeyPress(tea.KeyPressMsg{Code: tea.KeyEscape})
+	}
 	if m.modal == gotoLineModal || m.modal == openSourceModal {
 		return m.handleLocationModalMouse(mouse)
 	}
@@ -2492,6 +2496,8 @@ func (m *AppModel) selectTab(index int) {
 }
 
 type modalMouseAction struct {
+	dialog          bool // the whole dialog frame
+	close           bool
 	lineInput       bool
 	pick            bool
 	pickIndex       int
@@ -3297,9 +3303,54 @@ func renderModalBoxAt(content string, width, maxHeight, offset, initialOffset in
 	return strings.Join(rows, "\n"), offset, maxOffset
 }
 
+// modalMouseRegions returns the clickable regions inside the open dialog,
+// excluding the dialog frame itself.
 func (m AppModel) modalMouseRegions() []modalMouseRegion {
 	_, layout := m.renderReviewScreen()
-	return layout.modalRegions
+	return slices.DeleteFunc(slices.Clone(layout.modalRegions), func(r modalMouseRegion) bool { return r.action.dialog })
+}
+
+// clickedModalDismiss reports whether mouse hit the dialog's close button or
+// landed outside the dialog, either of which dismisses it like esc.
+func (m AppModel) clickedModalDismiss(mouse tea.Mouse) bool {
+	_, layout := m.renderReviewScreen()
+	return dismissesModal(layout.modalRegions, mouse)
+}
+
+func dismissesModal(regions []modalMouseRegion, mouse tea.Mouse) bool {
+	inside := false
+	for _, region := range regions {
+		if !region.rect.contains(mouse) {
+			continue
+		}
+		if region.action.close {
+			return true
+		}
+		if region.action.dialog {
+			inside = true
+		}
+	}
+	return !inside
+}
+
+// modalTitleRow renders a dialog title with a close "x" at the right edge of
+// the dialog body, returning the row and the region that closes the dialog.
+func modalTitleRow(title string, width int) (string, modalMouseRegion) {
+	closeButton := closeButtonStyle.Render("x")
+	title = ansi.Truncate(title, max(0, width-1-lipgloss.Width(closeButton)), "…")
+	gap := max(1, width-lipgloss.Width(title)-lipgloss.Width(closeButton))
+	region := modalMouseRegion{
+		rect:   mouseRect{left: width - 1, right: width, bottom: 1},
+		action: modalMouseAction{close: true, focus: -1}, // not a button focus index
+	}
+	return title + strings.Repeat(" ", gap) + closeButton, region
+}
+
+// modalTitle renders a dialog title row with a close "x" followed by a blank
+// line, as modalTitleStyle's bottom margin used to provide.
+func modalTitle(text string, width int) (string, modalMouseRegion) {
+	row, region := modalTitleRow(modalTitleStyle.MarginBottom(0).Render(text), width)
+	return row + "\n", region
 }
 
 func (m AppModel) renderDeleteButton(label, hint string, focused bool) string {
@@ -3380,19 +3431,19 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		modalContent = frameStyle.Width(modalWidth).Render(content)
 
 	case helpModal:
-		title := modalTitleStyle.MarginBottom(0).Render("Keyboard Help  (? / esc to close)")
+		title, closeRegion := modalTitleRow(modalTitleStyle.MarginBottom(0).Render("Keyboard Help  (? / esc to close)"), innerWidth)
+		regions = append(regions, closeRegion)
 		modalContent = frameStyle.Width(modalWidth).Render(
 			title + "\n" + m.renderHelp(innerWidth))
 
 	case commentModal:
 		start, end := m.selectionRange()
 		side := m.selectionSide()
-		var title string
+		titleText := fmt.Sprintf("Add Comment (line %d)", start)
 		if start != end {
-			title = modalTitleStyle.Render(fmt.Sprintf("Add Comment (lines %d-%d)", start, end))
-		} else {
-			title = modalTitleStyle.Render(fmt.Sprintf("Add Comment (line %d)", start))
+			titleText = fmt.Sprintf("Add Comment (lines %d-%d)", start, end)
 		}
+		title, closeRegion := modalTitle(titleText, innerWidth)
 		contextContent := m.renderContextPreview(side, start, end, innerWidth-4, 0)
 		buttonSpecs := []modalButtonSpec{
 			{rendered: m.renderModalButton("Save", "ctrl+s", m.modalFocus == 1), action: modalMouseAction{focus: 1}},
@@ -3437,9 +3488,10 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		content, contentRegions := buildContent(contextSection, scrollOffset, scrollMaxOffset)
 		modalContent = frameStyle.Width(modalWidth).Render(content)
 		regions = append(regions, contentRegions...)
+		regions = append(regions, closeRegion)
 
 	case fileCommentModal:
-		title := modalTitleStyle.Render("Add File Comment")
+		title, closeRegion := modalTitle("Add File Comment", innerWidth)
 		path := contextBoxStyle.Width(innerWidth - 2).Render(m.tab().path)
 		prefix, textareaRegion := layoutModalTextarea(
 			title+"\n"+path+"\n\n", m.clipboardTextareaView(), innerWidth)
@@ -3449,6 +3501,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 			{rendered: m.renderModalButton("Close", "esc", m.modalFocus == 2), action: modalMouseAction{focus: 2}},
 		}, innerWidth, strings.Count(prefix, "\n"))
 		regions = append(regions, buttonRegions...)
+		regions = append(regions, closeRegion)
 		modalContent = frameStyle.Width(modalWidth).Render(prefix + buttons)
 
 	case replyModal, editModal:
@@ -3458,7 +3511,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		} else if m.editingReplyID != "" {
 			titleText = "Edit Reply"
 		}
-		title := modalTitleStyle.Render(titleText)
+		title, closeRegion := modalTitle(titleText, innerWidth)
 		var referenceContent string
 		var thread threadLayout
 		var threadStart int
@@ -3543,9 +3596,10 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		content, contentRegions := buildContent(referenceSection, scrollOffset, scrollMaxOffset)
 		modalContent = frameStyle.Width(modalWidth).Render(content)
 		regions = append(regions, contentRegions...)
+		regions = append(regions, closeRegion)
 
 	case discardChangesModal:
-		title := modalTitleStyle.Render("Discard changes?")
+		title, closeRegion := modalTitle("Discard changes?", innerWidth)
 		info := "Your unsaved comment changes will be lost."
 		prefix := lipgloss.Wrap(title+"\n"+info+"\n\n", innerWidth, "")
 		buttons, buttonRegions := layoutModalButtonRow([]modalButtonSpec{
@@ -3553,6 +3607,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 			{rendered: m.renderModalButton("Keep Editing", "n / esc", m.modalFocus == 1), action: modalMouseAction{focus: 1}},
 		}, innerWidth, strings.Count(prefix, "\n"))
 		regions = append(regions, buttonRegions...)
+		regions = append(regions, closeRegion)
 		modalContent = frameStyle.Width(modalWidth).Render(prefix + buttons)
 
 	case deleteConfirmModal:
@@ -3560,7 +3615,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		if targets := m.modalDeleteTargets(); m.pendingDelete >= 0 && m.pendingDelete < len(targets) && targets[m.pendingDelete].replyID != "" {
 			titleText = "Delete reply?"
 		}
-		title := modalTitleStyle.Render(titleText)
+		title, closeRegion := modalTitle(titleText, innerWidth)
 		info := "This cannot be undone."
 		prefix := lipgloss.Wrap(title+"\n"+info+"\n\n", innerWidth, "")
 		buttons, buttonRegions := layoutModalButtonRow([]modalButtonSpec{
@@ -3568,21 +3623,23 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 			{rendered: m.renderModalButton("Keep", "n / esc", m.modalFocus == 1), action: modalMouseAction{focus: 1}},
 		}, innerWidth, strings.Count(prefix, "\n"))
 		regions = append(regions, buttonRegions...)
+		regions = append(regions, closeRegion)
 		modalContent = frameStyle.Width(modalWidth).Render(prefix + buttons)
 
 	case finishModal:
 		unresolved := m.unresolvedTotal()
-		var title, info string
+		var titleText, info string
 		if unresolved == 0 {
-			title = modalTitleStyle.Render("Approve review?")
+			titleText = "Approve review?"
 			info = "No unresolved comments — approving ends the review."
 		} else if !m.newFeedback {
-			title = modalTitleStyle.Render("Resolve all & Approve?")
+			titleText = "Resolve all & Approve?"
 			info = fmt.Sprintf("%d unresolved comment(s) will be resolved.", unresolved)
 		} else {
-			title = modalTitleStyle.Render("Finish review?")
+			titleText = "Finish review?"
 			info = fmt.Sprintf("%d unresolved comment(s) will be sent to the agent.", unresolved)
 		}
+		title, closeRegion := modalTitle(titleText, innerWidth)
 
 		prefix := title + "\n" + info + "\n\n"
 		prefix = lipgloss.Wrap(prefix, innerWidth, "")
@@ -3591,6 +3648,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 			{rendered: m.renderModalButton("Close", "n", m.modalFocus == 1), action: modalMouseAction{focus: 1}},
 		}, innerWidth, strings.Count(prefix, "\n"))
 		regions = append(regions, buttonRegions...)
+		regions = append(regions, closeRegion)
 		hint := footerStyle.Render("esc: back to review · q: quit without finishing")
 
 		modalContent = frameStyle.Width(modalWidth).Render(prefix + buttons + "\n" + hint)
@@ -3617,6 +3675,10 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		regions[i].rect.top += contentY
 		regions[i].rect.bottom += contentY
 	}
+	regions = append(regions, modalMouseRegion{
+		rect:   mouseRect{left: mx, top: my, right: mx + modalW, bottom: my + modalH},
+		action: modalMouseAction{dialog: true},
+	})
 
 	background = dimRendered(background, bgW, bgH)
 

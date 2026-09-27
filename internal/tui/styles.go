@@ -96,6 +96,9 @@ var (
 			Padding(1, 2).
 			Width(60)
 
+	closeButtonStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Red)
+
 	modalTitleStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(accent).

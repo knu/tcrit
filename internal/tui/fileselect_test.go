@@ -153,6 +153,26 @@ func TestFileSelectMouse(t *testing.T) {
 	t.Fatalf("row for %q not rendered: %q", target, rows)
 }
 
+func TestFileSelectCloseButton(t *testing.T) {
+	app := newFileSelectApp()
+	app, _ = updateApp(app, tea.KeyPressMsg{Code: 'p', Mod: tea.ModAlt})
+	titleRow := renderedLineY(t, app, "Open file")
+	for _, region := range app.modalMouseRegions() {
+		if !region.action.close {
+			continue
+		}
+		if region.rect.top != titleRow {
+			t.Fatalf("close button row = %d, title row = %d", region.rect.top, titleRow)
+		}
+		app = clickMouse(app, region.rect.left, region.rect.top)
+		if app.modal != noModal || app.activeTab != 1 {
+			t.Fatalf("x: modal = %v, tab = %d", app.modal, app.activeTab)
+		}
+		return
+	}
+	t.Fatal("file select dialog has no close button")
+}
+
 func TestRenderFileRowHighlightsMatches(t *testing.T) {
 	row := renderFileRow("src/app.go", []int{4, 5}, "(+1)", false)
 	if ansi.Strip(row) != "src/app.go (+1)" {

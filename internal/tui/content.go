@@ -381,7 +381,7 @@ func renderCommentHeader(label string, resolved, deletable bool, width int) (str
 	rows := strings.Split(header, "\n")
 	x, y := lipgloss.Width(rows[len(rows)-1])+1, len(rows)-1
 	buttonWidth := lipgloss.Width("☑︎ Resolved")
-	deleteButton := lipgloss.NewStyle().Foreground(lipgloss.Red).Render("x")
+	deleteButton := closeButtonStyle.Render("x")
 	actionsWidth := buttonWidth
 	if deletable {
 		actionsWidth += 1 + lipgloss.Width(deleteButton)
