@@ -30,6 +30,26 @@ func TestMouseClickFooterFinishButtonOpensModal(t *testing.T) {
 	}
 }
 
+func TestMouseClickFooterHelpButtonOpensHelp(t *testing.T) {
+	for _, width := range []int{60, 120} {
+		app := setupAppWithDoc(t, "first\nsecond\n")
+		app.width = width
+		app.height = 24
+		app.recalculateLayout()
+		rect, ok := app.footerHelpRect()
+		if !ok {
+			t.Fatalf("width %d: footer Help button not found", width)
+		}
+		assertRegionContainsRenderedText(t, app, rect, "Help ?")
+
+		app = clickMouse(app, rect.left, rect.top)
+
+		if app.modal != helpModal {
+			t.Fatalf("width %d: modal = %v, want help modal", width, app.modal)
+		}
+	}
+}
+
 func TestQuit_OpensFinishModal(t *testing.T) {
 	app, _ := newFinishTestApp(t, []review.Comment{testComment()})
 

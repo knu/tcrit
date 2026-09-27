@@ -172,6 +172,8 @@ func (r *commentHeaderRegion) translate(x, y int) {
 type renderedScreenLayout struct {
 	footerFinish    mouseRect
 	hasFooterFinish bool
+	footerHelp      mouseRect
+	hasFooterHelp   bool
 	modalRegions    []modalMouseRegion
 }
 
@@ -2180,10 +2182,9 @@ func (m AppModel) renderReviewScreen() (string, renderedScreenLayout) {
 	sections = append(sections, footer)
 	layout := renderedScreenLayout{}
 	if !t.selecting {
-		button := m.renderModalButton(m.finishActionLabel(), "q", true)
-		layout.footerFinish = mouseRect{right: lipgloss.Width(button), top: footerTop, bottom: footerTop + 1}
-		layout.hasFooterFinish = true
+		layout.footerFinish, layout.hasFooterFinish = footerButtonRect(footer, footerTop, m.renderModalButton(m.finishActionLabel(), "q", true))
 	}
+	layout.footerHelp, layout.hasFooterHelp = footerButtonRect(footer, footerTop, m.footerHelpButton())
 
 	full := lipgloss.JoinVertical(lipgloss.Left, sections...)
 
@@ -2340,6 +2341,10 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 	}
 	if rect, ok := m.footerFinishRect(); ok && rect.contains(mouse) {
 		m.openFinishModal()
+		return m, nil
+	}
+	if rect, ok := m.footerHelpRect(); ok && rect.contains(mouse) {
+		m.modal = helpModal
 		return m, nil
 	}
 
@@ -2899,6 +2904,14 @@ func (m *AppModel) footerFinishRect() (mouseRect, bool) {
 	return layout.footerFinish, layout.hasFooterFinish
 }
 
+func (m *AppModel) footerHelpRect() (mouseRect, bool) {
+	if len(m.tabs) == 0 || m.tab().state == nil {
+		return mouseRect{}, false
+	}
+	_, layout := m.renderReviewScreen()
+	return layout.footerHelp, layout.hasFooterHelp
+}
+
 func (m *AppModel) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 	if len(m.tabs) == 0 {
 		return m, nil
@@ -3041,7 +3054,7 @@ func (m AppModel) renderFooter() string {
 	}
 	t := m.tabs[m.activeTab]
 	k := func(key, desc string) string {
-		return footerKeyStyle.Render(key) + " " + footerStyle.Render(desc)
+		return footerKeyStyle.Render(key) + " " + footerDescStyle.Render(desc)
 	}
 
 	var items []string
@@ -3050,7 +3063,6 @@ func (m AppModel) renderFooter() string {
 			k("enter", "comment selection"),
 			k("esc", "cancel"),
 			k("v", "toggle select"),
-			k("?", "help"),
 		}
 	} else {
 		items = []string{
@@ -3063,17 +3075,40 @@ func (m AppModel) renderFooter() string {
 		if len(t.state.Comments) > 0 {
 			items = append(items, k("r", "resolve/unresolve"))
 		}
-		items = append(items, k("?", "help"))
 		if m.multiFile {
 			items = append([]string{
 				k("tab/S-tab", "next/prev tab"),
 				k("n/N", "change/open comment"),
 			}, items...)
 		}
-		items = append([]string{m.renderModalButton(m.finishActionLabel(), "q", true)}, items...)
 	}
+	buttons := []string{m.footerHelpButton()}
+	if !t.selecting {
+		buttons = append([]string{m.renderModalButton(m.finishActionLabel(), "q", true)}, buttons...)
+	}
+	items = append([]string{strings.Join(buttons, "  ")}, items...)
 
-	return footerStyle.Width(m.width).Render(strings.Join(items, "  "))
+	return footerStyle.Width(m.width).Render(strings.Join(items, " · "))
+}
+
+func (m AppModel) footerHelpButton() string {
+	return m.renderModalButton("Help", "?", true)
+}
+
+// footerButtonRect locates a rendered button in the footer, which may wrap
+// onto several rows, and returns its screen rectangle.
+func footerButtonRect(footer string, top int, button string) (mouseRect, bool) {
+	plain := ansi.Strip(button)
+	for y, line := range strings.Split(footer, "\n") {
+		stripped := ansi.Strip(line)
+		i := strings.Index(stripped, plain)
+		if i < 0 {
+			continue
+		}
+		left := lipgloss.Width(stripped[:i])
+		return mouseRect{left: left, right: left + lipgloss.Width(plain), top: top + y, bottom: top + y + 1}, true
+	}
+	return mouseRect{}, false
 }
 
 type helpItem struct {

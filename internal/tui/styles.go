@@ -69,9 +69,15 @@ var (
 	footerStyle = lipgloss.NewStyle().
 			Foreground(subtle)
 
+	// Footer key hints sit on a gray background so they read as keycaps,
+	// unlike the yellow keys of clickable buttons.
 	footerKeyStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.BrightWhite)
+			Foreground(lipgloss.Cyan).
+			Background(lipgloss.BrightBlack)
+
+	footerDescStyle = lipgloss.NewStyle().
+			Foreground(muted)
 
 	helpHeadingStyle = lipgloss.NewStyle().
 				Bold(true).

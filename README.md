@@ -422,7 +422,7 @@ The file selector lists every tab in order when the search field is empty, with 
 - Scroll code with the mouse wheel.  Over an inline or sidebar thread, the wheel focuses it and scrolls its full history; at the thread's limit, scrolling continues through the surrounding pane.
 - Hover over the `+`/`-` gutter to reveal a yellow `>` comment marker, then click to comment on a current or deleted line, or drag to select multiple lines on the same diff side.  Dragging to the top or bottom edge scrolls one line at a time.
 - Click inside a comment text box to focus it and position the cursor, or use the mouse wheel to move through longer comments.
-- Click actions in comment and finish dialogs, including **Close**.  The footer **Approve** / **Finish Review** button opens the finish dialog.
+- Click actions in comment and finish dialogs, including **Close**.  The footer **Approve** / **Finish Review** button opens the finish dialog, and **Help** opens the keyboard help.
 
 ## Scriptable CLI
 
