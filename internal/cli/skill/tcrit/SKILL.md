@@ -42,6 +42,14 @@ For a supplied diff, use `tcrit --diff=changes.diff` or `tcrit --diff changes.di
 
 Choose a wait mechanism before launching the Step 1 command.  Use the tools exposed by the host: a background task with retained output, or a resumable execution handle.  Distinguish a wait timeout from an execution timeout that terminates the process.  A longer execution timeout alone does not ensure that TCrit and its output survive it.  If the host cannot preserve both, ask the user to run TCrit in their terminal and return its finish output instead.
 
+For Codex, prepare a terminal marker immediately before **every** review launch, including retries and later rounds:
+
+1. Run `tcrit terminal prepare` and read its JSON `id` and `marker`.
+2. Display `marker` verbatim on its own line in a user-visible progress message.  Finish edits and other output before this message; then proceed directly to launch.
+3. Add `--terminal-request <id>` to the Step 1 command.  The request expires after two minutes and is consumed once.  A new request is needed after a failed launch or for another round.
+
+The reviewer must have launched Codex through `tcrit codex` or the bundled wrapper, or use a terminal filter that reports markers.  TCrit accepts filter notifications first, then searches only the visible text in registered panes.  If detection fails, follow the launch-failure procedure below; keep the marker visible in a sufficiently wide terminal.  Multiple matches require leaving one terminal displaying the conversation before preparing a fresh marker.  Use the normal launch path for other agents.
+
 Run the Step 1 command; retain its working directory, session ID, and execution handle or output location.  TCrit opens a Herdr tab or tmux pane and closes it after each round.  Without a supported multiplexer, ask the user to run it in their terminal and return the session ID for reading results.
 
 Before waiting, announce in the conversation's language that the review is open and you will wait for submission.  Ask the user to send `hey` after submitting if the wait times out, so you can collect the result.
@@ -64,7 +72,7 @@ Handle the command outcome before continuing:
 
 If the result cannot be recovered, report that limitation.  Silence, elapsed time, and missing saved data are not approval.
 
-If Codex's background server has lost the invoking terminal context, ask the user to resume Codex from their tmux pane or Herdr terminal with `tcrit codex resume`.  The bundled `codex` wrapper also preserves this context when placed before the original Codex in PATH.  A Codex session ID alone does not identify its terminal; do not guess terminal identifiers or relaunch Codex from the agent's shell tool.  After the user resumes the conversation, retry the saved TCrit review by its session ID.
+If Codex has no registered terminal and no notifying filter, ask the user to resume from their intended tmux pane or Herdr terminal with `tcrit codex resume` (or the bundled `codex` wrapper).  The wrapper registers a search candidate without changing Codex arguments or settings.  After they resume, prepare and display a new marker and retry the saved TCrit review by its session ID.  Terminal environment inherited by a daemon may refer to another pane; let TCrit resolve the marker rather than using those values yourself.
 
 Locate feedback using `path`, line range, and `anchor` (the original text).  Treat `drifted: true` line numbers as approximate; focus on `quote` when present.  Outside the finish prompt, `tcrit comments --session <id> --json` lists unresolved comments.  Use the session ID for all comment commands, including supplied-diff reviews, replies, and bulk input.
 
@@ -99,6 +107,8 @@ tcrit comment --session <session-id> --json --file .tmp/replies.json --author 'C
 The `/tcrit-cli` skill documents the JSON format and the other comment commands.  If no thread needs action, proceed to the next round without edits or additional comments.  Only `approved: true` completes the review.
 
 ## Step 5: Start the next round
+
+For Codex, repeat Step 2's marker preparation and display, and append the new `--terminal-request <id>` to the continuation command below.
 
 After an unapproved round submitted with exit status 0, run the command printed in the finish prompt from the original working directory.  `tcrit --session <id>` opens a new TUI from saved comments and round context; it retains the scope and refreshes code or document contents.  It advances past a submitted round, or resumes an interrupted round when explicitly requested by the user in chat.
 

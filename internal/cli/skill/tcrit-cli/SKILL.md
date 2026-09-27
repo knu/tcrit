@@ -167,3 +167,9 @@ tcrit clear --all               # delete every saved review for this directory
 Each round closes its TUI and dedicated pane or tab.  On cancellation or a task switch, stop the specific review and collect the blocking command's result; neither cancellation nor a connection error is approval.  A stopped review keeps comments, replies, resolution status, and round context, but unsaved editor text is not retained.  Stop is also safe when that session is already stopped.
 
 Use `clear` when deletion is requested, or when an approved finish result directs cleanup after its images have been read.  `stop` preserves data; `clear` deletes the session and its attachments and refuses active reviews.  Never clear earlier tasks automatically to start a new one.  Legacy `clear --code`, `clear <file>`, and `comment --clear` select saved reviews through their existing targeting rules; use an explicit session ID when several match.
+
+## Terminal marker requests
+
+For Codex review launches, the interactive `tcrit` skill prepares and displays a fresh marker for each round.  `tcrit terminal prepare` returns JSON with `id`, `marker`, and `expires_at`; pass its ID as `--terminal-request <id>` on `tcrit`, `tcrit review`, or `tcrit plan`.  Requests expire after two minutes and are consumed at destination selection.  Review session IDs and terminal request IDs are separate.
+
+`tcrit terminal notify <id>` is a terminal-filter callback, not an agent-side workaround.  It reads the filter's original tmux/Herdr environment and records the destination before or during review startup.  Duplicate notifications from one pane are accepted; different panes are ambiguous.  Expired or consumed requests fail.  Without a notification, TCrit reads only the visible text in live registered panes.  It never broadens a failed search to all panes or scrollback.

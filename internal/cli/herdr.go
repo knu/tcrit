@@ -7,9 +7,12 @@ import (
 	"os"
 	"os/exec"
 	"time"
+
+	"github.com/knu/tcrit/internal/terminalbinding"
 )
 
 type herdrContext struct {
+	socket    string
 	workspace string
 	tab       string
 	pane      string
@@ -51,7 +54,7 @@ func (c herdrContext) restoreFocus() {
 	if err != nil {
 		return
 	}
-	_ = runCommand(exec.Command(herdrBin, "tab", "focus", c.tab))
+	_ = runCommand(c.command(herdrBin, "tab", "focus", c.tab))
 }
 
 func (c herdrContext) active() bool {
@@ -59,17 +62,18 @@ func (c herdrContext) active() bool {
 }
 
 type herdrLaunch struct {
+	context   herdrContext
 	bin       string
 	tab       string
 	sourceTab string
 }
 
 func (l herdrLaunch) close() {
-	_ = runCommand(exec.Command(l.bin, "tab", "close", l.tab))
+	_ = runCommand(l.context.command(l.bin, "tab", "close", l.tab))
 }
 
 func (l herdrLaunch) restoreFocus() {
-	_ = runCommand(exec.Command(l.bin, "tab", "focus", l.sourceTab))
+	_ = runCommand(l.context.command(l.bin, "tab", "focus", l.sourceTab))
 }
 
 func focusCurrentHerdrTab() {
@@ -188,7 +192,7 @@ func spawnTUIHerdrTab(mode *reviewMode, herdr herdrContext) (herdrLaunch, error)
 			args = append(args, "--env", name+"="+value)
 		}
 	}
-	out, err := commandOutput(exec.Command(herdrBin, args...))
+	out, err := commandOutput(herdr.command(herdrBin, args...))
 	if err != nil {
 		return herdrLaunch{}, fmt.Errorf("failed to create Herdr tab: %w", err)
 	}
@@ -206,7 +210,7 @@ func spawnTUIHerdrTab(mode *reviewMode, herdr herdrContext) (herdrLaunch, error)
 	if err := json.Unmarshal(out, &response); err != nil {
 		return herdrLaunch{}, fmt.Errorf("parsing Herdr tab response: %w", err)
 	}
-	launch := herdrLaunch{bin: herdrBin, tab: response.Result.Tab.TabID, sourceTab: herdr.tab}
+	launch := herdrLaunch{context: herdr, bin: herdrBin, tab: response.Result.Tab.TabID, sourceTab: herdr.tab}
 	if launch.tab == "" {
 		return herdrLaunch{}, fmt.Errorf("missing tab or pane ID in Herdr tab response")
 	}
@@ -216,15 +220,25 @@ func spawnTUIHerdrTab(mode *reviewMode, herdr herdrContext) (herdrLaunch, error)
 		return herdrLaunch{}, fmt.Errorf("missing tab or pane ID in Herdr tab response")
 	}
 
-	if err := runCommand(exec.Command(herdrBin, "pane", "run", response.Result.RootPane.PaneID, "exec "+tuiCmd)); err != nil {
+	if err := runCommand(herdr.command(herdrBin, "pane", "run", response.Result.RootPane.PaneID, "exec "+tuiCmd)); err != nil {
 		launch.close()
 		return herdrLaunch{}, fmt.Errorf("failed to start TUI in Herdr tab: %w", err)
 	}
-	if err := runCommand(exec.Command(herdrBin, "tab", "focus", launch.tab)); err != nil {
+	if err := runCommand(herdr.command(herdrBin, "tab", "focus", launch.tab)); err != nil {
 		launch.close()
 		launch.restoreFocus()
 		return herdrLaunch{}, fmt.Errorf("failed to focus Herdr tab: %w", err)
 	}
 	fmt.Fprintln(os.Stderr, "Opened review in Herdr tab")
 	return launch, nil
+}
+
+func (c herdrContext) command(bin string, args ...string) *exec.Cmd {
+	if c.socket == "" {
+		return exec.Command(bin, args...)
+	}
+	cmd := (terminalbinding.Target{Kind: "herdr", Socket: c.socket}).Command(context.Background(), args...)
+	cmd.Path = bin
+	cmd.Args[0] = bin
+	return cmd
 }

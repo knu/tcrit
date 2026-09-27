@@ -179,12 +179,28 @@ func TestNearestMultiplexerContextChoosesClosestTMUX(t *testing.T) {
 
 func TestSpawnTUIHerdrTab(t *testing.T) {
 	var outputCalls, runCalls [][]string
+	checkServer := func(cmd *exec.Cmd) {
+		t.Helper()
+		if !slices.Contains(cmd.Env, "HERDR_SOCKET_PATH=/correct/server.sock") {
+			t.Fatalf("command %v did not pin the socket", cmd.Args)
+		}
+		for _, e := range cmd.Env {
+			if strings.HasPrefix(e, "HERDR_TAB_ID=") || strings.HasPrefix(e, "HERDR_CONFIG_PATH=") {
+				t.Fatalf("inherited stale Herdr context: %s", e)
+			}
+		}
+	}
+	t.Setenv("HERDR_SOCKET_PATH", "/wrong/server.sock")
+	t.Setenv("HERDR_TAB_ID", "wrong-tab")
+	t.Setenv("HERDR_CONFIG_PATH", "/wrong/config")
 	origOutput, origRun, origLook, origResolve := commandOutput, runCommand, lookPath, resolveExec
 	commandOutput = func(cmd *exec.Cmd) ([]byte, error) {
+		checkServer(cmd)
 		outputCalls = append(outputCalls, cmd.Args)
 		return []byte(`{"result":{"tab":{"tab_id":"w1:t9"},"root_pane":{"pane_id":"w1:p9"}}}`), nil
 	}
 	runCommand = func(cmd *exec.Cmd) error {
+		checkServer(cmd)
 		runCalls = append(runCalls, cmd.Args)
 		return nil
 	}
@@ -197,7 +213,7 @@ func TestSpawnTUIHerdrTab(t *testing.T) {
 
 	launch, err := spawnTUIHerdrTab(
 		&reviewMode{ref: "HEAD", sessionKey: "0123456789ab"},
-		herdrContext{workspace: "w1", tab: "w1:t1", pane: "w1:p1"},
+		herdrContext{socket: "/correct/server.sock", workspace: "w1", tab: "w1:t1", pane: "w1:p1"},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -229,6 +245,8 @@ func TestSpawnTUIHerdrTab(t *testing.T) {
 	if !slices.Equal(runCalls[1][1:], []string{"tab", "focus", "w1:t9"}) {
 		t.Errorf("tab focus call = %v", runCalls[1])
 	}
+	launch.restoreFocus()
+	launch.close()
 }
 
 func TestSpawnTUIHerdrTabClosesTabWhenPaneRunFails(t *testing.T) {

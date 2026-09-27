@@ -13,7 +13,7 @@ import (
 func init() {
 	rootCmd.AddCommand(&cobra.Command{
 		Use:                "codex [args...]",
-		Short:              "Launch Codex with terminal context for reviews through its local daemon",
+		Short:              "Register this terminal for marker lookup and launch Codex unchanged",
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return codexwrapper.Run(args, false)
@@ -57,7 +57,7 @@ func codexWrapperHint(self, path string) string {
 			if first == "" {
 				return ""
 			}
-			return fmt.Sprintf("TCrit provides a Codex wrapper that passes terminal context to shell tools. If this review was launched from Codex, using that wrapper may let TCrit detect your tmux or Herdr session. Currently %q precedes the wrapper %q in PATH; move the wrapper directory earlier. With mise, place github:knu/tcrit before the Codex tool in [tools] and reactivate the shell. Then resume Codex from the intended terminal (or run `tcrit codex resume`).", first, candidate)
+			return fmt.Sprintf("TCrit provides a Codex wrapper that registers the invoking terminal for marker lookup. If this review was launched from Codex, use that wrapper and the TCrit skill to locate your tmux or Herdr pane. Currently %q precedes the wrapper %q in PATH; move the wrapper directory earlier. With mise, place github:knu/tcrit before the Codex tool in [tools] and reactivate the shell. Then resume Codex from the intended terminal (or run `tcrit codex resume`).", first, candidate)
 		}
 		if first == "" {
 			first = candidate

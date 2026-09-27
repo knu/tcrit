@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Codex wrappers register the invoking terminal and preserve all original arguments and environment values.  Remove automatic daemon startup and injected `--remote`, `--cd`, and shell settings, restoring Codex's normal directory, permission, and worktree behavior.
+
+### Added
+
+- One-time terminal markers for Codex reviews.  The skill displays a fresh marker before each round; TCrit searches only the visible text in registered live panes and rejects missing or ambiguous matches.
+- `tcrit terminal prepare`, `tcrit terminal notify <id>`, and `--terminal-request <id>`.  [tfil](https://github.com/knu/tfil) 0.4.0 supports marker detection and notification with `--tcrit-notify`, letting TCrit skip pane text searches.  Requests expire and are consumed once; Herdr operations retain the selected server socket.
+
 ## 0.11.1
 
 ### Added

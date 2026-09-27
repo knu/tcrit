@@ -170,7 +170,11 @@ func runReviewFlow(cfg *config.Config, sess *review.Session, mode *reviewMode) e
 		return err
 	}
 
-	if multiplexer := findMultiplexerContext(); multiplexer != nil {
+	multiplexer, err := reviewTerminalContext()
+	if err != nil {
+		return err
+	}
+	if multiplexer != nil {
 		launch, err := multiplexer.launchReview(mode)
 		if err != nil {
 			return err
@@ -419,6 +423,7 @@ func splitWindowArgs(withSize bool, tuiCmd, pane string) []string {
 type tmuxContext struct {
 	session string
 	pane    string
+	socket  string
 }
 
 type tmuxDetector struct{}
@@ -459,7 +464,7 @@ func (l tmuxLaunch) close()      { _ = runCommand(tmuxCommand(l.bin, l.context, 
 func (tmuxLaunch) restoreFocus() {}
 
 func (c tmuxContext) active() bool {
-	return c.session != "" || c.pane != ""
+	return c.session != "" || c.socket != "" || c.pane != ""
 }
 
 func tmuxProcessContexts() map[int]tmuxContext {
@@ -514,6 +519,9 @@ func tmuxPIDContexts(ctx context.Context, tmuxBin string, args ...string) map[in
 }
 
 func tmuxCommand(tmuxBin string, tmux tmuxContext, args ...string) *exec.Cmd {
+	if tmux.socket != "" {
+		return exec.Command(tmuxBin, append([]string{"-S", tmux.socket}, args...)...)
+	}
 	cmd := exec.Command(tmuxBin, args...)
 	if os.Getenv("TMUX") == "" && tmux.session != "" {
 		for _, entry := range os.Environ() {
