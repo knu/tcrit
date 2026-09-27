@@ -492,7 +492,7 @@ func (m AppModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		kill, _ := killDirection(msg, m.modalTextarea.KeyMap)
-		if !m.isTextModal() || m.modalFocus != 0 || (!kill && msg.String() != "ctrl+y" && msg.String() != "alt+y") {
+		if !m.isTextModal() || m.modalFocus != 0 || (!kill && msg.String() != "ctrl+y" && msg.String() != "alt+y" && msg.String() != "alt+w") {
 			m.killRing.interrupt()
 		}
 		return m.handleKeyPress(msg)
@@ -1668,6 +1668,14 @@ func (m *AppModel) handleTextModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "alt+s":
 		if m.canSuggest() {
 			m.insertSuggestion()
+		}
+		return m, nil
+	case "alt+w":
+		// Experimental: copy the current kill ring entry to the system
+		// clipboard through OSC 52 without disturbing a yank sequence.
+		if text := m.killRing.current(); m.modalFocus == 0 && text != "" {
+			m.clipboardStatus = "Copied to system clipboard: " + ansi.Truncate(strings.ReplaceAll(text, "\n", "⏎"), 40, "…")
+			return m, tea.SetClipboard(text)
 		}
 		return m, nil
 	}

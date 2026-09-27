@@ -23,6 +23,18 @@ type yankState struct {
 	index       int
 }
 
+// current returns the entry a yank would insert: the one selected by an
+// ongoing yank-pop sequence, otherwise the newest.
+func (r *killRing) current() string {
+	if len(r.entries) == 0 {
+		return ""
+	}
+	if r.yank != nil {
+		return r.entries[r.yank.index]
+	}
+	return r.entries[0]
+}
+
 func (r *killRing) interrupt() {
 	r.killing = false
 	r.yank = nil

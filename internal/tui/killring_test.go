@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -219,5 +220,40 @@ func TestKillRingIgnoresCharacterDeletionAndEmptyYank(t *testing.T) {
 	editorMessage(&m, tea.KeyPressMsg{Code: tea.KeyBackspace})
 	if m.modalTextarea.Value() != "" || len(m.killRing.entries) != 0 {
 		t.Fatal("ordinary deletion should not add a kill")
+	}
+}
+
+func TestAltWCopiesCurrentKillRingEntryToSystemClipboard(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\n")
+	app.width, app.height = 100, 30
+	app.recalculateLayout()
+	app = pressKey(app, tea.KeyEnter)
+	if app.modal != commentModal {
+		t.Fatalf("modal = %v, want comment modal", app.modal)
+	}
+	app, _ = updateApp(app, tea.PasteMsg{Content: "older"})
+	app, _ = updateApp(app, tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
+	app, _ = updateApp(app, tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl})
+	app, _ = updateApp(app, tea.PasteMsg{Content: "newer"})
+	app, _ = updateApp(app, tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
+	app, _ = updateApp(app, tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl})
+
+	app, cmd := updateApp(app, tea.KeyPressMsg{Code: 'w', Mod: tea.ModAlt})
+	if cmd == nil || fmt.Sprint(cmd()) != "newer" {
+		t.Fatalf("alt+w did not set the clipboard to the newest kill; cmd = %v", cmd)
+	}
+	if !strings.Contains(app.clipboardStatus, "newer") {
+		t.Fatalf("status = %q", app.clipboardStatus)
+	}
+
+	app, _ = updateApp(app, tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
+	app, _ = updateApp(app, tea.KeyPressMsg{Code: 'y', Mod: tea.ModAlt})
+	app, cmd = updateApp(app, tea.KeyPressMsg{Code: 'w', Mod: tea.ModAlt})
+	if cmd == nil || fmt.Sprint(cmd()) != "older" {
+		t.Fatalf("alt+w after yank-pop did not copy the rotated entry; cmd = %v", cmd)
+	}
+	app, _ = updateApp(app, tea.KeyPressMsg{Code: 'y', Mod: tea.ModAlt})
+	if got := app.modalTextarea.Value(); got != "newer" {
+		t.Fatalf("alt+w broke the yank sequence; value = %q", got)
 	}
 }
