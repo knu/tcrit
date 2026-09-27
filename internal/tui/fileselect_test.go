@@ -90,14 +90,14 @@ func TestFileSelectFlow(t *testing.T) {
 	if !strings.Contains(rendered, "Open file") || !strings.Contains(rendered, "lib/util_test.go") {
 		t.Fatalf("modal not rendered: %q", rendered)
 	}
-	filtered := modalFrameRows(rendered)
+	filtered := modalFrameRows(app, rendered)
 	if height := filtered[1] - filtered[0] + 1; height != len(app.tabs)+10 {
 		t.Fatalf("dialog height = %d for %d tabs", height, len(app.tabs))
 	}
 	app, _ = updateApp(app, tea.KeyPressMsg{Code: tea.KeyBackspace})
 	app, _ = updateApp(app, tea.KeyPressMsg{Code: tea.KeyBackspace})
 	app, _ = updateApp(app, tea.KeyPressMsg{Code: tea.KeyBackspace})
-	if unfiltered := modalFrameRows(ansi.Strip(app.View().Content)); unfiltered != filtered {
+	if unfiltered := modalFrameRows(app, ansi.Strip(app.View().Content)); unfiltered != filtered {
 		t.Fatalf("dialog frame moved from %v to %v while typing", filtered, unfiltered)
 	}
 	for _, r := range "utl" {
@@ -173,14 +173,17 @@ func TestRenderFileRowHighlightsMatches(t *testing.T) {
 	}
 }
 
-// modalFrameRows returns the first and last rows of the thick dialog frame.
-func modalFrameRows(rendered string) [2]int {
+// modalFrameRows returns the first and last rows of the dialog frame,
+// identified by full-width border rows of the dialog's width so the pane
+// frames behind the dialog do not match.
+func modalFrameRows(app AppModel, rendered string) [2]int {
+	inner := strings.Repeat("─", app.modalWidth()-2)
 	rows := [2]int{-1, -1}
 	for y, line := range strings.Split(rendered, "\n") {
-		if strings.Contains(line, "┏") {
+		if strings.Contains(line, "╭"+inner+"╮") {
 			rows[0] = y
 		}
-		if strings.Contains(line, "┗") {
+		if strings.Contains(line, "╰"+inner+"╯") {
 			rows[1] = y
 		}
 	}

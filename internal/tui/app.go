@@ -1784,21 +1784,18 @@ func (m *AppModel) recalculateLayout() {
 	if os.Getenv("TMUX") != "" {
 		tmuxPadding = 1
 	}
-	frameBorderHeight := 0
-	frameBorderWidth := 0
-	if m.multiFile {
-		frameBorderHeight = 1 // bottom border
-		frameBorderWidth = 2  // left + right borders
-	}
-	mainHeight := max(0, m.height-headerHeight-tabBarHeight-footerHeight-frameBorderHeight-tmuxPadding)
+	// The tab bar serves as the top border of the content pane; one row
+	// remains for the bottom border.
+	mainHeight := max(0, m.height-headerHeight-tabBarHeight-footerHeight-1-tmuxPadding)
 
-	commentWidth := m.commentPanelWidth()
-	contentWidth := m.width - commentWidth - frameBorderWidth
+	// The comment pane (or the gutter when comments are hidden) takes
+	// commentPanelWidth columns; the content pane's borders take two.
+	contentWidth := m.width - m.commentPanelWidth() - 2
 
 	m.contentViewport.SetWidth(contentWidth)
 	m.contentViewport.SetHeight(mainHeight)
-	m.commentViewport.SetWidth(commentWidth - 3)      // -3 for left border + padding + margin
-	m.commentViewport.SetHeight(max(0, mainHeight-1)) // -1 for the "Comments (N)" header line
+	m.commentViewport.SetWidth(max(0, m.commentPanelWidth()-2-paneHorizontalPadding*2))
+	m.commentViewport.SetHeight(mainHeight)
 
 	modalWidth := m.width * 2 / 3
 	if modalWidth < 50 {
@@ -2160,71 +2157,25 @@ func (m AppModel) View() tea.View {
 func (m AppModel) renderReviewScreen() (string, renderedScreenLayout) {
 	t := m.tab()
 
-	commentCount := unresolvedCommentCount(t.state.Comments)
 	header := m.renderHeader()
-
-	// Tab bar (multi-file mode)
-	var tabBar string
-	if m.multiFile {
-		tabBar = m.renderTabBar()
-	}
-
-	// Content pane
-	commentWidth := m.commentPanelWidth()
-
-	panelHeight := m.contentViewport.Height()
 
 	contentBox := lipgloss.NewStyle().
 		Width(m.contentViewport.Width()).
-		Height(panelHeight).
+		Height(m.contentViewport.Height()).
 		Render(m.contentViewport.View())
-
-	// Comment sidebar (left border to separate from content)
-	sidebarBorderColor := commentBorderColor
-	sidebarBorder := lipgloss.Border{Left: "│"}
-	if m.focused == commentPane {
-		sidebarBorderColor = commentFocusedBorderColor
-		sidebarBorder.Left = lipgloss.ThickBorder().Left
-	}
-	commentHeader := lipgloss.NewStyle().Bold(true).Foreground(accent).Render(fmt.Sprintf("Comments (%d)", commentCount))
-	commentBox := lipgloss.NewStyle().
-		Border(sidebarBorder, false, false, false, true).
-		BorderForeground(sidebarBorderColor).
-		Width(commentWidth).
-		Height(panelHeight).
-		PaddingLeft(1).
-		Render(commentHeader + "\n" + m.commentViewport.View())
 	if m.hideComments {
-		contentBox = lipgloss.NewStyle().Width(m.contentViewport.Width()).Height(panelHeight).Render(m.contentViewport.View())
-		commentBox = m.renderCommentGutter()
+		contentBox = lipgloss.JoinHorizontal(lipgloss.Top, contentBox, m.renderCommentGutter())
 	}
+	contentPane := renderPane(m.renderTabBar(), contentBox, lipgloss.RoundedBorder(), lipgloss.NewStyle().Foreground(accent))
 
-	mainRow := lipgloss.JoinHorizontal(lipgloss.Top, contentBox, commentBox)
-
-	// Wrap content in a frame: │ left/right borders, ╰───╯ bottom.
-	// The tab bar serves as the top border.
-	if m.multiFile {
-		borderColor := lipgloss.NewStyle().Foreground(accent)
-		lines := strings.Split(mainRow, "\n")
-		var framed strings.Builder
-		left := borderColor.Render("│")
-		right := borderColor.Render("│")
-		for _, line := range lines {
-			framed.WriteString(left + line + right + "\n")
-		}
-		bottom := borderColor.Render("╰" + strings.Repeat("─", m.width-2) + "╯")
-		framed.WriteString(bottom)
-		mainRow = framed.String()
+	mainRow := contentPane
+	if !m.hideComments {
+		mainRow = lipgloss.JoinHorizontal(lipgloss.Top, contentPane, m.renderCommentPane())
 	}
 
 	footer := m.renderFooter()
 
-	var sections []string
-	sections = append(sections, header)
-	if tabBar != "" {
-		sections = append(sections, tabBar)
-	}
-	sections = append(sections, mainRow)
+	sections := []string{header, mainRow}
 	footerTop := lipgloss.Height(lipgloss.JoinVertical(lipgloss.Left, sections...))
 	sections = append(sections, footer)
 	layout := renderedScreenLayout{}
@@ -2310,7 +2261,8 @@ func (m *AppModel) visibleTabWindow(labels []tabLabel) (int, int) {
 	for _, label := range labels {
 		totalWidth += label.width
 	}
-	if totalWidth <= m.width {
+	paneWidth := m.contentPaneWidth()
+	if totalWidth <= paneWidth {
 		return 0, len(labels)
 	}
 
@@ -2325,7 +2277,7 @@ func (m *AppModel) visibleTabWindow(labels []tabLabel) (int, int) {
 		rightWidth = indicatorWidth(fmt.Sprintf("%d more ↦", len(labels)-m.activeTab-1))
 	}
 
-	available := m.width - leftWidth - rightWidth
+	available := paneWidth - leftWidth - rightWidth
 	start, end := m.activeTab, m.activeTab+1
 	used := labels[m.activeTab].width
 	for {
@@ -2392,7 +2344,13 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 	}
 
 	headerHeight := m.headerHeight()
-	if m.multiFile && mouse.Y >= headerHeight && mouse.Y < headerHeight+m.tabBarHeight() {
+	if mouse.Y >= headerHeight && mouse.Y < headerHeight+m.tabBarHeight() {
+		if left := m.contentPaneWidth(); !m.hideComments && mouse.X >= left && mouse.X < left+m.commentPaneTabWidth() {
+			m.focused = commentPane
+			m.updateCommentSidebar()
+			m.rebuildContent()
+			return m, nil
+		}
 		labels := m.tabLabels()
 		for i := range labels {
 			labels[i].rendered = m.renderTab(labels, i, i == 0)
@@ -2482,23 +2440,22 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 		}
 		wasFocused := m.focused == commentPane
 		m.focused = commentPane
-		if mouse.Y > top {
-			if i, ok := m.sidebarMouseTarget(mouse.Y - top - 1 + m.commentViewport.YOffset()); ok {
-				t := m.tab()
-				point := tea.Mouse{X: mouse.X - left - 2, Y: mouse.Y - top - 1 + m.commentViewport.YOffset()}
-				openThread := wasFocused && t.sidebarCursor == i
-				m.selectSidebarItem(i)
-				if !t.selecting {
-					for _, region := range m.sidebarActions {
-						if m.handleCommentHeaderClick(region, point) {
-							return m, nil
-						}
+		row := mouse.Y - top + m.commentViewport.YOffset()
+		if i, ok := m.sidebarMouseTarget(row); ok {
+			t := m.tab()
+			point := tea.Mouse{X: mouse.X - left - paneHorizontalPadding, Y: row}
+			openThread := wasFocused && t.sidebarCursor == i
+			m.selectSidebarItem(i)
+			if !t.selecting {
+				for _, region := range m.sidebarActions {
+					if m.handleCommentHeaderClick(region, point) {
+						return m, nil
 					}
 				}
-				if openThread {
-					m.openCommentThread(t.sidebarItems[i].id)
-					return m, nil
-				}
+			}
+			if openThread {
+				m.openCommentThread(t.sidebarItems[i].id)
+				return m, nil
 			}
 		}
 		m.updateCommentSidebar()
@@ -2805,9 +2762,91 @@ func (m AppModel) renderCommentGutter() string {
 	return strings.Join(rows, "\n")
 }
 
+// paneHorizontalPadding is the space between a pane's side borders and its body.
+const paneHorizontalPadding = 1
+
+// contentPaneWidth returns the total width of the tabbed content pane,
+// including its borders and the gutter shown while comments are hidden.
+func (m AppModel) contentPaneWidth() int {
+	if m.hideComments {
+		return m.width
+	}
+	return m.width - m.commentPanelWidth()
+}
+
+// renderPane frames body under a tab row: the tab row's bottom edge serves as
+// the top border, and body is wrapped by side borders and a bottom border.
+func renderPane(tabRow, body string, border lipgloss.Border, style lipgloss.Style) string {
+	left, right := style.Render(border.Left), style.Render(border.Right)
+	var b strings.Builder
+	b.WriteString(tabRow)
+	b.WriteByte('\n')
+	for _, line := range strings.Split(body, "\n") {
+		b.WriteString(left + line + right + "\n")
+	}
+	width := lipgloss.Width(tabRow)
+	b.WriteString(style.Render(border.BottomLeft + strings.Repeat(border.Bottom, max(0, width-2)) + border.BottomRight))
+	return b.String()
+}
+
+// commentPaneTabLabel returns the label of the comment pane's tab, truncated
+// to fit the pane.
+func (m AppModel) commentPaneTabLabel() string {
+	label := fmt.Sprintf("Comments (%d)", unresolvedCommentCount(m.tab().state.Comments))
+	return ansi.Truncate(label, max(0, m.commentPanelWidth()-activeTabStyle.GetHorizontalFrameSize()), "…")
+}
+
+// commentPaneTabWidth returns the rendered width of the comment pane's tab.
+func (m AppModel) commentPaneTabWidth() int {
+	return lipgloss.Width(m.commentPaneTabLabel()) + activeTabStyle.GetHorizontalFrameSize()
+}
+
+// renderCommentPane renders the comment sidebar as a pane with a single
+// "Comments (N)" tab, matching the height of the content pane.  Focus
+// brightens the border color, as with inline comment boxes.
+func (m AppModel) renderCommentPane() string {
+	width := m.commentPanelWidth()
+	border := lipgloss.RoundedBorder()
+	line := lipgloss.NewStyle().Foreground(commentBorderColor)
+	if m.focused == commentPane {
+		line = line.Foreground(commentFocusedBorderColor)
+	}
+	label := activeTabStyle.UnsetBorderStyle().Render(m.commentPaneTabLabel())
+	inner := lipgloss.Width(label)
+	// The tab's bottom-right corner joins the pane's top border, so it is a
+	// sharp corner even on the rounded pane.
+	tab := line.Render(border.TopLeft+strings.Repeat(border.Top, inner)+border.TopRight) + "\n" +
+		line.Render(border.Left) + label + line.Render(border.Right) + "\n" +
+		line.Render(border.Left+strings.Repeat(" ", inner)+lipgloss.NormalBorder().BottomLeft)
+	tabRow := fillTabRow(tab, width, border, line)
+	body := lipgloss.NewStyle().
+		Width(width-2).
+		Height(m.commentViewport.Height()).
+		Padding(0, paneHorizontalPadding).
+		Render(m.commentViewport.View())
+	return renderPane(tabRow, body, border, line)
+}
+
+// fillTabRow extends a rendered tab row to width with the pane's top border,
+// ending in the top-right corner.
+func fillTabRow(row string, width int, border lipgloss.Border, style lipgloss.Style) string {
+	gap := width - lipgloss.Width(row)
+	if gap <= 0 {
+		return row
+	}
+	blank := strings.Repeat(" ", gap)
+	filler := style.Render(
+		blank + "\n" + blank + "\n" + strings.Repeat(border.Top, gap-1) + border.TopRight)
+	return lipgloss.JoinHorizontal(lipgloss.Top, row, filler)
+}
+
 func (m *AppModel) commentBounds() (left, top, right, bottom int) {
 	_, top, left, bottom = m.contentBounds()
-	return left, top, left + m.commentPanelWidth(), bottom
+	if m.hideComments {
+		return left, top, left + m.commentPanelWidth(), bottom
+	}
+	left = m.contentPaneWidth() + 1
+	return left, top, m.width - 1, bottom
 }
 
 func (m *AppModel) sidebarMouseTarget(y int) (int, bool) {
@@ -2841,18 +2880,12 @@ func (m *AppModel) headerHeight() int {
 }
 
 func (m *AppModel) tabBarHeight() int {
-	if !m.multiFile {
-		return 0
-	}
 	return lipgloss.Height(m.renderTabBar())
 }
 
 func (m *AppModel) contentBounds() (left, top, right, bottom int) {
-	left = 0
+	left = 1 // inside the pane's left border
 	top = m.headerHeight() + m.tabBarHeight()
-	if m.multiFile {
-		left = 1
-	}
 	right = left + m.contentViewport.Width()
 	bottom = top + m.contentViewport.Height()
 	return left, top, right, bottom
@@ -2885,7 +2918,7 @@ func (m *AppModel) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) 
 	}
 	left, top, right, bottom := m.commentBounds()
 	if !m.hideComments && mouse.X >= left && mouse.X < right && mouse.Y >= top && mouse.Y < bottom {
-		if i, ok := m.sidebarMouseTarget(mouse.Y - top - 1 + m.commentViewport.YOffset()); ok && mouse.Y > top {
+		if i, ok := m.sidebarMouseTarget(mouse.Y - top + m.commentViewport.YOffset()); ok {
 			m.focused = commentPane
 			m.tab().sidebarCursor = i
 			m.updateCommentSidebar()
@@ -2971,22 +3004,8 @@ func (m *AppModel) renderTabBar() string {
 		labels[i].width = lipgloss.Width(rendered)
 	}
 
-	// addFiller extends the tab bottom border to the full width,
-	// connecting to the outer frame's right border.
 	addFiller := func(row string) string {
-		rowW := lipgloss.Width(row)
-		if rowW >= m.width {
-			return row
-		}
-		// 3 lines matching tab height: empty top, empty middle, ───╮ bottom
-		gap := m.width - rowW
-		topFill := strings.Repeat(" ", gap)
-		midFill := strings.Repeat(" ", gap)
-		botFill := strings.Repeat("─", gap-1) + "╮"
-		filler := lipgloss.NewStyle().Foreground(accent).Render(
-			topFill + "\n" + midFill + "\n" + botFill,
-		)
-		return lipgloss.JoinHorizontal(lipgloss.Top, row, filler)
+		return fillTabRow(row, m.contentPaneWidth(), lipgloss.RoundedBorder(), lipgloss.NewStyle().Foreground(accent))
 	}
 
 	start, end := m.visibleTabWindow(labels)

@@ -351,7 +351,7 @@ func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused boo
 	boxStyle := inlineCommentBox
 
 	if focused {
-		boxStyle = boxStyle.Border(lipgloss.ThickBorder()).BorderForeground(commentFocusedBorderColor)
+		boxStyle = boxStyle.BorderForeground(commentFocusedBorderColor)
 	}
 	box := boxStyle.Width(maxWidth).Render(boxContent.String())
 

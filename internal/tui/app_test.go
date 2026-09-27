@@ -291,17 +291,30 @@ func TestReviewFrameFitsTerminalWithSidebar(t *testing.T) {
 				app.rebuildContent()
 				rows := strings.Split(ansi.Strip(app.View().Content), "\n")
 				_, top, contentRight, bottom := app.contentBounds()
+				paneRight := app.contentPaneWidth() - 1
 				for y := top; y < bottom; y++ {
 					if lipgloss.Width(rows[y]) != width || ansi.Cut(rows[y], width-1, width) != "│" {
 						t.Fatalf("row %d: width=%d, want %d with right border at last column; %q", y, lipgloss.Width(rows[y]), width, rows[y])
 					}
+					if ansi.Cut(rows[y], paneRight, paneRight+1) != "│" {
+						t.Fatalf("row %d: want content pane border at column %d; %q", y, paneRight, rows[y])
+					}
 				}
 				left, _, right, _ := app.commentBounds()
-				if left != contentRight || right != width-1 {
-					t.Fatalf("sidebar bounds [%d,%d), want [%d,%d)", left, right, contentRight, width-1)
+				if hidden {
+					if left != contentRight || right != paneRight {
+						t.Fatalf("gutter bounds [%d,%d), want [%d,%d)", left, right, contentRight, paneRight)
+					}
+					return
 				}
-				if !hidden && ansi.Cut(rows[top], left, left+1) != "│" {
-					t.Fatal("sidebar mouse bounds should start at its rendered divider")
+				if left != paneRight+2 || right != width-1 {
+					t.Fatalf("sidebar bounds [%d,%d), want [%d,%d) inside the comment pane", left, right, paneRight+2, width-1)
+				}
+				if got := ansi.Cut(rows[top-1], paneRight+1, width); !strings.HasPrefix(got, "│") || !strings.HasSuffix(got, "╮") {
+					t.Fatalf("comment pane tab row = %q, want its tab joined to the top border", got)
+				}
+				if got := ansi.Cut(rows[bottom], paneRight-1, width); got != "─╯╰"+strings.Repeat("─", width-paneRight-3)+"╯" {
+					t.Fatalf("bottom row = %q, want both panes closed side by side", got)
 				}
 			})
 		}

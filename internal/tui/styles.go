@@ -85,7 +85,7 @@ var (
 				Foreground(lipgloss.BrightWhite)
 
 	modalStyle = lipgloss.NewStyle().
-			Border(lipgloss.ThickBorder()).
+			Border(lipgloss.RoundedBorder()).
 			BorderForeground(accent).
 			Padding(1, 2).
 			Width(60)

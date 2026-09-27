@@ -45,7 +45,7 @@ func TestMouseClickSelectsVisibleOverflowTab(t *testing.T) {
 	fifth := app.tabs[1]
 	fifth.path = "fifth.go"
 	app.tabs = append(app.tabs, fourth, fifth)
-	app.width = 50
+	app.width = 70 // a 50-column content pane beside the 20-column comment pane
 	app.activeTab = 2
 
 	labels := app.tabLabels()
@@ -675,7 +675,7 @@ func TestMouseClickHeaderDelete(t *testing.T) {
 						if location != "inline" {
 							region = app.sidebarActions
 							left, top, _, _ = app.commentBounds()
-							left, top = left+2, top+1
+							left += paneHorizontalPadding
 							right = app.commentViewport.Width()
 						}
 						button := region[0].delete
@@ -830,5 +830,31 @@ func TestMouseClickSelectsWrappedSidebarCommentFromRenderedRows(t *testing.T) {
 	if app.tab().sidebarCursor != 1 || app.tab().cursorLine != 3 {
 		t.Fatalf("sidebar = %d, line = %d; want wrapped-row map to select second comment",
 			app.tab().sidebarCursor, app.tab().cursorLine)
+	}
+}
+
+func TestMouseClickCommentPaneTabFocusesSidebar(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\n")
+	app.width, app.height = 80, 24
+	app.recalculateLayout()
+	app.rebuildContent()
+
+	tabLeft, y := app.contentPaneWidth(), app.headerHeight()+1
+	app = clickMouse(app, tabLeft+app.commentPaneTabWidth(), y)
+	if app.focused != contentPane {
+		t.Fatalf("focus = %v, want content pane after clicking beside the comment tab", app.focused)
+	}
+
+	app = clickMouse(app, tabLeft+2, y)
+
+	if app.focused != commentPane {
+		t.Fatalf("focus = %v, want comment pane after clicking its tab", app.focused)
+	}
+	rows := strings.Split(app.View().Content, "\n")
+	if tabRow := ansi.Strip(rows[y]); !strings.Contains(tabRow, "│ Comments (0) │") {
+		t.Fatalf("tab row = %q, want the comment pane tab", tabRow)
+	}
+	if got := ansi.Cut(rows[y], tabLeft, tabLeft+1); !strings.Contains(got, "\x1b[94m") {
+		t.Fatalf("focused comment pane border = %q, want bright blue", got)
 	}
 }

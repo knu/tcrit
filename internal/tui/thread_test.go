@@ -220,7 +220,7 @@ func TestResolvedThreadsExpandOnFocus(t *testing.T) {
 				x, y, key := left+gutterWidth+2, top+2, 'j'
 				if surface == "sidebar" {
 					left, top, _, _ = app.commentBounds()
-					x, y, key = left+2, top+1, 's'
+					x, y, key = left+2, top, 's'
 				}
 				switch action {
 				case "keyboard":
