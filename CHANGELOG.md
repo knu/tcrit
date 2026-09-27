@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.13.0
+
+### Added
+
+- **File tree sidebar** — the sidebar now has **Files** and **Comments** tabs and opens on **Files**, a directory tree of the reviewed files with foldable folders.  `t` switches views and focuses the sidebar; clicking a tab does the same.  The tree cursor follows the active file tab and vice versa, unfolding folders as needed.  Each level indents by one column, and rows too long for the sidebar scroll sideways with `→` / `l`, returning with `←` / `h` before those keys fold or climb.
+- **Help button** — the footer shows a **Help ?** button next to **Approve** / **Finish Review**; clicking it opens the keyboard help.
+- **Dialog dismissal** — every dialog has a red `x` at the right edge of its title row, and clicking outside a dialog dismisses it.  Both act like `esc`, so unsaved comment edits still ask before discarding.
+
+### Changed
+
+- `r` resolves or reopens the focused thread without moving.  The new `R` resolves it, or leaves an already resolved thread as is, and advances to the next unresolved thread as `r` used to.  Clicking **☐ Resolve** stays in place.
+- The comment sidebar is a separate pane to the right of the tabbed source pane, with the same height and its own tabs, instead of a divider inside the frame.  Hiding comments with `H` keeps the narrow gutter inside the source pane.  The sidebar is at least 26 columns wide.
+- Focused comment boxes, the sidebar, and dialogs keep rounded borders; focus is shown by a brighter border color instead of thick borders.
+- Footer key hints use bold cyan keys on a gray background with normal-colored descriptions, separated by middle dots, so they are readable and distinct from the clickable buttons.
+
 ## 0.12.0
 
 ### Changed
