@@ -42,6 +42,31 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse "refs/tags/$TAG^{commit}")" = "$TESTED_SHA"
 
+      - name: Extract release notes from CHANGELOG.md
+        env:
+          TAG: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          mkdir -p .tmp
+          awk -v heading="## ${TAG#v}" '
+            /^## / {
+              selected = ($0 == heading)
+              if (selected) matches++
+              next
+            }
+            selected {
+              notes = notes $0 "\n"
+              if ($0 ~ /[^[:space:]#]/) content = 1
+            }
+            END {
+              if (matches != 1 || !content) {
+                print "expected one nonempty CHANGELOG.md section: " heading > "/dev/stderr"
+                exit 1
+              }
+              printf "%s", notes
+            }
+          ' CHANGELOG.md > .tmp/release-notes.md
+
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
@@ -50,6 +75,6 @@ jobs:
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
         with:
           version: "~> v2"
-          args: release --clean
+          args: release --clean --release-notes .tmp/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

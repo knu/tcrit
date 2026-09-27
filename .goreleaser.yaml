@@ -28,9 +28,4 @@ archives:
   - formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
 
-changelog:
-  sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
+# The release workflow supplies the matching CHANGELOG.md section with --release-notes.
