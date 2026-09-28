@@ -2011,9 +2011,9 @@ func (m *AppModel) updateCommentSidebar() {
 		if it.side == "old" {
 			lineInfo += " (deleted)"
 		}
-		lineInfo = commentLineStyle.Render(lineInfo)
+		lineInfo = commentLineStyle.Foreground(lipgloss.Cyan).Render(lineInfo)
 		if len(it.replies) > 0 {
-			lineInfo += commentLineStyle.Render(fmt.Sprintf(" · %d replies", len(it.replies)))
+			lineInfo += commentLineStyle.Render(" · ") + inlineLabelComment.Bold(false).Render(fmt.Sprintf("%d replies", len(it.replies)))
 		}
 		cursorCol := lipgloss.NewStyle().Width(2)
 		prefix := cursorCol.Render("")

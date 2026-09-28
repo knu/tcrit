@@ -337,10 +337,10 @@ func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused boo
 
 	var boxContent strings.Builder
 	label := inlineLabelComment.Render("comment")
-	lineRef := commentLineStyle.Render(lineLabel)
+	lineRef := commentLineStyle.Foreground(lipgloss.Cyan).Render(lineLabel)
 	header := fmt.Sprintf("%s %s", label, lineRef)
 	if len(ann.replies) > 0 {
-		header += commentLineStyle.Render(fmt.Sprintf(" · %d replies", len(ann.replies)))
+		header += commentLineStyle.Render(" · ") + inlineLabelComment.Bold(false).Render(fmt.Sprintf("%d replies", len(ann.replies)))
 	}
 	header, button := renderCommentHeader(header, ann.resolved, m.canDeleteComment(ann.id), max(1, maxWidth-4))
 	boxContent.WriteString(header)
@@ -378,7 +378,7 @@ func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused boo
 // the arrows go first; the rest moves to its own row only when it does not
 // fit either.
 func renderCommentHeader(label string, resolved, deletable bool, width int) (string, commentHeaderRegion) {
-	resolve := inlineLabelComment.Render("☐ Resolve")
+	resolve := inlineLabelComment.Foreground(lipgloss.Yellow).Render("☐ Resolve")
 	if resolved {
 		resolve = resolvedBadge.Render("☑︎ Resolved")
 	}
