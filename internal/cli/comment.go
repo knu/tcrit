@@ -38,7 +38,13 @@ Usage forms:
   tcrit comment [opts] <path>:<line[-end]> <body>    Line-level comment
   tcrit comment [opts] --reply-to <id> [--resolve] [--path <p>] <body>
   tcrit comment [opts] --json [--file <path>|-]      Bulk import (JSON array)
-  tcrit comment [opts] --clear                       Remove the review`,
+  tcrit comment [opts] --clear                       Remove the review
+
+Bulk import entries are objects with "body" (required) and any of "file"
+or "path", "line" (42 or "56-58"), "end_line", "author", "scope" ("review"
+or "file"), "reply_to" (a comment ID), and "resolve" (bool).  For example:
+  [{"file": "main.go", "line": 42, "body": "Unreachable."},
+   {"reply_to": "c_152b0a", "body": "Removed the old names."}]`,
 	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.LoadCurrent()
