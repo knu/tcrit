@@ -109,6 +109,7 @@ func rankFileMatches(paths []string, query string) []fileMatch {
 
 func (m *AppModel) openFileSelect() tea.Cmd {
 	input := textinput.New()
+	input.SetStyles(textinput.DefaultStyles(terminalIsDark))
 	input.SetVirtualCursor(false)
 	input.Prompt = "> "
 	input.Placeholder = "file name"

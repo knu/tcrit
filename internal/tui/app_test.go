@@ -1238,4 +1238,48 @@ func TestDimRenderedDimsBackgrounds(t *testing.T) {
 			t.Fatalf("cell %d bg = %v, want dimmed dark gray", i, style.Bg)
 		}
 	}
+
+	initAdaptiveStyles(false)
+	t.Cleanup(func() { initAdaptiveStyles(true) })
+	if light := dimRendered(bar, 14, 1); !strings.Contains(light, "170;170;170") || !strings.Contains(light, "221;221;221") {
+		t.Fatalf("light dimming = %q, want pale gray text on a paler background", light)
+	}
+}
+
+func TestLightBackgroundDarkensTextOnTerminalBackground(t *testing.T) {
+	initAdaptiveStyles(false)
+	t.Cleanup(func() { initAdaptiveStyles(true) })
+	app := setupAppWithDoc(t, "first\nsecond\n")
+	app.width, app.height, app.multiFile = 100, 24, true
+	app.recalculateLayout()
+	for name, style := range map[string]lipgloss.Style{
+		"active tab": activeTabStyle, "help description": helpDescriptionStyle,
+		"context box": contextBoxStyle, "self author": app.commentAuthorStyle(app.author),
+	} {
+		if got := style.GetForeground(); color.RGBAModel.Convert(got) != color.RGBAModel.Convert(lipgloss.Black) {
+			t.Errorf("%s foreground = %v on a light background, want black", name, got)
+		}
+	}
+	for name, style := range map[string]lipgloss.Style{
+		"inactive tab": inactiveTabStyle, "footer description": footerDescStyle, "comment": commentStyle,
+	} {
+		if got := style.GetForeground(); color.RGBAModel.Convert(got) != color.RGBAModel.Convert(lipgloss.BrightBlack) {
+			t.Errorf("%s foreground = %v on a light background, want bright black", name, got)
+		}
+	}
+	if tab := app.renderTab(app.tabLabels(), 0, true); !strings.Contains(tab, "\x1b[1;30m") && !strings.Contains(tab, "\x1b[30m") && !strings.Contains(tab, ";30m") {
+		t.Errorf("active tab = %q, want a black label", tab)
+	}
+	initAdaptiveStyles(true)
+	if got := activeTabStyle.GetForeground(); color.RGBAModel.Convert(got) != color.RGBAModel.Convert(lipgloss.BrightWhite) {
+		t.Errorf("active tab foreground = %v on a dark background, want bright white", got)
+	}
+
+	app, _ = updateApp(app, tea.BackgroundColorMsg{Color: color.White})
+	if got := app.modalTextarea.Styles().Focused.CursorLine.GetBackground(); color.RGBAModel.Convert(got) != color.RGBAModel.Convert(lipgloss.Color("255")) {
+		t.Errorf("textarea cursor line background = %v on a light background, want near white", got)
+	}
+	if terminalIsDark {
+		t.Error("terminalIsDark is still true after a light background probe")
+	}
 }

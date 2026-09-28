@@ -11,7 +11,7 @@ import (
 
 func (m *AppModel) commentAuthorStyle(author string) lipgloss.Style {
 	if author == m.author {
-		return lipgloss.NewStyle().Foreground(lipgloss.BrightWhite)
+		return lipgloss.NewStyle().Foreground(textPrimary)
 	}
 	colors := [...]color.Color{lipgloss.Cyan, lipgloss.Green, lipgloss.Color("208"), lipgloss.Magenta, lipgloss.Yellow}
 	if m.authorColors == nil {
@@ -45,6 +45,16 @@ var (
 	success = lipgloss.Green
 	warning = lipgloss.Yellow
 	muted   = lipgloss.White // normal white (dimmer than BrightWhite)
+
+	// textPrimary and textSecondary are the foregrounds of emphasized and
+	// regular text on the terminal background.  initAdaptiveStyles swaps
+	// them for dark colors on a light background.
+	textPrimary   color.Color = lipgloss.BrightWhite
+	textSecondary color.Color = muted
+
+	// terminalIsDark records the background probe's answer for inputs that
+	// are created later and pick their default styles from it.
+	terminalIsDark = true
 
 	commentBorderColor        = lipgloss.Blue
 	commentFocusedBorderColor = lipgloss.BrightBlue
@@ -355,6 +365,22 @@ var (
 // initAdaptiveStyles updates background-dependent styles based on terminal background.
 func initAdaptiveStyles(hasDarkBG bool) {
 	ld := lipgloss.LightDark(hasDarkBG)
+	terminalIsDark = hasDarkBG
+	textPrimary = ld(lipgloss.Black, lipgloss.BrightWhite)
+	textSecondary = ld(lipgloss.BrightBlack, muted)
+	commentStyle = commentStyle.Foreground(textSecondary)
+	footerDescStyle = footerDescStyle.Foreground(textSecondary)
+	helpDescriptionStyle = helpDescriptionStyle.Foreground(textPrimary)
+	inlineCommentBox = inlineCommentBox.Foreground(textSecondary)
+	mdBoldStyle = mdBoldStyle.Foreground(textPrimary)
+	mdItalicStyle = mdItalicStyle.Foreground(textSecondary)
+	mdTableCellStyle = mdTableCellStyle.Foreground(textSecondary)
+	modalBtnLabel = modalBtnLabel.Foreground(textPrimary)
+	modalBtnNormalLabel = modalBtnLabel.PaddingLeft(1)
+	inactiveTabStyle = inactiveTabStyle.Foreground(textSecondary)
+	activeTabStyle = activeTabStyle.Foreground(textPrimary)
+	tabCountDelimiter = tabCountDelimiter.Foreground(textSecondary)
+	contextBoxStyle = contextBoxStyle.Foreground(textPrimary)
 	modalBtnFocusedLabel = lipgloss.NewStyle().
 		Foreground(ld(lipgloss.BrightWhite, lipgloss.Black)).
 		Background(ld(lipgloss.Black, lipgloss.White)).

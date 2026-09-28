@@ -399,6 +399,7 @@ func (m AppModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.BackgroundColorMsg:
 		initAdaptiveStyles(msg.IsDark())
+		m.modalTextarea.SetStyles(textarea.DefaultStyles(msg.IsDark()))
 		if len(m.tabs) > 0 && m.tab().state != nil {
 			m.rebuildContent()
 			m.updateCommentSidebar()
@@ -3927,8 +3928,11 @@ func dimRendered(s string, w, h int) string {
 	canvas.Compose(lipgloss.NewLayer(s))
 
 	// Backgrounds are dimmed too, so text on a gray background stays
-	// distinguishable from the dimmed foreground.
-	dim, dimBg := lipgloss.Color("#555555"), lipgloss.Color("#2a2a2a")
+	// distinguishable from the dimmed foreground.  Light terminals dim
+	// toward white so the dialog still stands out from a pale page.
+	ld := lipgloss.LightDark(terminalIsDark)
+	dim := ld(lipgloss.Color("#aaaaaa"), lipgloss.Color("#555555"))
+	dimBg := ld(lipgloss.Color("#dddddd"), lipgloss.Color("#2a2a2a"))
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			cell := canvas.CellAt(x, y)

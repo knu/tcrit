@@ -184,9 +184,9 @@ func (m *AppModel) treeRowText(i int) string {
 		}
 		label += "/"
 	}
-	style := lipgloss.NewStyle().Foreground(muted)
+	style := lipgloss.NewStyle().Foreground(textSecondary)
 	if !row.isDir && row.tabIndex == m.activeTab {
-		style = style.Bold(true).Foreground(lipgloss.BrightWhite)
+		style = style.Bold(true).Foreground(textPrimary)
 	}
 	text := strings.Repeat(" ", row.depth*treeIndent) + style.Render(icon+label)
 	if !row.isDir {

@@ -91,6 +91,7 @@ func (m *AppModel) navigateSource(location sourceLocation) tea.Cmd {
 
 func (m *AppModel) openGotoLine() tea.Cmd {
 	m.lineInput = textinput.New()
+	m.lineInput.SetStyles(textinput.DefaultStyles(terminalIsDark))
 	m.lineInput.SetVirtualCursor(false)
 	m.lineInput.Prompt = "Line: "
 	m.lineInput.Placeholder = strconv.Itoa(max(1, m.tab().cursorLine))
