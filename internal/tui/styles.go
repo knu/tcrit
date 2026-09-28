@@ -59,6 +59,11 @@ var (
 			Background(lipgloss.Red).
 			Padding(0, 1)
 
+	headerPathStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.BrightWhite).
+			Background(lipgloss.Color("240"))
+
 	commentStyle = lipgloss.NewStyle().
 			Foreground(muted).
 			PaddingLeft(1)

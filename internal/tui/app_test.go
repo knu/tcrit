@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"image/color"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/knu/tcrit/internal/document"
@@ -75,13 +77,59 @@ func TestRenderHeaderShowsCodeReviewScope(t *testing.T) {
 	}
 }
 
+func TestRenderHeaderPathBackground(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\n")
+	app.filePath = "path/to/file"
+	app.width = 80
+	header := app.renderHeader()
+	if !strings.Contains(ansi.Strip(header), "path/to/file L0/3 · 0 comments") {
+		t.Fatalf("path and status should retain their order: %q", header)
+	}
+	var styles []uv.Style
+	var pen uv.Style
+	parser := ansi.NewParser()
+	parser.SetHandler(ansi.Handler{
+		Print: func(r rune) { styles = append(styles, pen) },
+		HandleCsi: func(cmd ansi.Cmd, params ansi.Params) {
+			if cmd == 'm' {
+				uv.ReadStyle(params, &pen)
+			}
+		},
+	})
+	for i := range len(header) {
+		parser.Advance(header[i])
+	}
+	for _, part := range []struct {
+		text string
+		fg   color.Color
+	}{
+		{"path/to/file", lipgloss.BrightWhite},
+		{"L0/3", lipgloss.Cyan},
+		{"0 comments", lipgloss.Blue},
+	} {
+		start := strings.Index(ansi.Strip(header), part.text)
+		if start < 0 {
+			t.Fatalf("header missing %q: %q", part.text, header)
+		}
+		start = len([]rune(ansi.Strip(header)[:start]))
+		for _, style := range styles[start : start+len(part.text)] {
+			if style.Fg == nil || style.Bg == nil ||
+				color.RGBAModel.Convert(style.Fg) != color.RGBAModel.Convert(part.fg) ||
+				color.RGBAModel.Convert(style.Bg) != (color.RGBA{R: 88, G: 88, B: 88, A: 255}) {
+				t.Fatalf("wrong colors in %q: %+v", part.text, style)
+			}
+		}
+	}
+}
+
 func TestRenderHeaderStaysOnOneLineWithLongPath(t *testing.T) {
 	tests := []struct {
 		name  string
 		setup func(*AppModel)
 		want  string
 	}{
-		{name: "document", want: "0 comments  L0/3"},
+		{name: "document", want: "L0/3 · 0 comments"},
+		{name: "deleted", setup: func(app *AppModel) { app.tabs[0].cursorSide = "old" }, want: "L0 (deleted) · 0 comments"},
 		{name: "selection", setup: func(app *AppModel) { app.tabs[0].selecting = true }, want: "VISUAL  L0-0"},
 		{name: "loading", setup: func(app *AppModel) { app.tabs[0].doc = nil }, want: "0 comments"},
 	}

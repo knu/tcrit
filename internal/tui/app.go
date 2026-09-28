@@ -2142,20 +2142,23 @@ func (m AppModel) renderHeader() string {
 		}
 		suffix = fmt.Sprintf("  %s L%d-%d%s", selLabel, start, end, deleted)
 	} else if t.doc != nil {
+		var position string
 		if t.cursorSide == "old" {
-			suffix = fmt.Sprintf("  %d comments  L%d (deleted)", commentCount, t.cursorLine)
+			position = fmt.Sprintf("L%d (deleted)", t.cursorLine)
 		} else {
-			suffix = fmt.Sprintf("  %d comments  L%d/%d", commentCount, t.cursorLine, t.doc.LineCount())
+			position = fmt.Sprintf("L%d/%d", t.cursorLine, t.doc.LineCount())
 		}
+		suffix = " " + headerPathStyle.Foreground(lipgloss.Cyan).Render(position)
+		suffix += " · " + headerPathStyle.Foreground(inlineLabelComment.GetForeground()).Render(fmt.Sprintf("%d comments", commentCount))
 	} else {
-		suffix = fmt.Sprintf("  %d comments", commentCount)
+		suffix = " · " + headerPathStyle.Foreground(inlineLabelComment.GetForeground()).Render(fmt.Sprintf("%d comments", commentCount))
 	}
 	headerWidth := max(0, m.width-headerStyle.GetHorizontalFrameSize())
 	if m.width > 0 {
 		pathWidth := max(0, headerWidth-ansi.StringWidth(prefix)-ansi.StringWidth(suffix))
 		displayPath = truncateLeftToWidth(displayPath, pathWidth)
 	}
-	headerContent := prefix + displayPath + suffix
+	headerContent := prefix + inlineBackground(headerPathStyle, headerPathStyle.Render(displayPath+suffix))
 	if m.width > 0 {
 		headerContent = ansi.Truncate(headerContent, headerWidth, "")
 	}
