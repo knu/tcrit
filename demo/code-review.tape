@@ -1,76 +1,91 @@
-# Crit — full code review lifecycle with Claude Code
+# TCrit — staged-change review loop with Claude Code
+#
+# Run `make` in this directory; it runs setup.sh (builds tcrit and prepares
+# the fixture under $DEMO_DIR), records with VHS, and strips blank frames.
 
-Output demo/code-review.gif
+Output code-review.gif
 
-Require crit
 Require tmux
 Require claude
+Require vhs
 
 Set Shell "zsh"
-Set FontSize 14
+Set FontSize 18
+Set FontFamily "Monaspace Argon NF"
 Set Width 1800
 Set Height 900
 Set Theme "Catppuccin Mocha"
 Set Padding 20
+Set Framerate 24
 Set TypingSpeed 50ms
 Set WindowBar Colorful
 
 Hide
 
-# Start a tmux session
-Type "tmux new -s demo"
+# Detach from the recording host's multiplexer, use the demo build and an
+# isolated review state, and start a private tmux server for the recording.
+Type "unset TMUX TMUX_PANE; unset -m 'HERDR_*'; export TAPE_DIR=$PWD DEMO_DIR=${DEMO_DIR:-${${TMPDIR:-/tmp}%/}/tcrit-demo}; export XDG_STATE_HOME=$DEMO_DIR/state PATH=$DEMO_DIR/bin:$PATH; cd $DEMO_DIR/work; clear"
 Enter
-Sleep 1.5s
+Type "tmux -L demo -f $TAPE_DIR/tmux.conf new -s demo"
+Enter
+Sleep 1s
 
-# Launch Claude Code inside tmux
-Type "claude --dangerously-skip-permissions"
+# Launch Claude Code in auto mode; set DEMO_PERMISSION_MODE=bypassPermissions
+# if a permission prompt stalls the recording.  On a fresh setup Claude Code
+# asks to trust the folder, and Bypass Permissions mode asks for acceptance;
+# both default to "No, exit".  Down + Enter picks "Yes" for each dialog that
+# appears and is harmless on an empty prompt.
+Type "claude --permission-mode ${DEMO_PERMISSION_MODE:-auto}"
 Enter
-Sleep 5s
+Wait+Screen@60s /Yes, I (trust|accept)|auto mode on|bypass permissions on/
+Sleep 1s
+Down
+Sleep 500ms
+Enter
+Sleep 1s
+Wait+Screen@60s /Yes, I (trust|accept)|auto mode on|bypass permissions on/
+Sleep 1s
+Down
+Sleep 500ms
+Enter
+Wait+Screen@60s /auto mode on|bypass permissions on/
+Sleep 1s
 
 Show
 
-# Call the code review skill
-Type@40ms "/crit:code-review"
+# Ask for a review; the tcrit skill opens the TUI in a tmux split pane.
+Type@40ms "Review the staged changes with TCrit."
 Sleep 500ms
 Enter
-Sleep 8s
+Wait+Screen@300s /Comments \(\d+\)/
+Sleep 2s
 
-# --- Focus is now in the crit TUI split pane (right side) ---
-Sleep 1s
-
-
-# Switch to next file tab
+# Switch to internal/config/config.go, move to the line that discards the
+# parse error, and comment on it.
 Tab
-Sleep 1.5s
-
-# Scroll through the second file
-Type@80ms "jjjjjj"
 Sleep 800ms
-
-# Jump to next change in this file
-Type "n"
+Type@60ms "jjjjjjjjjjjjjjjjjjjj"
 Sleep 800ms
-
-# Visual select a block
-Type "v"
-Sleep 400ms
-Type@100ms "jjjj"
-Sleep 800ms
-
-# Add a comment on the selection
 Enter
-Sleep 1s
-
-Type@40ms "Consider extracting this into a helper function."
 Sleep 800ms
-
-# Save the comment
+Type@40ms "Don't drop the parse error. Return it so main can report a bad GREET_COUNT."
+Sleep 800ms
 Ctrl+S
 Sleep 1.5s
 
-# Quit crit — focus returns to Claude Code pane
+# Finish the round: the TUI closes and Claude Code addresses the comment.
 Type "q"
+Sleep 800ms
+Type "y"
 
-# --- Claude is now reading comments and making changes ---
-# Wait for Claude to process comments and start editing files
-Sleep 15s
+# The next round opens with Claude's reply focused in the thread.
+Wait+Screen@600s /↳ /
+Sleep 3s
+
+# Resolve the thread and approve.
+Type "R"
+Sleep 1.5s
+Type "q"
+Sleep 800ms
+Type "y"
+Sleep 8s
