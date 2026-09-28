@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"image/color"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"charm.land/lipgloss/v2"
 )
 
@@ -53,16 +55,18 @@ var (
 			Background(accent).
 			Padding(0, 1)
 
-	pausedStatusBar = lipgloss.NewStyle().
-			Bold(true).
+	reviewBarStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.BrightWhite).
-			Background(lipgloss.Red).
-			Padding(0, 1)
+			Background(lipgloss.Red)
 
 	headerPathStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.BrightWhite).
-			Background(lipgloss.Color("240"))
+			Background(accent)
+
+	// headerCountStyle shows the comment count in plain white, which reads
+	// on the magenta header where blue does not.
+	headerCountStyle = headerPathStyle.Bold(false).Foreground(lipgloss.White)
 
 	commentStyle = lipgloss.NewStyle().
 			Foreground(muted).
@@ -389,11 +393,21 @@ func initAdaptiveStyles(hasDarkBG bool) {
 		Background(ld(lipgloss.Color("#E8A8A8"), lipgloss.Color("#682828")))
 }
 
-// bgToAnsi converts a lipgloss color to a raw ANSI truecolor background escape sequence.
-// Returns "" if the color is nil or zero-alpha.
+// bgToAnsi converts a lipgloss color to a raw ANSI background escape
+// sequence.  Palette colors keep their index so the terminal theme applies,
+// and other colors become truecolor.  Returns "" if the color is nil or
+// zero-alpha.
 func bgToAnsi(c color.Color) string {
-	if c == nil {
+	switch c := c.(type) {
+	case nil:
 		return ""
+	case ansi.BasicColor:
+		if c < 8 {
+			return fmt.Sprintf("\033[%dm", 40+int(c))
+		}
+		return fmt.Sprintf("\033[%dm", 92+int(c))
+	case ansi.IndexedColor:
+		return fmt.Sprintf("\033[48;5;%dm", int(c))
 	}
 	r, g, b, a := c.RGBA()
 	if a == 0 {

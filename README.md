@@ -26,7 +26,7 @@
 - **Deleted-line comments** — removed lines, including lines in fully deleted files, can be selected and commented on from the keyboard or gutter.
 - **Mouse-first TUI controls** — click file tabs, code lines, comment threads, sidebar items, dialog actions, and the review-finish button; use the wheel to scroll code and drag the gutter to select line ranges.  Each thread header ends with a right-aligned button group: **☐ Resolve** / **☑︎ Resolved** toggles its resolution (including file comments), **↑** / **↓** move to the previous or next thread like `[` / `]`, and eligible comments add a red **x** to request deletion.  The buttons line up across threads: the toggle keeps one width in both states, and the **x** slot stays blank where deletion is not allowed.  Every dialog has a red **x** at the right edge of its title row, and clicking outside a dialog dismisses it like `esc`.
 - **File tree sidebar** — the sidebar opens on a **Files** tab: a directory tree of the reviewed files with foldable folders; `t` switches between it and the **Comments** tab.  The tree cursor follows the active file tab and vice versa, unfolding folders as needed.  Each level indents by one column so deep paths stay narrow, and long rows scroll sideways under the cursor.
-- **Compact file tab paths** — tabs always include abbreviated directories, such as `i/t/app.go` or `.g/w/ci.yml`.  Each directory keeps its prefix through the first Unicode letter or number; shortened components appear in italics, and directories without a letter or number stay intact.  Filenames remain complete and are underlined when the file has unresolved comments.  The file tree shows the full directory names even when abbreviated tabs coincide.  On a shared gray background, the header shows the path in bright white, the line position in cyan, and the comment count in blue (`path/to/file L6/10 · 1 comments`).
+- **Compact file tab paths** — tabs always include abbreviated directories, such as `i/t/app.go` or `.g/w/ci.yml`.  Each directory keeps its prefix through the first Unicode letter or number; shortened components appear in italics, and directories without a letter or number stay intact.  Filenames remain complete and are underlined when the file has unresolved comments.  The file tree shows the full directory names even when abbreviated tabs coincide.  The header line shows the path in bright white, the line position in cyan, and the comment count in white (`path/to/file L6/10 · 1 comment`).
 - **Fuzzy file switching** — `alt+p` opens a file selector with a search field: candidates are matched fuzzily with basename matches first, `↑` / `↓` choose, and `enter` switches tabs.  `/` is reserved for in-source search.
 - **Combined change and comment navigation** — `n` / `N` visit change hunks and unresolved comments in display order across files, from either pane.  File comments and separate threads on the same line are included; resolved comments are skipped even when unfolded.
 - **Versioned plan reviews** — `tcrit plan` saves immutable revisions and carries comment threads forward as the plan changes.
@@ -287,7 +287,7 @@ The selected scope stays fixed for the session.  To inspect another comparison, 
 
 1. An agent (or you) runs `tcrit review --code` — the TUI opens in a Herdr tab or tmux split and the command blocks
 2. Navigate between files and leave inline comments on the changes
-3. Press `q` or click the footer button — with unresolved comments the button is **Finish Review**, without any it is **Approve**
+3. Press `q` or click **Submit** in the top bar — the finish dialog offers **Finish Review** with unresolved comments and **Approve** without any
 4. On finish, the blocked command prints all comment threads and replies, including resolved threads on approval, with instructions on stdout and `approved: true|false` on stderr
 5. The agent edits the files, replies with `tcrit comment --reply-to`, and runs the printed `tcrit --session <id>` to start the next round; a new TUI restores the comments and remaps their anchors onto the updated contents
 6. Resolve comments with `r` and approve to end the loop
@@ -428,7 +428,7 @@ The file selector lists every tab in order when the search field is empty, with 
 - Scroll code with the mouse wheel.  Over an inline or sidebar thread, the wheel focuses it and scrolls its full history; at the thread's limit, scrolling continues through the surrounding pane.
 - Hover over the `+`/`-` gutter to reveal a yellow `>` comment marker, then click to comment on a current or deleted line, or drag to select multiple lines on the same diff side.  Dragging to the top or bottom edge scrolls one line at a time.
 - Click inside a comment text box to focus it and position the cursor, or use the mouse wheel to move through longer comments.
-- Click actions in comment and finish dialogs, including **Close**.  The footer **Approve** / **Finish Review** button opens the finish dialog, and **Help** opens the keyboard help.
+- Click actions in comment and finish dialogs, including **Close**.  The **Submit** button in the top bar opens the finish dialog, and the footer **Help** button opens the keyboard help.
 
 ## Scriptable CLI
 

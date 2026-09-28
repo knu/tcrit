@@ -101,7 +101,7 @@ type AppModel struct {
 	patch    *gitpkg.Patch
 	source   *gitpkg.ReviewSource
 
-	detached bool
+	host string // multiplexer hosting an agent-launched review, if any
 
 	contentViewport   viewport.Model
 	commentViewport   viewport.Model
@@ -178,8 +178,8 @@ func (r *commentHeaderRegion) translate(x, y int) {
 }
 
 type renderedScreenLayout struct {
-	footerFinish    mouseRect
-	hasFooterFinish bool
+	finishButton    mouseRect
+	hasFinishButton bool
 	footerHelp      mouseRect
 	hasFooterHelp   bool
 	modalRegions    []modalMouseRegion
@@ -239,7 +239,7 @@ func NewApp(filePath string, cfg AppConfig) AppModel {
 		author:          cfg.Author,
 		authorColors:    make(map[string]int),
 		finishCh:        cfg.FinishCh,
-		detached:        os.Getenv("TCRIT_DETACHED") == "1",
+		host:            os.Getenv("TCRIT_HOST"),
 		contentViewport: viewport.New(),
 		commentViewport: viewport.New(),
 		fileTree:        newFileTree(),
@@ -312,7 +312,7 @@ func NewCodeReviewApp(files []gitpkg.FileChange, ref string, cfg AppConfig) AppM
 		staged:          cfg.Staged,
 		patch:           cfg.Patch,
 		source:          cfg.Source,
-		detached:        os.Getenv("TCRIT_DETACHED") == "1",
+		host:            os.Getenv("TCRIT_HOST"),
 		contentViewport: viewport.New(),
 		commentViewport: viewport.New(),
 		fileTree:        newFileTree(),
@@ -1836,17 +1836,15 @@ func (m *AppModel) handleDeleteConfirmModal(msg tea.KeyPressMsg) (tea.Model, tea
 func (m *AppModel) recalculateLayout() {
 	headerHeight := m.headerHeight()
 	tabBarHeight := m.tabBarHeight()
-	footerHeight := 1
+	footerHeight := 0
 	if len(m.tabs) > 0 && m.tab().state != nil {
-		footerHeight = lipgloss.Height(m.renderFooter())
-	}
-	tmuxPadding := 0
-	if os.Getenv("TMUX") != "" {
-		tmuxPadding = 1
+		if footer := m.renderFooter(); footer != "" {
+			footerHeight = lipgloss.Height(footer)
+		}
 	}
 	// The tab bar serves as the top border of the content pane; one row
 	// remains for the bottom border.
-	mainHeight := max(0, m.height-headerHeight-tabBarHeight-footerHeight-1-tmuxPadding)
+	mainHeight := max(0, m.height-headerHeight-tabBarHeight-footerHeight-1)
 
 	// The comment pane (or the gutter when comments are hidden) takes
 	// commentPanelWidth columns; the content pane's borders take two.
@@ -2015,7 +2013,7 @@ func (m *AppModel) updateCommentSidebar() {
 		}
 		lineInfo = commentLineStyle.Foreground(lipgloss.Cyan).Render(lineInfo)
 		if len(it.replies) > 0 {
-			lineInfo += commentLineStyle.Render(" · ") + inlineLabelComment.Bold(false).Render(fmt.Sprintf("%d replies", len(it.replies)))
+			lineInfo += commentLineStyle.Render(" · ") + inlineLabelComment.Bold(false).Render(countNoun(len(it.replies), "reply", "replies"))
 		}
 		cursorCol := lipgloss.NewStyle().Width(2)
 		prefix := cursorCol.Render("")
@@ -2124,16 +2122,7 @@ func (m AppModel) renderHeader() string {
 		displayPath = m.filePath
 	}
 
-	prefix := " TCrit: "
-	if m.ignoreWhitespace {
-		prefix += "[Whitespace ignored] "
-	}
-	if m.hideComments {
-		prefix += "[Comments hidden: H] "
-	}
-	if scope := m.reviewScopeLabel(); scope != "" {
-		prefix += "[" + scope + "] "
-	}
+	prefix := " "
 	var suffix string
 	if t.selecting {
 		start, end := m.selectionRange()
@@ -2151,9 +2140,9 @@ func (m AppModel) renderHeader() string {
 			position = fmt.Sprintf("L%d/%d", t.cursorLine, t.doc.LineCount())
 		}
 		suffix = " " + headerPathStyle.Foreground(lipgloss.Cyan).Render(position)
-		suffix += " · " + headerPathStyle.Foreground(inlineLabelComment.GetForeground()).Render(fmt.Sprintf("%d comments", commentCount))
+		suffix += " · " + headerCountStyle.Render(countNoun(commentCount, "comment", "comments"))
 	} else {
-		suffix = " · " + headerPathStyle.Foreground(inlineLabelComment.GetForeground()).Render(fmt.Sprintf("%d comments", commentCount))
+		suffix = " · " + headerCountStyle.Render(countNoun(commentCount, "comment", "comments"))
 	}
 	headerWidth := max(0, m.width-headerStyle.GetHorizontalFrameSize())
 	if m.width > 0 {
@@ -2164,12 +2153,78 @@ func (m AppModel) renderHeader() string {
 	if m.width > 0 {
 		headerContent = ansi.Truncate(headerContent, headerWidth, "")
 	}
-	if !m.detached {
-		return headerStyle.Width(m.width).Render(headerContent)
+	return m.renderReviewBar() + "\n" + headerStyle.Width(m.width).Render(headerContent)
+}
+
+// renderReviewBar renders the top bar: what is under review, the review-wide
+// toggles, and a right-aligned Submit button.  The parts are styled one by
+// one so the bar's background resumes after each embedded style.
+func (m AppModel) renderReviewBar() string {
+	scope, subject := m.reviewSubject()
+	if m.host != "" {
+		subject += " on " + m.host
 	}
-	pausedBanner := pausedStatusBar.Width(m.width).Render(
-		" AI agent is paused — review the document, then press q to submit")
-	return pausedBanner + "\n" + headerStyle.Width(m.width).Render(headerContent)
+	subject += "."
+	if m.ignoreWhitespace {
+		subject += "  [Whitespace ignored]"
+	}
+	if m.hideComments {
+		subject += "  [Comments hidden: H]"
+	}
+	text := reviewBarStyle.Bold(true).Render(" TCrit") + reviewBarStyle.Render(": review the ")
+	if style, ok := scopeWordStyle(scope); ok {
+		text += style.Render(scope) + reviewBarStyle.Render(" ")
+	}
+	text += reviewBarStyle.Render(subject)
+	button := m.submitButton()
+	if m.width <= 0 {
+		return text + reviewBarStyle.Render(" ") + button + reviewBarStyle.Render(" ")
+	}
+	available := m.width - lipgloss.Width(button) - 1
+	if available < 0 {
+		return ansi.Truncate(text, m.width, "")
+	}
+	if lipgloss.Width(text) > available {
+		text = ansi.Truncate(text, available-1, "") + reviewBarStyle.Render("…")
+	}
+	gap := available - lipgloss.Width(text)
+	return text + reviewBarStyle.Render(strings.Repeat(" ", gap)) + button + reviewBarStyle.Render(" ")
+}
+
+// submitButton renders the button that opens the finish dialog.
+func (m AppModel) submitButton() string {
+	return renderBarButton("Submit", "q")
+}
+
+// scopeWordStyle styles the scope word in the top bar: white on the
+// inline-change background of the matching diff side, which follows the
+// terminal's light or dark theme.  Other scopes have no word.
+func scopeWordStyle(scope string) (lipgloss.Style, bool) {
+	switch scope {
+	case "staged":
+		return diffAddedTextBg.Foreground(lipgloss.BrightWhite), true
+	case "unstaged":
+		return diffDeletedTextBg.Foreground(lipgloss.BrightWhite), true
+	}
+	return lipgloss.Style{}, false
+}
+
+// reviewSubject names what the review covers, for the top bar.  The scope
+// is "staged" or "unstaged" when the review is limited to one of them and
+// empty otherwise.
+func (m AppModel) reviewSubject() (scope, subject string) {
+	if !m.multiFile {
+		return "", "document"
+	}
+	if m.source != nil {
+		scope = m.source.Scope
+	} else if m.staged {
+		scope = "staged"
+	}
+	if _, ok := scopeWordStyle(scope); !ok {
+		scope = ""
+	}
+	return scope, "changes"
 }
 
 func (m AppModel) View() tea.View {
@@ -2243,12 +2298,14 @@ func (m AppModel) renderReviewScreen() (string, renderedScreenLayout) {
 
 	sections := []string{header, mainRow}
 	footerTop := lipgloss.Height(lipgloss.JoinVertical(lipgloss.Left, sections...))
-	sections = append(sections, footer)
+	if footer != "" {
+		sections = append(sections, footer)
+	}
 	layout := renderedScreenLayout{}
 	if !t.selecting {
-		layout.footerFinish, layout.hasFooterFinish = footerButtonRect(footer, footerTop, m.renderModalButton(m.finishActionLabel(), "q", true))
+		layout.finishButton, layout.hasFinishButton = buttonRect(header, 0, m.submitButton())
 	}
-	layout.footerHelp, layout.hasFooterHelp = footerButtonRect(footer, footerTop, m.footerHelpButton())
+	layout.footerHelp, layout.hasFooterHelp = buttonRect(footer, footerTop, m.footerHelpButton())
 
 	full := lipgloss.JoinVertical(lipgloss.Left, sections...)
 
@@ -2419,7 +2476,7 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 			return m, m.navigateSource(location)
 		}
 	}
-	if rect, ok := m.footerFinishRect(); ok && rect.contains(mouse) {
+	if rect, ok := m.finishButtonRect(); ok && rect.contains(mouse) {
 		m.openFinishModal()
 		return m, nil
 	}
@@ -3038,12 +3095,14 @@ func (m *AppModel) contentBounds() (left, top, right, bottom int) {
 	return left, top, right, bottom
 }
 
-func (m *AppModel) footerFinishRect() (mouseRect, bool) {
+// finishButtonRect returns the screen rectangle of the Submit button in the
+// top bar.
+func (m *AppModel) finishButtonRect() (mouseRect, bool) {
 	if len(m.tabs) == 0 || m.tab().state == nil || m.tab().selecting {
 		return mouseRect{}, false
 	}
 	_, layout := m.renderReviewScreen()
-	return layout.footerFinish, layout.hasFooterFinish
+	return layout.finishButton, layout.hasFinishButton
 }
 
 func (m *AppModel) footerHelpRect() (mouseRect, bool) {
@@ -3198,9 +3257,18 @@ func (m *AppModel) renderTabBar() string {
 	return addFiller(row)
 }
 
+// footerMinHeight is the terminal height above which the footer's key hints
+// are shown; shorter terminals keep every row for the review itself.
+const footerMinHeight = 22
+
+// renderFooter renders the key hints and the Help button, or "" when the
+// terminal is too short for them.
 func (m AppModel) renderFooter() string {
 	if m.locationError != "" {
 		return footerStyle.Width(m.width).Render(m.locationError)
+	}
+	if m.height < footerMinHeight {
+		return ""
 	}
 	t := m.tabs[m.activeTab]
 	k := func(key, desc string) string {
@@ -3233,24 +3301,20 @@ func (m AppModel) renderFooter() string {
 			}, items...)
 		}
 	}
-	buttons := []string{m.footerHelpButton()}
-	if !t.selecting {
-		buttons = append([]string{m.renderModalButton(m.finishActionLabel(), "q", true)}, buttons...)
-	}
-	items = append([]string{strings.Join(buttons, "  ")}, items...)
+	items = append([]string{m.footerHelpButton()}, items...)
 
 	return footerStyle.Width(m.width).Render(strings.Join(items, " · "))
 }
 
 func (m AppModel) footerHelpButton() string {
-	return m.renderModalButton("Help", "?", true)
+	return renderBarButton("Help", "?")
 }
 
-// footerButtonRect locates a rendered button in the footer, which may wrap
-// onto several rows, and returns its screen rectangle.
-func footerButtonRect(footer string, top int, button string) (mouseRect, bool) {
+// buttonRect locates a rendered button in a block that starts at screen row
+// top and may span several rows, and returns its screen rectangle.
+func buttonRect(block string, top int, button string) (mouseRect, bool) {
 	plain := ansi.Strip(button)
-	for y, line := range strings.Split(footer, "\n") {
+	for y, line := range strings.Split(block, "\n") {
 		stripped := ansi.Strip(line)
 		i := strings.Index(stripped, plain)
 		if i < 0 {
@@ -3339,13 +3403,22 @@ func (m AppModel) renderHelp(innerWidth int) string {
 }
 
 func (m AppModel) renderModalButton(label, hint string, focused bool) string {
-	labelStyle := modalBtnNormalLabel
-	keyStyle := modalBtnNormalKey
 	if focused {
-		labelStyle = modalBtnFocusedLabel
-		keyStyle = modalBtnFocusedKey
+		return renderButton(label, hint, modalBtnFocusedLabel, modalBtnFocusedKey)
 	}
+	return renderButton(label, hint, modalBtnNormalLabel, modalBtnNormalKey)
+}
 
+// renderBarButton renders a button for the banner or footer.  Its label is
+// bold so it stands out from the surrounding key hints.
+func renderBarButton(label, hint string) string {
+	return renderButton(label, hint, modalBtnFocusedLabel.Bold(true), modalBtnFocusedKey)
+}
+
+func renderButton(label, hint string, labelStyle, keyStyle lipgloss.Style) string {
+	if hint == "" {
+		return labelStyle.Render(label + " ")
+	}
 	keys := strings.Split(hint, " / ")
 	var renderedHint strings.Builder
 	for i, key := range keys {
@@ -3540,7 +3613,7 @@ func (m AppModel) renderContextPreview(side string, start, end, maxWidth, maxLin
 		}
 	}
 	if maxLines > 0 && len(lines) > maxLines {
-		lines = append(lines[:maxLines-1], footerStyle.Render(fmt.Sprintf("  ... +%d more lines", len(lines)-maxLines+1)))
+		lines = append(lines[:maxLines-1], footerStyle.Render("  ... +"+countNoun(len(lines)-maxLines+1, "more line", "more lines")))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -3853,14 +3926,28 @@ func dimRendered(s string, w, h int) string {
 	canvas := lipgloss.NewCanvas(w, h)
 	canvas.Compose(lipgloss.NewLayer(s))
 
-	dim := lipgloss.Color("#555555")
+	// Backgrounds are dimmed too, so text on a gray background stays
+	// distinguishable from the dimmed foreground.
+	dim, dimBg := lipgloss.Color("#555555"), lipgloss.Color("#2a2a2a")
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			cell := canvas.CellAt(x, y)
-			if cell != nil {
-				cell.Style.Fg = dim
+			if cell == nil {
+				continue
+			}
+			cell.Style.Fg = dim
+			if cell.Style.Bg != nil {
+				cell.Style.Bg = dimBg
 			}
 		}
 	}
 	return canvas.Render()
+}
+
+// countNoun formats n with the noun in the matching number.
+func countNoun(n int, singular, plural string) string {
+	if n == 1 {
+		return "1 " + singular
+	}
+	return fmt.Sprintf("%d %s", n, plural)
 }

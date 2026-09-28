@@ -182,7 +182,7 @@ func TestSpawnTUIPaneCodeMode(t *testing.T) {
 		t.Fatalf("expected 1 tmux call, got %d", len(*calls))
 	}
 	cmd := (*calls)[0][len((*calls)[0])-1]
-	for _, want := range []string{"TCRIT_DETACHED=1", "_tui", "--session"} {
+	for _, want := range []string{"TCRIT_HOST='tmux'", "_tui", "--session"} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("pane command missing %q: %s", want, cmd)
 		}
@@ -195,7 +195,7 @@ func TestSpawnTUIPaneCodeMode(t *testing.T) {
 func TestBuildTUICommandStagedMode(t *testing.T) {
 	captureSpawns(t)
 
-	cmd, err := buildTUICommand(&reviewMode{ref: "HEAD", staged: true, sessionKey: "0123456789ab"})
+	cmd, err := buildTUICommand(&reviewMode{ref: "HEAD", staged: true, sessionKey: "0123456789ab"}, "tmux")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -458,5 +458,12 @@ func TestBuildFinishPayloadPlanMode(t *testing.T) {
 		if !strings.Contains(payload.Prompt, want) {
 			t.Errorf("prompt missing %q:\n%s", want, payload.Prompt)
 		}
+	}
+}
+
+func TestReviewArgSuffixEscapesDocumentPath(t *testing.T) {
+	mode := &reviewMode{docPath: "plans/it's a plan.md"}
+	if got, want := reviewArgSuffix(mode), " 'plans/it'\\''s a plan.md'"; got != want {
+		t.Fatalf("reviewArgSuffix = %q, want %q", got, want)
 	}
 }

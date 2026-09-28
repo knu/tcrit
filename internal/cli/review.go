@@ -218,7 +218,7 @@ func reviewArgSuffix(mode *reviewMode) string {
 		}
 		return ""
 	}
-	return " " + mode.docPath
+	return " " + shellEscape(mode.docPath)
 }
 
 // resolveReviewMode classifies the arguments and, for code mode, detects
@@ -349,7 +349,7 @@ func spawnTUIPane(mode *reviewMode, tmux tmuxContext) (tmuxLaunch, error) {
 	if err != nil {
 		return tmuxLaunch{}, err
 	}
-	tuiCmd, err := buildTUICommand(mode)
+	tuiCmd, err := buildTUICommand(mode, "tmux")
 	if err != nil {
 		return tmuxLaunch{}, err
 	}
@@ -373,7 +373,9 @@ func spawnTUIPane(mode *reviewMode, tmux tmuxContext) (tmuxLaunch, error) {
 	return tmuxLaunch{bin: tmuxBin, context: tmux, pane: pane}, nil
 }
 
-func buildTUICommand(mode *reviewMode) (string, error) {
+// buildTUICommand builds the shell command that runs the TUI inside a pane
+// of host, the multiplexer named in the TUI's top bar.
+func buildTUICommand(mode *reviewMode, host string) (string, error) {
 	tcritBin, err := resolveExec()
 	if err != nil {
 		return "", fmt.Errorf("resolving tcrit binary path: %w", err)
@@ -381,7 +383,7 @@ func buildTUICommand(mode *reviewMode) (string, error) {
 
 	// Multiplexer panes inherit their host's environment, not necessarily the
 	// caller's, so pass through the variables that locate review state.
-	envPrefix := "env TCRIT_DETACHED=1"
+	envPrefix := "env TCRIT_HOST=" + shellEscape(host)
 	for _, name := range []string{"XDG_STATE_HOME", "XDG_CONFIG_HOME"} {
 		if val := os.Getenv(name); val != "" {
 			envPrefix += " " + name + "=" + shellEscape(val)

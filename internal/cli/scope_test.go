@@ -55,7 +55,7 @@ func TestResolveExplicitScopes(t *testing.T) {
 			t.Fatalf("%s: mode=%+v err=%v", scope, mode, err)
 		}
 		mode.sessionKey = "0123456789ab"
-		cmd, err := buildTUICommand(mode)
+		cmd, err := buildTUICommand(mode, "tmux")
 		if err != nil || !strings.Contains(cmd, "--session '0123456789ab'") {
 			t.Fatalf("command=%q err=%v", cmd, err)
 		}

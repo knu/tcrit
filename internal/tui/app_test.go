@@ -56,9 +56,9 @@ func TestRenderHeaderShowsCodeReviewScope(t *testing.T) {
 		staged  bool
 		want    string
 	}{
-		{name: "working tree", baseRef: "HEAD", want: "[Working tree]"},
-		{name: "staged", baseRef: "HEAD", staged: true, want: "[Staged]"},
-		{name: "base ref", baseRef: "main", want: "[Base: main]"},
+		{name: "working tree", baseRef: "HEAD", want: "review the changes."},
+		{name: "staged", baseRef: "HEAD", staged: true, want: "review the staged changes."},
+		{name: "base ref", baseRef: "main", want: "review the changes."},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -152,9 +152,12 @@ func TestRenderHeaderPathBackground(t *testing.T) {
 	app := setupAppWithDoc(t, "first\nsecond\n")
 	app.filePath = "path/to/file"
 	app.width = 80
-	header := app.renderHeader()
+	_, header, _ := strings.Cut(app.renderHeader(), "\n")
 	if !strings.Contains(ansi.Strip(header), "path/to/file L0/3 · 0 comments") {
 		t.Fatalf("path and status should retain their order: %q", header)
+	}
+	if strings.Contains(header, "48;2;") {
+		t.Fatalf("header = %q, want the palette background rather than truecolor", header)
 	}
 	var styles []uv.Style
 	var pen uv.Style
@@ -176,7 +179,7 @@ func TestRenderHeaderPathBackground(t *testing.T) {
 	}{
 		{"path/to/file", lipgloss.BrightWhite},
 		{"L0/3", lipgloss.Cyan},
-		{"0 comments", lipgloss.Blue},
+		{"0 comments", lipgloss.White},
 	} {
 		start := strings.Index(ansi.Strip(header), part.text)
 		if start < 0 {
@@ -186,7 +189,7 @@ func TestRenderHeaderPathBackground(t *testing.T) {
 		for _, style := range styles[start : start+len(part.text)] {
 			if style.Fg == nil || style.Bg == nil ||
 				color.RGBAModel.Convert(style.Fg) != color.RGBAModel.Convert(part.fg) ||
-				color.RGBAModel.Convert(style.Bg) != (color.RGBA{R: 88, G: 88, B: 88, A: 255}) {
+				color.RGBAModel.Convert(style.Bg) != color.RGBAModel.Convert(accent) {
 				t.Fatalf("wrong colors in %q: %+v", part.text, style)
 			}
 		}
@@ -216,8 +219,8 @@ func TestRenderHeaderStaysOnOneLineWithLongPath(t *testing.T) {
 
 			header := app.renderHeader()
 			plainHeader := ansi.Strip(header)
-			if got := lipgloss.Height(header); got != 1 {
-				t.Errorf("header height = %d, want 1: %q", got, plainHeader)
+			if got := lipgloss.Height(header); got != 2 {
+				t.Errorf("header height = %d, want bar and file line: %q", got, plainHeader)
 			}
 			if !strings.Contains(plainHeader, "…") {
 				t.Errorf("header = %q, want truncated path", plainHeader)
@@ -1072,5 +1075,167 @@ func TestFillTabRowJoinsFlushTabToPaneBorder(t *testing.T) {
 				t.Fatalf("wider row = %q, want the top border filler", ansi.Strip(got))
 			}
 		})
+	}
+}
+
+func TestReviewBarHostsSubmitButton(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\n")
+	app.width, app.height, app.host = 100, 24, "tmux"
+	app.recalculateLayout()
+
+	rows := strings.Split(app.renderHeader(), "\n")
+	if len(rows) != 2 {
+		t.Fatalf("header has %d rows, want bar and file line", len(rows))
+	}
+	bar := rows[0]
+	if got := lipgloss.Width(bar); got != app.width {
+		t.Fatalf("bar width = %d, want %d", got, app.width)
+	}
+	plain := ansi.Strip(bar)
+	if !strings.HasPrefix(plain, " TCrit: review the document on tmux.") || !strings.HasSuffix(plain, " Submit q ") {
+		t.Fatalf("bar = %q, want the subject on the left and Submit on the right", plain)
+	}
+	for _, part := range []string{
+		reviewBarStyle.Bold(true).Render(" TCrit"),
+		reviewBarStyle.Render(": review the "),
+		reviewBarStyle.Render("document on tmux."),
+	} {
+		if !strings.Contains(bar, part) {
+			t.Fatalf("bar = %q, want it to contain %q", bar, part)
+		}
+	}
+	initAdaptiveStyles(true)
+	for _, tc := range []struct {
+		scope string
+		bg    lipgloss.Style
+	}{{"staged", diffAddedTextBg}, {"unstaged", diffDeletedTextBg}} {
+		app.multiFile, app.filePath = true, ""
+		app.source = &gitpkg.ReviewSource{Scope: tc.scope}
+		bar := app.renderReviewBar()
+		if plain := ansi.Strip(bar); !strings.Contains(plain, "review the "+tc.scope+" changes on tmux.") {
+			t.Fatalf("%s bar = %q, want the scope before the noun", tc.scope, plain)
+		}
+		if want := tc.bg.Foreground(lipgloss.BrightWhite).Render(tc.scope); !strings.Contains(bar, want) {
+			t.Fatalf("%s bar = %q, want the scope styled as %q", tc.scope, bar, want)
+		}
+	}
+	app.source = &gitpkg.ReviewSource{Scope: "range", Range: "main..HEAD"}
+	if plain := ansi.Strip(app.renderReviewBar()); !strings.Contains(plain, "review the changes on tmux.") {
+		t.Fatalf("range bar = %q, want no scope word", plain)
+	}
+	app.multiFile, app.filePath, app.source = false, "", nil
+	if label := modalBtnFocusedLabel.Bold(true).Render("Submit "); !strings.Contains(bar, label) {
+		t.Fatalf("bar = %q, want a bold button label %q", bar, label)
+	}
+	if !strings.Contains(bar, modalBtnFocusedKey.Render("q")) {
+		t.Fatalf("bar = %q, want the q key styled as a button key", bar)
+	}
+	footer := ansi.Strip(app.renderFooter())
+	if strings.Contains(footer, "Approve") || strings.Contains(footer, "Submit") {
+		t.Fatalf("footer = %q, want no finish button", footer)
+	}
+	if label := modalBtnFocusedLabel.Bold(true).Render("Help "); !strings.Contains(app.renderFooter(), label) {
+		t.Fatalf("footer = %q, want a bold Help label %q", app.renderFooter(), label)
+	}
+
+	rect, ok := app.finishButtonRect()
+	if !ok || rect.top != 0 {
+		t.Fatalf("submit button rect = %+v, %t; want it on the bar row", rect, ok)
+	}
+	assertRegionContainsRenderedText(t, app, rect, "Submit q")
+	app = clickMouse(app, rect.left, rect.top)
+	if app.modal != finishModal {
+		t.Fatalf("modal = %v, want finish modal", app.modal)
+	}
+
+	app.host = ""
+	app.ignoreWhitespace, app.hideComments = true, true
+	app.width = 60
+	app.recalculateLayout()
+	rows = strings.Split(app.renderHeader(), "\n")
+	plain = ansi.Strip(rows[0])
+	if lipgloss.Width(rows[0]) != app.width || !strings.HasPrefix(plain, " TCrit: review the document.  [Whitespace") || !strings.Contains(plain, "…") || !strings.HasSuffix(plain, " Submit q ") {
+		t.Fatalf("narrow bar = %q, want the text truncated ahead of the button", plain)
+	}
+}
+
+func TestCountsUseSingularForOne(t *testing.T) {
+	for _, tc := range []struct {
+		n    int
+		want string
+	}{{0, "0 comments"}, {1, "1 comment"}, {2, "2 comments"}} {
+		if got := countNoun(tc.n, "comment", "comments"); got != tc.want {
+			t.Errorf("countNoun(%d) = %q, want %q", tc.n, got, tc.want)
+		}
+	}
+	app := setupAppWithDoc(t, "first\nsecond\n")
+	app.width = 100
+	app.tab().state.Comments = []review.Comment{{ID: "c1", Scope: "file", Body: "one"}}
+	if header := ansi.Strip(app.renderHeader()); !strings.Contains(header, "· 1 comment") || strings.Contains(header, "1 comments") {
+		t.Fatalf("header = %q, want a singular comment count", header)
+	}
+}
+
+func TestFooterHiddenOnShortTerminals(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-1/default,1,0")
+	for _, tc := range []struct {
+		height int
+		shown  bool
+	}{{21, false}, {22, true}, {24, true}} {
+		app := setupAppWithDoc(t, "first\nsecond\n")
+		app.width, app.height = 100, tc.height
+		app.recalculateLayout()
+		content := ansi.Strip(app.View().Content)
+		rows := strings.Split(content, "\n")
+		if len(rows) != tc.height {
+			t.Fatalf("height %d: rendered %d rows, want the terminal filled with no spare row", tc.height, len(rows))
+		}
+		if shown := strings.Contains(content, "Help ?"); shown != tc.shown {
+			t.Fatalf("height %d: footer shown = %t, want %t: %q", tc.height, shown, tc.shown, content)
+		}
+		last := rows[len(rows)-1]
+		if !tc.shown {
+			if _, ok := app.footerHelpRect(); ok {
+				t.Fatalf("height %d: hidden footer still has a Help button region", tc.height)
+			}
+			if !strings.HasSuffix(last, "╯") {
+				t.Fatalf("height %d: last row = %q, want the pane's bottom border", tc.height, last)
+			}
+		}
+	}
+}
+
+func TestDimRenderedDimsBackgrounds(t *testing.T) {
+	initAdaptiveStyles(true)
+	bar := reviewBarStyle.Render("bar") + diffAddedTextBg.Foreground(lipgloss.BrightWhite).Render("staged") + "plain"
+	dimmed := dimRendered(bar, 14, 1)
+	var styles []uv.Style
+	var pen uv.Style
+	parser := ansi.NewParser()
+	parser.SetHandler(ansi.Handler{
+		Print: func(r rune) { styles = append(styles, pen) },
+		HandleCsi: func(cmd ansi.Cmd, params ansi.Params) {
+			if cmd == 'm' {
+				uv.ReadStyle(params, &pen)
+			}
+		},
+	})
+	for i := range len(dimmed) {
+		parser.Advance(dimmed[i])
+	}
+	if len(styles) < 14 {
+		t.Fatalf("parsed %d cells, want 14: %q", len(styles), dimmed)
+	}
+	for i, style := range styles[:14] {
+		if style.Fg == nil || color.RGBAModel.Convert(style.Fg) != (color.RGBA{R: 0x55, G: 0x55, B: 0x55, A: 255}) {
+			t.Fatalf("cell %d fg = %v, want dimmed gray", i, style.Fg)
+		}
+		hasBg := i < 9
+		if (style.Bg != nil) != hasBg {
+			t.Fatalf("cell %d bg = %v, want background presence %t", i, style.Bg, hasBg)
+		}
+		if hasBg && color.RGBAModel.Convert(style.Bg) != (color.RGBA{R: 0x2a, G: 0x2a, B: 0x2a, A: 255}) {
+			t.Fatalf("cell %d bg = %v, want dimmed dark gray", i, style.Bg)
+		}
 	}
 }

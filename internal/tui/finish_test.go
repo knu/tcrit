@@ -9,19 +9,19 @@ import (
 	"github.com/knu/tcrit/internal/review"
 )
 
-func TestMouseClickFooterFinishButtonOpensModal(t *testing.T) {
+func TestMouseClickSubmitButtonOpensModal(t *testing.T) {
 	app := setupAppWithDoc(t, "first\nsecond\n")
 	app.width = 100
 	app.height = 24
 	app.recalculateLayout()
-	rect, ok := app.footerFinishRect()
+	rect, ok := app.finishButtonRect()
 	if !ok {
-		t.Fatal("footer Approve button not found")
+		t.Fatal("Submit button not found")
 	}
-	if actualY := renderedLineY(t, app, "Approve q"); actualY != rect.top {
-		t.Fatalf("footer region row = %d, rendered button row = %d", rect.top, actualY)
+	if actualY := renderedLineY(t, app, "Submit q"); actualY != rect.top {
+		t.Fatalf("button region row = %d, rendered button row = %d", rect.top, actualY)
 	}
-	assertRegionContainsRenderedText(t, app, rect, "Approve q")
+	assertRegionContainsRenderedText(t, app, rect, "Submit q")
 
 	app = clickMouse(app, rect.left, rect.top)
 

@@ -263,6 +263,7 @@ func TestAngleBracketsMoveToFileBoundaries(t *testing.T) {
 
 func TestFooterKeepsOnlyNonstandardNavigationHints(t *testing.T) {
 	app := newChangeNavigationTestApp()
+	app.height = 24
 	footer := app.renderFooter()
 
 	for _, omitted := range []string{"j/k", "shift+↑↓", "</>"} {

@@ -121,7 +121,7 @@ func TestMouseClickSelectsTabBehindOverflowIndicator(t *testing.T) {
 				want = end
 			}
 
-			app = clickMouse(app, x, 1)
+			app = clickMouse(app, x, app.headerHeight())
 			if app.activeTab != want {
 				t.Fatalf("active tab = %d, want adjacent hidden tab %d", app.activeTab, want)
 			}
@@ -242,7 +242,6 @@ func TestMouseClickSelectionEndGutterPreservesRangeAndOpensComment(t *testing.T)
 func TestMouseClickRenderedCodeLineUsesItsDisplayedPosition(t *testing.T) {
 	app := setupAppWithDoc(t, "first unique\nsecond unique\nthird unique\n")
 	app.multiFile = true
-	app.detached = true
 	app.width = 60
 	app.height = 20
 	app.recalculateLayout()
@@ -261,7 +260,6 @@ func TestMouseClickWrappedContinuationUsesOriginalLine(t *testing.T) {
 	longLine := "wrapped-start " + strings.Repeat("word ", 20) + "continuation-tail"
 	app := setupAppWithDoc(t, longLine+"\nnext unique\n")
 	app.multiFile = true
-	app.detached = true
 	app.width = 60
 	app.height = 24
 	app.recalculateLayout()
@@ -298,7 +296,6 @@ func TestMouseClickTabIndentedWrappedRowsUsesOriginalLine(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			app := setupAppWithDoc(t, tt.content+"\nnext unique\n")
 			app.multiFile = true
-			app.detached = true
 			app.width = 60
 			app.height = 24
 			app.recalculateLayout()
@@ -323,7 +320,6 @@ func TestMouseClickTabIndentedWrappedRowsUsesOriginalLine(t *testing.T) {
 func TestMouseClickWrappedDeletedRowsUsesFollowingLine(t *testing.T) {
 	app := setupAppWithDoc(t, "current unique\nnext unique\n")
 	app.multiFile = true
-	app.detached = true
 	app.width = 60
 	app.height = 24
 	app.tabs[0].isMarkdown = false
@@ -353,7 +349,6 @@ func TestMouseClickWrappedMarkdownTableRowsUsesOriginalLine(t *testing.T) {
 	header := "| very-long-header-cell " + strings.Repeat("word ", 12) + "| value |"
 	app := setupAppWithDoc(t, header+"\n| --- | --- |\n| body | value |\n")
 	app.multiFile = true
-	app.detached = true
 	app.width = 60
 	app.height = 24
 	app.recalculateLayout()
@@ -377,7 +372,6 @@ func TestMouseClickWrappedMarkdownTableRowsUsesOriginalLine(t *testing.T) {
 func TestMouseDragRenderedCodeLinesUsesDisplayedPositions(t *testing.T) {
 	app := setupAppWithDoc(t, "first unique\nsecond unique\nthird unique\nfourth unique\n")
 	app.multiFile = true
-	app.detached = true
 	app.width = 60
 	app.height = 22
 	app.recalculateLayout()

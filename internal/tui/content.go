@@ -340,7 +340,7 @@ func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused boo
 	lineRef := commentLineStyle.Foreground(lipgloss.Cyan).Render(lineLabel)
 	header := fmt.Sprintf("%s %s", label, lineRef)
 	if len(ann.replies) > 0 {
-		header += commentLineStyle.Render(" · ") + inlineLabelComment.Bold(false).Render(fmt.Sprintf("%d replies", len(ann.replies)))
+		header += commentLineStyle.Render(" · ") + inlineLabelComment.Bold(false).Render(countNoun(len(ann.replies), "reply", "replies"))
 	}
 	header, button := renderCommentHeader(header, ann.resolved, m.canDeleteComment(ann.id), max(1, maxWidth-4))
 	boxContent.WriteString(header)

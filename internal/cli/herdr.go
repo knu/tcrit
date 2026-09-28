@@ -177,7 +177,7 @@ func spawnTUIHerdrTab(mode *reviewMode, herdr herdrContext) (herdrLaunch, error)
 	if err != nil {
 		return herdrLaunch{}, fmt.Errorf("herdr binary not found on PATH: %w", err)
 	}
-	tuiCmd, err := buildTUICommand(mode)
+	tuiCmd, err := buildTUICommand(mode, "Herdr")
 	if err != nil {
 		return herdrLaunch{}, err
 	}

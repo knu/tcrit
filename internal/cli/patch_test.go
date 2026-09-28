@@ -49,7 +49,7 @@ func TestDiffReviewSessionAndDetachedCommand(t *testing.T) {
 	original := resolveExec
 	resolveExec = func() (string, error) { return "/a path/tcrit", nil }
 	t.Cleanup(func() { resolveExec = original })
-	cmd, err := buildTUICommand(mode)
+	cmd, err := buildTUICommand(mode, "tmux")
 	if err != nil || !strings.Contains(cmd, "'/a path/tcrit' _tui --session '"+sess.Key+"'") {
 		t.Fatalf("detached command = %q, %v", cmd, err)
 	}

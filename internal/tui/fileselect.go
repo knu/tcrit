@@ -277,9 +277,9 @@ func (m AppModel) fileSelectModalContent(width, maxRows int) (string, []modalMou
 	status := "No matching files"
 	switch {
 	case len(s.matches) > rows:
-		status = fmt.Sprintf("%d-%d of %d files", start+1, end, len(s.matches))
+		status = fmt.Sprintf("%d-%d of %s", start+1, end, countNoun(len(s.matches), "file", "files"))
 	case len(s.matches) > 0:
-		status = fmt.Sprintf("%d of %d files", len(s.matches), len(m.tabs))
+		status = fmt.Sprintf("%d of %s", len(s.matches), countNoun(len(m.tabs), "file", "files"))
 	}
 	return content + footerStyle.Render(status) + "\n" + footerStyle.Render("↑/↓ choose · enter open · esc cancel"), append(regions, closeRegion)
 }
