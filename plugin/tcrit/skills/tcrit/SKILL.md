@@ -1,1 +1,0 @@
-../../../../internal/cli/skill/tcrit/SKILL.md

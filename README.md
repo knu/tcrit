@@ -53,16 +53,7 @@ Your agent writes code or a plan, you review it in the TUI, and the agent reads 
 
 ## Install
 
-### Claude Code Plugin Marketplace (recommended)
-
-tcrit is available as a Claude Code plugin. Add the marketplace and install:
-
-```
-/plugin marketplace add knu/tcrit
-/plugin install tcrit
-```
-
-Then use `/tcrit:tcrit [file]` in Claude Code. It opens the TUI on the git changes or on the given document and has Claude address your comments after each round.
+Install the `tcrit` binary, then install the review skills for your agent with `tcrit install`.
 
 ### Command-line binary
 
@@ -118,9 +109,9 @@ Filters such as tfil can avoid pane text searches by reporting a marker they obs
 - Exit 0 means accepted (including a repeated report from the same pane).  Invalid, expired, or consumed requests return nonzero.  Report each marker once; do not block or change the terminal stream on a rejected report.  Distinct pane notifications received before selection make the request ambiguous.  Reports arriving after consumption are rejected.
 - This is local routing, not authentication or remote control.  Neither the marker nor other pane text is executed.  This protocol works with `tfil → tcrit wrapper → codex` and `tcrit wrapper → tfil → codex` because the inbox is found by request ID, not process parentage.
 
-### Manual skill install
+### Agent skills
 
-If you prefer not to use the plugin, install the integration for your agent directly. Every target provides two pieces:
+The binary embeds the integration for each agent and installs it with `tcrit install`, so the skills always match the installed version. Every target provides two pieces:
 
 - `tcrit [file]` — the interactive review loop. It opens the TUI on the git changes (`tcrit`), a document (`tcrit <file>`), or a versioned plan (`tcrit plan <file>`), then has the agent address the comments round by round.
 - `tcrit-cli` — a reference skill the agent loads when it needs `tcrit comment`, `tcrit comments`, session or plan targeting, bulk JSON input, or the review file format.

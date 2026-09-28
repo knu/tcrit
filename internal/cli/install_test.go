@@ -198,20 +198,3 @@ func TestDropFrontmatterKeys(t *testing.T) {
 		t.Errorf("content without frontmatter was altered: %q", got)
 	}
 }
-
-func TestPluginSkillsMatchEmbeddedSources(t *testing.T) {
-	for _, name := range skillNames {
-		embedded, err := skillContent.ReadFile("skill/" + name + "/SKILL.md")
-		if err != nil {
-			t.Fatal(err)
-		}
-		pluginPath := filepath.Join("..", "..", "plugin", "tcrit", "skills", name, "SKILL.md")
-		plugin, err := os.ReadFile(pluginPath)
-		if err != nil {
-			t.Fatalf("reading %s: %v", pluginPath, err)
-		}
-		if !bytes.Equal(plugin, embedded) {
-			t.Errorf("%s differs from the embedded skill; copy internal/cli/skill/%s/SKILL.md over it", pluginPath, name)
-		}
-	}
-}
