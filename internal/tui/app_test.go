@@ -1037,3 +1037,40 @@ func TestResolveKeysStayOrAdvance(t *testing.T) {
 		t.Fatalf("R from a resolved thread selected %q, want first-b", got)
 	}
 }
+
+func TestFillTabRowJoinsFlushTabToPaneBorder(t *testing.T) {
+	border := lipgloss.RoundedBorder()
+	style := lipgloss.NewStyle().Foreground(accent)
+	for _, tc := range []struct {
+		name  string
+		last  lipgloss.Style
+		wantR string
+	}{
+		{"active", activeTabStyle, "│"},
+		{"inactive", inactiveTabStyle, "┤"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			row := lipgloss.JoinHorizontal(lipgloss.Top, inactiveTabStyle.Render("one"), tc.last.Render("two"))
+			width := lipgloss.Width(row)
+			lines := strings.Split(fillTabRow(row, width, border, style), "\n")
+			if len(lines) != 3 {
+				t.Fatalf("tab row has %d lines, want 3", len(lines))
+			}
+			for i, line := range lines {
+				if got := lipgloss.Width(line); got != width {
+					t.Fatalf("line %d width = %d, want %d", i, got, width)
+				}
+			}
+			bottom := ansi.Strip(lines[2])
+			if !strings.HasSuffix(bottom, tc.wantR) {
+				t.Fatalf("bottom line = %q, want it to end with %q", bottom, tc.wantR)
+			}
+			if !strings.HasSuffix(lines[2], "\x1b[m") {
+				t.Fatalf("bottom line %q does not reset its style", lines[2])
+			}
+			if got := fillTabRow(row, width+3, border, style); !strings.HasSuffix(ansi.Strip(got), "──╮") {
+				t.Fatalf("wider row = %q, want the top border filler", ansi.Strip(got))
+			}
+		})
+	}
+}

@@ -2957,17 +2957,34 @@ func (m AppModel) renderSidebarPane() string {
 	return renderPane(tabRow, body, border, line)
 }
 
-// fillTabRow extends a rendered tab row to width with the pane's top border,
-// ending in the top-right corner.
+// fillTabRow fits a rendered tab row to width.  A shorter row is extended
+// with the pane's top border ending in the top-right corner; a row that fills
+// the width exactly gets its last corner joined to the pane's right border.
 func fillTabRow(row string, width int, border lipgloss.Border, style lipgloss.Style) string {
 	gap := width - lipgloss.Width(row)
-	if gap <= 0 {
+	if gap < 0 {
 		return row
+	}
+	if gap == 0 {
+		return joinTabRowRight(row, style)
 	}
 	blank := strings.Repeat(" ", gap)
 	filler := style.Render(
 		blank + "\n" + blank + "\n" + strings.Repeat(border.Top, gap-1) + border.TopRight)
 	return lipgloss.JoinHorizontal(lipgloss.Top, row, filler)
+}
+
+// joinTabRowRight replaces the bottom-right corner of the last tab, which
+// points outward, with a glyph that meets the pane's right border below it.
+func joinTabRowRight(row string, style lipgloss.Style) string {
+	lines := strings.Split(row, "\n")
+	bottom := lines[len(lines)-1]
+	corner := "┤"
+	if strings.HasSuffix(ansi.Strip(bottom), activeTabBorder.BottomRight) {
+		corner = "│"
+	}
+	lines[len(lines)-1] = ansi.Cut(bottom, 0, lipgloss.Width(bottom)-1) + style.Render(corner)
+	return strings.Join(lines, "\n")
 }
 
 func (m *AppModel) commentBounds() (left, top, right, bottom int) {
