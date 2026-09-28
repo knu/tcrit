@@ -1,6 +1,9 @@
 # Built binary
 /crit
 
+# Demo videos converted from the committed GIFs
+/demo/*.mp4
+
 # Local Claude Code config
 .claude/
 
