@@ -2,7 +2,7 @@
 #
 #   make            build every GIF whose tape or inputs changed
 #   make rebuild    record every GIF again
-#   make mp4        convert the GIFs to MP4 for sites that want video, such as X
+#   make mp4        record MP4s for sites that want video, such as X
 #   make clean      delete the GIFs and MP4s
 #
 # code-review.tape launches Claude Code and takes a few minutes; demo.tape
@@ -37,14 +37,20 @@ clean:
 
 # Every recording rebuilds tcrit and the fixture, so the GIFs depend on the
 # demo scripts as well as the tape; Go sources would rebuild on every edit.
-%.gif: %.tape theme.tape setup.sh tmux.conf clean-gif.sh $(ASSETS)
+%.gif: %.tape theme.tape setup.sh tmux.conf clean-recording.sh $(ASSETS)
 	./setup.sh
 	vhs $<
-	./clean-gif.sh $@
+	./clean-recording.sh $@
 
 # X accepts MP4 with H.264 video (and AAC audio, which a silent clip omits),
-# up to 512 MB, 2:20, 1920x1200, and 40 fps.  The GIFs already fit those
-# limits, so this keeps their frames and timing; yuv420p and even dimensions
-# are what H.264 players expect.
-%.mp4: %.gif
-	ffmpeg -y -loglevel error -i $< -movflags +faststart -c:v libx264 -crf 18 -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" $@
+# up to 512 MB, 2:20, 1920x1200, and 40 fps; the tapes fit those limits.
+# Video has no GIF palette to protect, so Claude Code keeps its full-color
+# default theme here.  VHS records the tape again from a copy whose Output
+# line names the MP4, since `vhs -o` adds an output instead of replacing
+# the GIF.
+%.mp4: %.tape theme.tape setup.sh tmux.conf clean-recording.sh $(ASSETS)
+	DEMO_CLAUDE_THEME=dark ./setup.sh
+	sed 's|^Output .*|Output $@|' $< > .$@.tape
+	vhs .$@.tape
+	rm -f .$@.tape
+	./clean-recording.sh $@

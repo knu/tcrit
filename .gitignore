@@ -1,8 +1,9 @@
 # Built binary
 /crit
 
-# Demo videos converted from the committed GIFs
+# Demo videos recorded on demand, and the temporary tapes that record them
 /demo/*.mp4
+/demo/.*.mp4.tape
 
 # Local Claude Code config
 .claude/

@@ -41,6 +41,7 @@ git add .
 
 "$demo/bin/tcrit" install claude-code >/dev/null
 # The ANSI theme keeps Claude Code within the terminal's 16 colors so the
-# GIF palette has room for TCrit's own colors.
-printf '{"theme": "dark-ansi"}\n' > .claude/settings.json
+# GIF palette has room for TCrit's own colors; video recordings have no such
+# limit and pass Claude Code's default theme instead.
+printf '{"theme": "%s"}\n' "${DEMO_CLAUDE_THEME:-dark-ansi}" > .claude/settings.json
 echo "demo fixtures ready under $demo"
