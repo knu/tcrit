@@ -117,24 +117,26 @@ type InlineSegment struct {
 	Changed bool
 }
 
-// DiffFile returns full diff information for a file relative to the given ref.
-func DiffFile(path string, ref string) (*DiffInfo, error) {
-	return diffFile(path, ref, false)
+// DiffFile returns full diff information for a file relative to the given
+// ref.  oldPath is the file's previous path when it was renamed, else "".
+func DiffFile(path, oldPath, ref string) (*DiffInfo, error) {
+	return diffFile(path, oldPath, ref, false)
 }
 
 // DiffFileStaged returns diff information for the indexed version of a file.
-func DiffFileStaged(path string) (*DiffInfo, error) {
-	return diffFile(path, "HEAD", true)
+// oldPath is the file's previous path when it was renamed, else "".
+func DiffFileStaged(path, oldPath string) (*DiffInfo, error) {
+	return diffFile(path, oldPath, "HEAD", true)
 }
 
-func diffFile(path, ref string, staged bool) (*DiffInfo, error) {
-	args := []string{"diff"}
+func diffFile(path, oldPath, ref string, staged bool) (*DiffInfo, error) {
+	args := []string{"diff", "--find-renames"}
 	if staged {
 		args = append(args, "--cached")
 	} else {
 		args = append(args, ref)
 	}
-	args = append(args, "--", path)
+	args = append(args, diffPathspec(path, oldPath)...)
 	out, err := gitCommand(args...)
 	if err != nil {
 		return nil, fmt.Errorf("git diff for %s: %w", path, err)
@@ -150,6 +152,16 @@ func diffFile(path, ref string, staged bool) (*DiffInfo, error) {
 	}
 
 	return diffInfo(files), nil
+}
+
+// diffPathspec limits a diff to path.  A renamed file's previous path is
+// included so Git pairs both sides instead of reporting a new file whose
+// every line was added.
+func diffPathspec(path, oldPath string) []string {
+	if oldPath != "" && oldPath != path {
+		return []string{"--", oldPath, path}
+	}
+	return []string{"--", path}
 }
 
 func diffInfo(files []*gitdiff.File) *DiffInfo {

@@ -270,9 +270,9 @@ func NewCodeReviewApp(files []gitpkg.FileChange, ref string, cfg AppConfig) AppM
 			}
 		} else if f.Status != gitpkg.StatusBinary {
 			if cfg.Source != nil {
-				diff, _ = cfg.Source.Diff(f.Path)
+				diff, _ = cfg.Source.Diff(f.Path, f.OldPath)
 			} else {
-				diff, _ = codeDiff(f.Path, ref, cfg.Staged)
+				diff, _ = codeDiff(f.Path, f.OldPath, ref, cfg.Staged)
 			}
 		}
 		ft := newFileTab(f.Path, diff)
@@ -364,11 +364,11 @@ func (m AppModel) loadDocument(path string) (*document.Document, error) {
 	return document.FromContent(path, content), nil
 }
 
-func codeDiff(path, ref string, staged bool) (*gitpkg.DiffInfo, error) {
+func codeDiff(path, oldPath, ref string, staged bool) (*gitpkg.DiffInfo, error) {
 	if staged {
-		return gitpkg.DiffFileStaged(path)
+		return gitpkg.DiffFileStaged(path, oldPath)
 	}
-	return gitpkg.DiffFile(path, ref)
+	return gitpkg.DiffFile(path, oldPath, ref)
 }
 
 func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

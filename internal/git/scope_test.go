@@ -41,7 +41,7 @@ func TestReviewSources(t *testing.T) {
 			if err != nil || string(content) != tc.content {
 				t.Fatalf("content=%q err=%v", content, err)
 			}
-			diff, err := s.Diff("file 日本語.txt")
+			diff, err := s.Diff("file 日本語.txt", "")
 			if err != nil || diff == nil || !diff.ChangedLines[1] {
 				t.Fatalf("diff=%v err=%v", diff, err)
 			}
@@ -106,5 +106,44 @@ func TestReviewSources(t *testing.T) {
 		if want := parseNameStatusZ(out); !reflect.DeepEqual(files, want) {
 			t.Fatalf("%s: files=%v, git diff=%v", source.Range, files, want)
 		}
+	}
+}
+
+func TestDiffFollowsRenames(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+	t.Chdir(dir)
+	runGit(t, dir, "init", "-q")
+	runGit(t, dir, "config", "user.name", "Test")
+	runGit(t, dir, "config", "user.email", "test@example.com")
+	runGit(t, dir, "config", "diff.renames", "false")
+	writeFile(t, dir, "old name.txt", []byte("one\ntwo\n"))
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "-qm", "base")
+	runGit(t, dir, "mv", "old name.txt", "new name.txt")
+	writeFile(t, dir, "new name.txt", []byte("one\ntwo\nthree\n"))
+	runGit(t, dir, "add", ".")
+
+	s := ReviewSource{Scope: "staged"}
+	files, err := s.Files()
+	if err != nil || len(files) != 1 || files[0].Status != StatusRenamed || files[0].OldPath != "old name.txt" || files[0].Path != "new name.txt" {
+		t.Fatalf("files=%+v err=%v, want one rename", files, err)
+	}
+	for name, diff := range map[string]func() (*DiffInfo, error){
+		"source": func() (*DiffInfo, error) { return s.Diff(files[0].Path, files[0].OldPath) },
+		"staged": func() (*DiffInfo, error) { return DiffFileStaged(files[0].Path, files[0].OldPath) },
+	} {
+		info, err := diff()
+		if err != nil || info == nil {
+			t.Fatalf("%s: diff=%v err=%v", name, info, err)
+		}
+		if len(info.ChangedLines) != 1 || !info.ChangedLines[3] || len(info.DeletedAfter) != 0 {
+			t.Fatalf("%s: changed=%v deleted=%v, want only line 3 added", name, info.ChangedLines, info.DeletedAfter)
+		}
+	}
+	info, err := s.Diff(files[0].Path, "")
+	if err != nil || info == nil || len(info.ChangedLines) != 3 {
+		t.Fatalf("without the old path: changed=%v err=%v, want the whole file added", info, err)
 	}
 }

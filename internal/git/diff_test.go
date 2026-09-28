@@ -210,7 +210,7 @@ func TestStagedReviewUsesIndexContent(t *testing.T) {
 	if string(content) != "staged\n" {
 		t.Errorf("indexed content = %q, want %q", content, "staged\\n")
 	}
-	diff, err := DiffFileStaged("partial.txt")
+	diff, err := DiffFileStaged("partial.txt", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestChangedFilesStagedBeforeInitialCommit(t *testing.T) {
 	if len(files) != 1 || files[0].Path != "first.txt" {
 		t.Fatalf("staged files = %+v, want only first.txt", files)
 	}
-	diff, err := DiffFileStaged("first.txt")
+	diff, err := DiffFileStaged("first.txt", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +303,7 @@ func TestDiffFileAnnotatesReplacementLines(t *testing.T) {
 	writeFile(t, dir, "README.md", []byte("prefix new suffix\n"))
 
 	t.Chdir(dir)
-	info, err := DiffFile("README.md", "HEAD")
+	info, err := DiffFile("README.md", "", "HEAD")
 	if err != nil {
 		t.Fatalf("DiffFile: %v", err)
 	}
@@ -331,7 +331,7 @@ func TestDiffFileDeletedFileAnchorsBeforeFirstLine(t *testing.T) {
 	runGit(t, dir, "rm", "-q", "gone.txt")
 
 	t.Chdir(dir)
-	info, err := DiffFile("gone.txt", "HEAD")
+	info, err := DiffFile("gone.txt", "", "HEAD")
 	if err != nil {
 		t.Fatalf("DiffFile: %v", err)
 	}

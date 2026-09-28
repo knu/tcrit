@@ -59,7 +59,7 @@ func ResolveRange(value string) (ReviewSource, error) {
 }
 
 func (s ReviewSource) diffArgs() []string {
-	args := []string{"diff", "--no-ext-diff", "--no-textconv"}
+	args := []string{"diff", "--no-ext-diff", "--no-textconv", "--find-renames"}
 	switch s.Scope {
 	case "staged":
 		return append(args, "--cached")
@@ -104,8 +104,10 @@ func (s ReviewSource) Files() ([]FileChange, error) {
 	return files, nil
 }
 
-func (s ReviewSource) Diff(path string) (*DiffInfo, error) {
-	out, err := gitCommand(append(s.diffArgs(), "--", path)...)
+// Diff returns the diff of path.  oldPath is the file's previous path when it
+// was renamed, else "".
+func (s ReviewSource) Diff(path, oldPath string) (*DiffInfo, error) {
+	out, err := gitCommand(append(s.diffArgs(), diffPathspec(path, oldPath)...)...)
 	if err != nil {
 		return nil, err
 	}
