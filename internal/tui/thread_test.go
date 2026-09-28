@@ -276,8 +276,11 @@ func TestResolveThreadAdvancesToUnresolved(t *testing.T) {
 						if current >= 0 || app.focused != contentPane || app.unresolvedTotal() != 0 {
 							t.Fatal("final resolution did not release focus with all threads resolved")
 						}
-					} else if current < 0 || targets[current].id != want || targets[current].resolved {
-						t.Fatalf("selected target %d in %+v, want unresolved %s", current, targets, want)
+						if app.modal != finishModal {
+							t.Fatalf("final resolution opened modal %v, want the finish dialog", app.modal)
+						}
+					} else if app.modal != noModal || current < 0 || targets[current].id != want || targets[current].resolved {
+						t.Fatalf("selected target %d in %+v (modal %v), want unresolved %s", current, targets, app.modal, want)
 					}
 					if app.showResolved != expanded {
 						t.Fatal("resolving changed the global folding preference")
@@ -318,6 +321,10 @@ func TestResolveThreadReleasesFocus(t *testing.T) {
 				if app.focused != contentPane || app.tab().cursorOnAnnotation {
 					t.Fatal("resolved thread retained focus")
 				}
+				if app.modal != finishModal {
+					t.Fatalf("resolving the last thread opened modal %v, want the finish dialog", app.modal)
+				}
+				app = pressKey(app, tea.KeyEscape)
 				if app.showResolved != expanded {
 					t.Fatal("resolving changed the global folding preference")
 				}

@@ -319,12 +319,12 @@ Tcrit resolves the Herdr workspace, tab, and pane or the tmux server and pane fr
 | `s`                                   | Toggle comment sidebar                   |
 | `t`                                   | Switch the sidebar between the file tree and comments, and focus it |
 | `j` / `k`, `enter`, `h` / `l`, `←` / `→` (file tree) | Move (moving onto a file opens its tab); toggle a folder or open the file and focus the source; fold a folder or go to its parent / unfold a folder or enter it.  On a row too long for the sidebar, `→` and `l` scroll it to reveal the rest and `←` and `h` scroll back before folding |
-| `[` / `]`                             | Jump to prev / next comment; skip resolved comments unless unfolded with `h` |
+| `[` / `]`                             | Jump to prev / next comment; skip resolved comments unless unfolded with `h`.  `]` on the last comment opens the finish dialog |
 | `h`                                   | Toggle folding resolved comments across all files |
 | `H`                                   | Hide/show comment boxes across all files; show line markers in a narrow right gutter |
 | `w`                                   | Toggle ignore whitespace across all files in code reviews |
 | `r`                                   | Resolve / unresolve the focused comment in place |
-| `R`                                   | Resolve the focused comment, or leave it resolved, and jump to the next unresolved thread, or return focus to the source if none remain |
+| `R`                                   | Resolve the focused comment, or leave it resolved, and jump to the next unresolved thread, or open the finish dialog if none remain |
 | `d`                                   | Delete the selected comment after confirmation |
 | `ctrl+PgUp` / `ctrl+PgDn`               | Scroll the selected inline or sidebar thread |
 | `?`                                   | Show all keyboard shortcuts              |
@@ -390,7 +390,7 @@ The file selector lists every tab in order when the search field is empty, with 
 
 - Click a file tab, code line, inline comment, sidebar, or sidebar comment to focus it.  Click the sidebar's **Comments** or **Files** tab to switch views; in the file tree, click a folder to fold or unfold it and a file to open it.
 - Every inline or sidebar thread header ends with a right-aligned button group.  Click **☐ Resolve** to resolve the thread, or **☑︎ Resolved** to reopen it; file comments support the same toggle.  Both states reserve the same button width, and collapsed headers keep the reply count without adding the author's name, so the buttons stay in the same position when a thread is toggled.  Resolving by click stays in place, as with `r`.
-- Click **↑** or **↓** next to the toggle to move to the previous or next thread, exactly as `[` and `]` do: across files, wrapping at the ends, and skipping folded resolved threads.  When a header is too narrow for all the buttons, the arrows are omitted before the group moves to its own row.
+- Click **↑** or **↓** next to the toggle to move to the previous or next thread, exactly as `[` and `]` do: across files and skipping folded resolved threads.  **↑** wraps from the first thread to the last; **↓** on the last thread opens the finish dialog.  When a header is too narrow for all the buttons, the arrows are omitted before the group moves to its own row.
 - Click the red **x** at the right edge to delete a comment after confirmation.  It appears only on your own comments from the current round that have no replies, including file comments; other headers leave its slot blank so the buttons line up.
 - Scroll code with the mouse wheel.  Over an inline or sidebar thread, the wheel focuses it and scrolls its full history; at the thread's limit, scrolling continues through the surrounding pane.
 - Hover over the `+`/`-` gutter to reveal a yellow `>` comment marker, then click to comment on a current or deleted line, or drag to select multiple lines on the same diff side.  Dragging to the top or bottom edge scrolls one line at a time.

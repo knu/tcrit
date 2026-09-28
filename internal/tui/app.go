@@ -776,7 +776,7 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.focused == contentPane && !t.selecting {
 		switch {
 		case key.Matches(msg, keys.NextComment):
-			m.jumpToComment(1)
+			m.nextCommentOrFinish()
 			return m, nil
 		case key.Matches(msg, keys.PrevComment):
 			m.jumpToComment(-1)
@@ -904,7 +904,7 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.focused == commentPane {
 		switch {
 		case key.Matches(msg, keys.NextComment):
-			m.jumpToComment(1)
+			m.nextCommentOrFinish()
 			return m, nil
 		case key.Matches(msg, keys.PrevComment):
 			m.jumpToComment(-1)
@@ -1358,6 +1358,10 @@ func (m *AppModel) resolveThread(id string, advance bool) {
 	m.updateCommentSidebar()
 	if m.focused == contentPane && !t.cursorOnAnnotation {
 		m.scrollToCursor()
+	}
+	// No unresolved thread is left to advance to: move on to submitting.
+	if advance && found {
+		m.openFinishModal()
 	}
 }
 
@@ -2621,7 +2625,7 @@ func (m *AppModel) handleCommentHeaderClick(region commentHeaderRegion, point te
 	case region.up.contains(point):
 		m.jumpToComment(-1)
 	case region.down.contains(point):
-		m.jumpToComment(1)
+		m.nextCommentOrFinish()
 	case region.delete.contains(point):
 		m.openCommentDelete(region.id)
 	default:

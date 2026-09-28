@@ -762,6 +762,13 @@ func TestMouseClickHeaderArrowsMoveBetweenComments(t *testing.T) {
 			if app.modal != noModal {
 				t.Fatalf("arrow click opened modal %v", app.modal)
 			}
+			click(1, func(r commentHeaderRegion) mouseRect { return r.down })
+			if app.modal != finishModal {
+				t.Fatalf("↓ on the last comment opened modal %v, want the finish dialog", app.modal)
+			}
+			if got := app.selectedCommentID(); got != "second" {
+				t.Fatalf("↓ on the last comment moved to %q", got)
+			}
 		})
 	}
 }

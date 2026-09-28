@@ -96,7 +96,7 @@ func TestCommentNavigationCrossesFiles(t *testing.T) {
 	}
 }
 
-func TestCommentNavigationWrapsReviewAndVisitsSameLineThreads(t *testing.T) {
+func TestCommentNavigationFinishesAfterLastAndWrapsBackward(t *testing.T) {
 	app := newCommentNavigationTestApp()
 	app.tabs[0].cursorLine = 2
 
@@ -110,13 +110,29 @@ func TestCommentNavigationWrapsReviewAndVisitsSameLineThreads(t *testing.T) {
 		t.Fatalf("second comment = tab %d, annotation %d; want tab 0, annotation 1", app.activeTab, app.tab().cursorAnnoIdx)
 	}
 
+	// ] on the last thread of the review opens the finish dialog and stays put.
 	app.activeTab = 2
 	app.tabs[2].cursorLine = 3
 	app.tabs[2].cursorOnAnnotation = true
 	app.tabs[2].cursorAnnoIdx = 0
 	app = pressKey(app, ']')
-	if app.activeTab != 0 || app.tab().cursorLine != 2 || app.tab().cursorAnnoIdx != 0 {
-		t.Fatalf("wrapped next = tab %d, line %d, annotation %d", app.activeTab, app.tab().cursorLine, app.tab().cursorAnnoIdx)
+	if app.modal != finishModal {
+		t.Fatalf("] on the last thread opened modal %v, want the finish dialog", app.modal)
+	}
+	if app.activeTab != 2 || app.tab().cursorLine != 3 || !app.tab().cursorOnAnnotation {
+		t.Fatalf("] on the last thread moved to tab %d, line %d", app.activeTab, app.tab().cursorLine)
+	}
+	app = pressKey(app, tea.KeyEscape)
+	if app.modal != noModal {
+		t.Fatal("esc did not close the finish dialog")
+	}
+
+	// From a source line past every thread, ] still wraps to the first thread.
+	app.tab().cursorOnAnnotation = false
+	app.tab().cursorLine = 4
+	app = pressKey(app, ']')
+	if app.modal != noModal || app.activeTab != 0 || app.tab().cursorLine != 2 || app.tab().cursorAnnoIdx != 0 {
+		t.Fatalf("wrapped next from source = modal %v, tab %d, line %d, annotation %d", app.modal, app.activeTab, app.tab().cursorLine, app.tab().cursorAnnoIdx)
 	}
 
 	app = pressKey(app, '[')
@@ -367,10 +383,17 @@ func TestCommentNavigationSkipsResolvedComments(t *testing.T) {
 	for _, step := range []struct {
 		key rune
 		tab int
-	}{{']', 0}, {']', 2}, {']', 0}, {'[', 2}, {'[', 0}, {'[', 2}} {
+	}{{']', 0}, {']', 2}, {']', -1}, {'[', 0}, {'[', 2}, {'[', 0}} {
 		app = pressKey(app, step.key)
+		if step.tab < 0 {
+			if app.modal != finishModal {
+				t.Fatalf("key %c on the last unresolved thread opened modal %v, want the finish dialog", step.key, app.modal)
+			}
+			app = pressKey(app, tea.KeyEscape)
+			continue
+		}
 		anns := app.annotationsAfterLine(app.tab().cursorLine, app.tab().cursorSide)
-		if app.activeTab != step.tab || app.focused != contentPane || !app.tab().cursorOnAnnotation {
+		if app.modal != noModal || app.activeTab != step.tab || app.focused != contentPane || !app.tab().cursorOnAnnotation {
 			t.Fatalf("key %c: tab %d, want %d with inline focus", step.key, app.activeTab, step.tab)
 		}
 		if anns[app.tab().cursorAnnoIdx].resolved {
@@ -405,14 +428,21 @@ func TestCommentNavigationVisitsUnfoldedResolvedComments(t *testing.T) {
 		id  string
 	}{
 		{']', "first-a"}, {']', "first-b"}, {']', "first-c"},
-		{']', "file"}, {']', "last-a"}, {']', "last-b"}, {']', "first-a"},
-		{'[', "last-b"}, {'[', "last-a"}, {'[', "file"},
+		{']', "file"}, {']', "last-a"}, {']', "last-b"}, {']', ""},
+		{'[', "last-a"}, {'[', "file"},
 		{'[', "first-c"}, {'[', "first-b"}, {'[', "first-a"},
 	} {
 		app = pressKey(app, step.key)
+		if step.id == "" {
+			if app.modal != finishModal {
+				t.Fatalf("key %c on the last unfolded thread opened modal %v, want the finish dialog", step.key, app.modal)
+			}
+			app = pressKey(app, tea.KeyEscape)
+			continue
+		}
 		targets := app.commentTargets(app.activeTab)
 		current := app.currentCommentTarget(targets)
-		if current < 0 || targets[current].id != step.id {
+		if app.modal != noModal || current < 0 || targets[current].id != step.id {
 			t.Fatalf("key %c: selected target %d in %+v, want %s", step.key, current, targets, step.id)
 		}
 	}
@@ -457,13 +487,27 @@ func TestCommentNavigationVisitsFileComments(t *testing.T) {
 		t.Fatalf("previous from line comment did not return to the file comment (focus %v)", app.focused)
 	}
 
-	// Wrapping past the last comment of the review reaches the file comment first.
+	// The last comment of the review has no next: ] opens the finish dialog.
 	app.focused = contentPane
 	app.activeTab = 2
 	app.tabs[2].cursorLine = 3
 	app.tabs[2].cursorOnAnnotation = true
 	app = pressKey(app, ']')
-	if app.activeTab != 0 || app.focused != contentPane || app.selectedCommentID() != fileComment.ID {
-		t.Fatalf("wrapped next = tab %d, focus %v; want the file comment of tab 0", app.activeTab, app.focused)
+	if app.modal != finishModal || app.activeTab != 2 {
+		t.Fatalf("] on the last thread = modal %v, tab %d; want the finish dialog on tab 2", app.modal, app.activeTab)
+	}
+	app = pressKey(app, tea.KeyEscape)
+
+	// Wrapping backward from the file comment reaches the last comment of the review.
+	app.activeTab = 0
+	app.tabs[0].cursorLine = 0
+	app.tabs[0].cursorOnAnnotation = true
+	app.tabs[0].cursorAnnoIdx = 0
+	if app.selectedCommentID() != fileComment.ID {
+		t.Fatalf("selected %q, want the file comment", app.selectedCommentID())
+	}
+	app = pressKey(app, '[')
+	if app.activeTab != 2 || app.focused != contentPane || app.tab().cursorLine != 3 {
+		t.Fatalf("wrapped previous = tab %d, line %d; want tab 2, line 3", app.activeTab, app.tab().cursorLine)
 	}
 }

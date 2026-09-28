@@ -174,7 +174,31 @@ func (m *AppModel) jumpToComment(step int) bool {
 	return ok
 }
 
+// nextCommentOrFinish moves to the next comment like jumpToComment(1), except
+// that on the last thread of the review it opens the finish dialog instead of
+// wrapping around to the first.
+func (m *AppModel) nextCommentOrFinish() {
+	if m.currentCommentTarget(m.commentTargets(m.activeTab)) >= 0 {
+		if _, _, ok := m.adjacentCommentNoWrap(1, m.showResolved); !ok {
+			m.openFinishModal()
+			return
+		}
+	}
+	m.jumpToComment(1)
+}
+
 func (m *AppModel) adjacentComment(step int, includeResolved bool) (int, commentTarget, bool) {
+	return m.findAdjacentComment(step, includeResolved, true)
+}
+
+func (m *AppModel) adjacentCommentNoWrap(step int, includeResolved bool) (int, commentTarget, bool) {
+	return m.findAdjacentComment(step, includeResolved, false)
+}
+
+// findAdjacentComment searches from the current position in the given
+// direction, continuing into the other tabs.  With wrap, the search continues
+// from the opposite end of the review until it returns to the current tab.
+func (m *AppModel) findAdjacentComment(step int, includeResolved, wrap bool) (int, commentTarget, bool) {
 	t := m.tab()
 	targets := m.commentTargets(m.activeTab)
 	current := m.currentCommentTarget(targets)
@@ -204,7 +228,12 @@ func (m *AppModel) adjacentComment(step int, includeResolved bool) (int, comment
 	}
 
 	for offset := 1; offset <= len(m.tabs); offset++ {
-		tabIndex := (m.activeTab + step*offset + len(m.tabs)) % len(m.tabs)
+		tabIndex := m.activeTab + step*offset
+		if wrap {
+			tabIndex = (tabIndex + len(m.tabs)) % len(m.tabs)
+		} else if tabIndex < 0 || tabIndex >= len(m.tabs) {
+			break
+		}
 		targets = m.commentTargets(tabIndex)
 		if len(targets) == 0 {
 			continue
