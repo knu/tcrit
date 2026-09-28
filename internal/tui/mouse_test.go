@@ -651,6 +651,127 @@ func TestResolveButtonPositionSurvivesCollapse(t *testing.T) {
 	}
 }
 
+func TestCommentHeaderActionsAlignRight(t *testing.T) {
+	const label = "comment L1 · 2 replies" // 22 columns
+	for _, tc := range []struct {
+		width     int
+		deletable bool
+		rows      int
+		arrows    bool
+	}{
+		{width: 80, deletable: false, rows: 1, arrows: true},
+		{width: 80, deletable: true, rows: 1, arrows: true},
+		{width: 40, deletable: false, rows: 1, arrows: false}, // arrows go before wrapping
+		{width: 40, deletable: true, rows: 1, arrows: false},
+		{width: 24, deletable: false, rows: 2, arrows: true}, // a new row has room again
+		{width: 24, deletable: true, rows: 2, arrows: true},
+		{width: 16, deletable: false, rows: 3, arrows: false}, // the label itself wraps
+		{width: 16, deletable: true, rows: 3, arrows: false},
+	} {
+		t.Run(fmt.Sprintf("width=%d/deletable=%t", tc.width, tc.deletable), func(t *testing.T) {
+			var open, resolved commentHeaderRegion
+			for _, state := range []bool{false, true} {
+				header, region := renderCommentHeader(label, state, tc.deletable, tc.width)
+				rows := strings.Split(ansi.Strip(header), "\n")
+				if len(rows) != tc.rows || region.resolve.top != tc.rows-1 {
+					t.Fatalf("header rows = %q, actions at row %d, want %d rows", rows, region.resolve.top, tc.rows)
+				}
+				row := rows[region.resolve.top]
+				if lipgloss.Width(row) != tc.width {
+					t.Fatalf("action row %q is %d wide, want %d", row, lipgloss.Width(row), tc.width)
+				}
+				last := region.resolve.right
+				if tc.arrows {
+					if got := ansi.Cut(row, region.up.left, region.up.right); got != "↑ " {
+						t.Fatalf("up region contains %q, want ↑", got)
+					}
+					if got := ansi.Cut(row, region.down.left, region.down.right); got != " ↓" {
+						t.Fatalf("down region contains %q, want ↓", got)
+					}
+					last = region.down.right
+				} else if region.up.left != region.up.right || region.down.left != region.down.right || strings.ContainsAny(row, "↑↓") {
+					t.Fatalf("arrows should be omitted: row %q, region %+v", row, region)
+				}
+				slot := ansi.Cut(row, last+2, last+3)
+				if tc.deletable {
+					if got := ansi.Cut(row, region.delete.left, region.delete.right); got != "x" || region.delete.left != last+2 {
+						t.Fatalf("delete region %+v contains %q, want x after %d", region.delete, got, last)
+					}
+				} else if region.delete.left != region.delete.right || slot != " " {
+					t.Fatalf("undeletable header should keep a blank x slot: region %+v, slot %q", region.delete, slot)
+				}
+				if last+3 != tc.width {
+					t.Fatalf("actions end at %d, want right edge %d", last+3, tc.width)
+				}
+				if state {
+					resolved = region
+				} else {
+					open = region
+				}
+			}
+			if open != resolved {
+				t.Fatalf("regions differ by resolution:\nopen     = %+v\nresolved = %+v", open, resolved)
+			}
+		})
+	}
+}
+
+func TestMouseClickHeaderArrowsMoveBetweenComments(t *testing.T) {
+	for _, location := range []string{"inline", "sidebar"} {
+		t.Run(location, func(t *testing.T) {
+			app := setupAppWithDoc(t, strings.Repeat("source\n", 30))
+			app.width, app.height = 120, 40 // wide enough for the sidebar to show the arrows
+			app.tab().state.Comments = []review.Comment{
+				{ID: "first", StartLine: 1, EndLine: 1, Body: "one", Author: "AI"},
+				{ID: "second", StartLine: 3, EndLine: 3, Body: "two", Author: "AI"},
+			}
+			app.recalculateLayout()
+			app.updateCommentSidebar()
+			app.rebuildContent()
+
+			click := func(index int, rect func(commentHeaderRegion) mouseRect) {
+				t.Helper()
+				regions := app.contentLayout.actions
+				left, top, _, _ := app.contentBounds()
+				if location == "sidebar" {
+					regions = app.sidebarActions
+					left, top, _, _ = app.commentBounds()
+					left += paneHorizontalPadding
+				}
+				r := rect(regions[index])
+				if r.left == r.right {
+					t.Fatalf("%s header %d has no such button: %+v", location, index, regions[index])
+				}
+				app = clickMouse(app, left+r.left, top+r.top)
+			}
+			current := func() string {
+				t.Helper()
+				tab := app.tab()
+				if !tab.cursorOnAnnotation || app.focused != contentPane {
+					t.Fatalf("cursor not on an annotation in the content pane: focused=%v onAnnotation=%t", app.focused, tab.cursorOnAnnotation)
+				}
+				return app.annotationsAfterLine(tab.cursorLine, tab.cursorSide)[tab.cursorAnnoIdx].id
+			}
+
+			click(0, func(r commentHeaderRegion) mouseRect { return r.down })
+			if got := current(); got != "second" {
+				t.Fatalf("after ↓ on first: cursor on %q, want second", got)
+			}
+			click(1, func(r commentHeaderRegion) mouseRect { return r.up })
+			if got := current(); got != "first" {
+				t.Fatalf("after ↑ on second: cursor on %q, want first", got)
+			}
+			click(0, func(r commentHeaderRegion) mouseRect { return r.up })
+			if got := current(); got != "second" {
+				t.Fatalf("↑ on the first comment should wrap like [, got %q", got)
+			}
+			if app.modal != noModal {
+				t.Fatalf("arrow click opened modal %v", app.modal)
+			}
+		})
+	}
+}
+
 func TestMouseClickHeaderDelete(t *testing.T) {
 	for _, location := range []string{"inline", "sidebar", "file"} {
 		for _, width := range []int{60, 120} {

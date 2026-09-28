@@ -160,12 +160,14 @@ type renderedContentLayout struct {
 
 type commentHeaderRegion struct {
 	resolve mouseRect
+	up      mouseRect
+	down    mouseRect
 	delete  mouseRect
 	id      string
 }
 
 func (r *commentHeaderRegion) translate(x, y int) {
-	for _, rect := range []*mouseRect{&r.resolve, &r.delete} {
+	for _, rect := range []*mouseRect{&r.resolve, &r.up, &r.down, &r.delete} {
 		rect.left += x
 		rect.right += x
 		rect.top += y
@@ -2540,6 +2542,10 @@ func (m *AppModel) handleCommentHeaderClick(region commentHeaderRegion, point te
 	switch {
 	case region.resolve.contains(point):
 		m.toggleResolve(region.id)
+	case region.up.contains(point):
+		m.jumpToComment(-1)
+	case region.down.contains(point):
+		m.jumpToComment(1)
 	case region.delete.contains(point):
 		m.openCommentDelete(region.id)
 	default:

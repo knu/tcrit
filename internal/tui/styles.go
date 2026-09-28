@@ -99,6 +99,10 @@ var (
 	closeButtonStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Red)
 
+	commentNavButtonStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Cyan).
+				Bold(true)
+
 	modalTitleStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(accent).

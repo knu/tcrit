@@ -371,34 +371,55 @@ func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused boo
 	return b.String(), button
 }
 
-// renderCommentHeader keeps the resolve button intact when the header wraps.
+// renderCommentHeader appends the right-aligned action group
+// "☐ Resolve  ↑ / ↓  x" to label.  Both resolution states reserve the same
+// width, and the x slot stays blank on comments that cannot be deleted, so
+// the buttons line up across threads.  When the label row is too narrow,
+// the arrows go first; the rest moves to its own row only when it does not
+// fit either.
 func renderCommentHeader(label string, resolved, deletable bool, width int) (string, commentHeaderRegion) {
-	button := inlineLabelComment.Render("☐ Resolve")
+	resolve := inlineLabelComment.Render("☐ Resolve")
 	if resolved {
-		button = resolvedBadge.Render("☑︎ Resolved")
+		resolve = resolvedBadge.Render("☑︎ Resolved")
 	}
+	resolveWidth := lipgloss.Width("☑︎ Resolved")
+	group := func(arrows bool) (string, commentHeaderRegion) {
+		actions := lipgloss.NewStyle().Width(resolveWidth).Render(resolve)
+		region := commentHeaderRegion{resolve: mouseRect{right: resolveWidth, bottom: 1}}
+		end := resolveWidth
+		if arrows {
+			actions += "  " + commentNavButtonStyle.Render("↑") + commentLineStyle.Render(" / ") + commentNavButtonStyle.Render("↓")
+			region.up = mouseRect{left: end + 2, right: end + 4, bottom: 1}
+			region.down = mouseRect{left: end + 5, right: end + 7, bottom: 1}
+			end += 7
+		}
+		deleteButton := closeButtonStyle.Render("x")
+		if deletable {
+			actions += "  " + deleteButton
+			region.delete = mouseRect{left: end + 2, right: end + 2 + lipgloss.Width(deleteButton), bottom: 1}
+		} else {
+			actions += strings.Repeat(" ", 2+lipgloss.Width(deleteButton))
+		}
+		return actions, region
+	}
+
 	header := lipgloss.Wrap(expandDisplayTabs(label), width, "")
 	rows := strings.Split(header, "\n")
-	x, y := lipgloss.Width(rows[len(rows)-1])+1, len(rows)-1
-	buttonWidth := lipgloss.Width("☑︎ Resolved")
-	deleteButton := closeButtonStyle.Render("x")
-	actionsWidth := buttonWidth
-	if deletable {
-		actionsWidth += 1 + lipgloss.Width(deleteButton)
+	last, y := lipgloss.Width(rows[len(rows)-1]), len(rows)-1
+	actions, region := group(true)
+	if last+1+lipgloss.Width(actions) > width {
+		actions, region = group(false)
 	}
-	if x+actionsWidth > width {
+	if last+1+lipgloss.Width(actions) > width {
 		header += "\n"
-		x, y = 0, y+1
-	} else {
-		header += " "
+		last, y = 0, y+1
+		if actions, region = group(true); lipgloss.Width(actions) > width {
+			actions, region = group(false)
+		}
 	}
-	header += lipgloss.NewStyle().Width(buttonWidth).Render(button)
-	region := commentHeaderRegion{resolve: mouseRect{left: x, top: y, right: x + buttonWidth, bottom: y + 1}}
-	if deletable {
-		deleteX := max(x+buttonWidth+1, width-lipgloss.Width(deleteButton))
-		header += strings.Repeat(" ", deleteX-x-buttonWidth) + deleteButton
-		region.delete = mouseRect{left: deleteX, top: y, right: deleteX + lipgloss.Width(deleteButton), bottom: y + 1}
-	}
+	x := max(0, width-lipgloss.Width(actions))
+	header += strings.Repeat(" ", x-last) + actions
+	region.translate(x, y)
 	return header, region
 }
 
