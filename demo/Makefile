@@ -33,7 +33,7 @@ clean:
 
 # Every recording rebuilds tcrit and the fixture, so the GIFs depend on the
 # demo scripts as well as the tape; Go sources would rebuild on every edit.
-%.gif: %.tape setup.sh tmux.conf clean-gif.sh $(ASSETS)
+%.gif: %.tape theme.tape setup.sh tmux.conf clean-gif.sh $(ASSETS)
 	./setup.sh
 	vhs $<
 	./clean-gif.sh $@

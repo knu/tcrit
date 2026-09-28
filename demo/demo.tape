@@ -13,7 +13,7 @@ Set FontSize 18
 Set FontFamily "Monaspace Argon NF"
 Set Width 1400
 Set Height 800
-Set Theme "Catppuccin Mocha"
+Source theme.tape
 Set Padding 20
 Set Framerate 24
 Set TypingSpeed 50ms
