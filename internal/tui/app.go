@@ -1342,12 +1342,7 @@ func (m *AppModel) resolveThread(id string, advance bool) {
 		break
 	}
 	if advance && found {
-		m.focused = contentPane
-		t.cursorOnAnnotation = false
-		t.cursorAnnoIdx = 0
-		if t.cursorLine == 0 {
-			m.moveCursorBy(t, 1, 1)
-		}
+		m.releaseThreadFocus()
 	}
 	m.persist()
 	if advance && found && hasNext && (nextTab != m.activeTab || next.id != id) {
@@ -1363,6 +1358,41 @@ func (m *AppModel) resolveThread(id string, advance bool) {
 	if advance && found {
 		m.openFinishModal()
 	}
+}
+
+// releaseThreadFocus returns focus to the source line under the cursor so a
+// resolved thread folds.
+func (m *AppModel) releaseThreadFocus() {
+	t := m.tab()
+	m.focused = contentPane
+	t.cursorOnAnnotation = false
+	t.cursorAnnoIdx = 0
+	if t.cursorLine == 0 {
+		m.moveCursorBy(t, 1, 1)
+	}
+}
+
+// clickResolve toggles thread id from its header button.  Resolving releases
+// focus so the thread folds out of the way; reopening keeps the thread
+// focused so its history is visible again.
+func (m *AppModel) clickResolve(id string) {
+	wasResolved := false
+	if t := m.tab(); t.state != nil {
+		for _, c := range t.state.Comments {
+			if c.ID == id {
+				wasResolved = c.Resolved
+				break
+			}
+		}
+	}
+	m.toggleResolve(id)
+	if wasResolved {
+		return
+	}
+	m.releaseThreadFocus()
+	m.rebuildContent()
+	m.updateCommentSidebar()
+	m.scrollToCursor()
 }
 
 // resolveAll marks every comment thread resolved in the current round.
@@ -2621,7 +2651,7 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 func (m *AppModel) handleCommentHeaderClick(region commentHeaderRegion, point tea.Mouse) bool {
 	switch {
 	case region.resolve.contains(point):
-		m.toggleResolve(region.id)
+		m.clickResolve(region.id)
 	case region.up.contains(point):
 		m.jumpToComment(-1)
 	case region.down.contains(point):

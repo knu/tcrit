@@ -597,6 +597,20 @@ func TestMouseClickTogglesCommentResolution(t *testing.T) {
 						if app.modal != noModal {
 							t.Fatalf("resolve click opened modal %v", app.modal)
 						}
+						// Resolving folds the thread by releasing focus; reopening
+						// keeps it focused so the history is visible.
+						view := ansi.Strip(app.commentViewport.View())
+						onThread := app.focused == commentPane && app.tab().sidebarCursor == 0
+						if location == "inline" {
+							view = ansi.Strip(app.contentViewport.View())
+							onThread = app.focused == contentPane && app.tab().cursorOnAnnotation
+						}
+						if onThread == wantResolved {
+							t.Fatalf("after %q: focused=%v onAnnotation=%t, want on thread=%t", label, app.focused, app.tab().cursorOnAnnotation, !wantResolved)
+						}
+						if strings.Contains(view, "original") == wantResolved {
+							t.Fatalf("after %q: history visible=%t, want %t:\n%s", label, !wantResolved, !wantResolved, view)
+						}
 					}
 				})
 			}
