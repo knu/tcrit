@@ -8,6 +8,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
@@ -2277,23 +2279,36 @@ type tabLabel struct {
 }
 
 func (m *AppModel) tabLabels() []tabLabel {
-	basenames := make(map[string]int)
-	for _, t := range m.tabs {
-		basenames[filepath.Base(t.path)]++
-	}
-
 	labels := make([]tabLabel, len(m.tabs))
 	for i, t := range m.tabs {
-		label := filepath.Base(t.path)
-		if basenames[label] > 1 {
-			label = t.path
+		label := abbreviatedTabPath(t.path)
+		start := strings.LastIndexByte(label, '/') + 1
+		filenameStyle := ansi.NewStyle().Underline(t.state != nil && unresolvedCommentCount(t.state.Comments) > 0)
+		if i == m.activeTab {
+			filenameStyle = filenameStyle.Bold()
 		}
+		label = label[:start] + filenameStyle.String() + label[start:] + ansi.NewStyle().Normal().Underline(false).String()
 		if counts := t.changeCounts(); counts != "" {
 			label += " " + counts
 		}
 		labels[i] = tabLabel{text: label}
 	}
 	return labels
+}
+
+func abbreviatedTabPath(path string) string {
+	parts := strings.Split(filepath.ToSlash(path), "/")
+	for i, part := range parts[:len(parts)-1] {
+		for j, r := range part {
+			if unicode.IsLetter(r) || unicode.IsNumber(r) {
+				if end := j + utf8.RuneLen(r); end < len(part) {
+					parts[i] = ansi.NewStyle().Italic(true).String() + part[:end] + ansi.NewStyle().Italic(false).String()
+				}
+				break
+			}
+		}
+	}
+	return strings.Join(parts, "/")
 }
 
 func (m *AppModel) renderTab(labels []tabLabel, i int, isFirst bool) string {

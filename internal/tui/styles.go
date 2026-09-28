@@ -292,7 +292,6 @@ var (
 	activeTabStyle = lipgloss.NewStyle().
 			Border(activeTabBorder, true).
 			BorderForeground(accent).
-			Bold(true).
 			Foreground(lipgloss.BrightWhite).
 			Padding(0, 1)
 
@@ -319,6 +318,8 @@ var (
 			Foreground(lipgloss.Green)
 	tabDeletedCount = lipgloss.NewStyle().
 			Foreground(lipgloss.Red)
+	tabCountDelimiter = lipgloss.NewStyle().
+				Foreground(muted)
 
 	// Context box in comment/edit modals
 	contextBoxStyle = lipgloss.NewStyle().

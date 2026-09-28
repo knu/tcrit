@@ -77,6 +77,77 @@ func TestRenderHeaderShowsCodeReviewScope(t *testing.T) {
 	}
 }
 
+func TestTabFilenameEmphasis(t *testing.T) {
+	app := setupAppWithDoc(t, "line\n")
+	app.tabs[0].path = "internal/.github/x/--/日本 file.go"
+	app.tabs[0].changedLines = map[int]bool{1: true}
+	app.tabs[0].deletedAfter = map[int][]gitpkg.DeletedLine{0: {{OldLineNum: 1, Content: "old"}}}
+	for _, active := range []int{0, -1} {
+		app.activeTab = active
+		for _, tt := range []struct {
+			name  string
+			state *fileReview
+			want  string
+		}{
+			{name: "no state"},
+			{name: "no comments", state: &fileReview{}},
+			{name: "line comment", state: &fileReview{Comments: []review.Comment{{Scope: "line"}}}, want: "日本 file.go"},
+			{name: "resolved", state: &fileReview{Comments: []review.Comment{{Resolved: true}}}},
+			{name: "file comment", state: &fileReview{Comments: []review.Comment{{Scope: "file"}}}, want: "日本 file.go"},
+		} {
+			t.Run(fmt.Sprintf("active=%d/%s", active, tt.name), func(t *testing.T) {
+				app.tabs[0].state = tt.state
+				rendered := app.renderTab(app.tabLabels(), 0, true)
+				var underlined, bold, italic strings.Builder
+				var pen uv.Style
+				parser := ansi.NewParser()
+				parser.SetHandler(ansi.Handler{
+					Print: func(r rune) {
+						if r == '(' || r == ')' {
+							if pen.Fg == nil || color.RGBAModel.Convert(pen.Fg) != color.RGBAModel.Convert(muted) {
+								t.Errorf("delimiter %q foreground = %v, want %v", r, pen.Fg, muted)
+							}
+						}
+						if pen.Underline != uv.UnderlineNone {
+							underlined.WriteRune(r)
+						}
+						if pen.Attrs&uv.AttrBold != 0 {
+							bold.WriteRune(r)
+						}
+						if pen.Attrs&uv.AttrItalic != 0 {
+							italic.WriteRune(r)
+						}
+					},
+					HandleCsi: func(cmd ansi.Cmd, params ansi.Params) {
+						if cmd == 'm' {
+							uv.ReadStyle(params, &pen)
+						}
+					},
+				})
+				for i := range len(rendered) {
+					parser.Advance(rendered[i])
+				}
+				if got := underlined.String(); got != tt.want {
+					t.Fatalf("underlined text = %q, want %q", got, tt.want)
+				}
+				wantBold := ""
+				if active == 0 {
+					wantBold = "日本 file.go"
+				}
+				if got := bold.String(); got != wantBold {
+					t.Fatalf("bold text = %q, want %q", got, wantBold)
+				}
+				if got := italic.String(); got != "i.g" {
+					t.Fatalf("italic text = %q, want %q", got, "i.g")
+				}
+				if !strings.Contains(ansi.Strip(rendered), "i/.g/x/--/日本 file.go (+1 -1)") {
+					t.Fatalf("tab label changed: %q", rendered)
+				}
+			})
+		}
+	}
+}
+
 func TestRenderHeaderPathBackground(t *testing.T) {
 	app := setupAppWithDoc(t, "first\nsecond\n")
 	app.filePath = "path/to/file"

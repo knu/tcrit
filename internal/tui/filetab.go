@@ -176,5 +176,5 @@ func (t *FileTab) changeCounts() string {
 	if len(counts) == 0 {
 		return ""
 	}
-	return "(" + strings.Join(counts, " ") + ")"
+	return tabCountDelimiter.Render("(") + strings.Join(counts, " ") + tabCountDelimiter.Render(")")
 }
