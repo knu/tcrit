@@ -144,6 +144,24 @@ tcrit install prompts                # From a repo root: install under .tcrit/pr
 tcrit check                         # Report stale installed integrations
 ```
 
+### Building a custom flow
+
+The skills only run the review loop, so your project instructions can wrap them in a larger flow.  This example has the agent draft the commit message before the review, stage it next to the code so both are reviewed together, and commit once the review is approved.  Put something like this in your `CLAUDE.md` or `AGENTS.md`:
+
+```markdown
+Every implementation request ends with a TCrit review and a commit.  After implementing what was asked:
+
+1. Stage everything with `git add -A`.
+2. Draft the commit message in `.tmp/.review/COMMIT_MESSAGE.md` and stage it with `git add -f`, so the reviewer sees the message with the code.
+3. Review with the `tcrit` skill: run `tcrit review --staged` and wait for it to exit.
+4. For every comment, make the change, update the commit message to match, stage the updated files, reply on the thread, and run the next round with `tcrit --session <id>`.  Repeat until approved.
+5. On approval, run `git restore --staged .tmp/.review/COMMIT_MESSAGE.md`, then `git commit -F .tmp/.review/COMMIT_MESSAGE.md`.
+```
+
+With that in place, an implementation request is all it takes.  Below, the agent implements the change and opens the review with its draft message as the first tab.  The reviewer sends the code back with an inline comment, then reads the updated message and asks for a shorter body with a file comment (`f`), and finally resolves the last thread with `R`, which goes straight to the approval dialog.  The agent commits with the reviewed message.
+
+![TCrit review-and-commit flow demo](demo/review-flow.gif)
+
 ## Requirements
 
 - **Go 1.25+** for building from source
