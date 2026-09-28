@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.14.0
+
+### Added
+
+- **Review bar** — the top line names what is under review and where.  The button that opens the finish dialog moves there from the footer as **Submit q**.
+- **Thread navigation buttons** — **↑** / **↓** in each comment header move to the previous or next thread like `[` / `]`, and the buttons line up across threads.
+- **Light terminal backgrounds** — text, the comment editor, and dialog dimming adapt to light backgrounds.
+
+### Changed
+
+- The header and footer are tidied up: the header line shows the path, line position, and comment count, and the footer keeps the key hints and **Help**, disappearing when the terminal is too short for it.
+- File tabs abbreviate directories to their first letter, bold the active file, and underline files with unresolved comments.
+- Counts use the singular for one.
+- The bundled skill returns from the review wait as soon as TCrit finishes.
+- The demo recordings are redone with a revised scenario.
+
+### Fixed
+
+- Renamed files are diffed against their previous path, so a rename no longer counts every line as added.
+- The last file tab joins the pane border when the tabs fill the width exactly.
+
 ## 0.13.0
 
 ### Added
