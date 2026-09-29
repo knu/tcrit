@@ -61,27 +61,9 @@ tcrit codex
 tcrit codex resume
 ```
 
-Launch Codex through `tcrit codex`, or put TCrit's bundled `codex` binary before the original Codex in PATH.  The wrapper registers the invoking tmux or Herdr pane, then executes Codex with its arguments, environment, working directory, and exit status unchanged.  It does not start a daemon or add `--remote`, `--cd`, or configuration overrides.  Codex retains its normal behavior for `--add-dir`, `--worktree`, `resume`, and other options.
+Launch Codex through `tcrit codex`, or put TCrit's bundled `codex` wrapper before the original Codex in PATH.  The wrapper records which tmux or Herdr pane Codex runs in, then starts Codex with its arguments and environment unchanged.  `go install github.com/knu/tcrit/cmd/...@latest` installs both binaries; the [mise GitHub backend](https://mise.jdx.dev/dev-tools/backends/github.html#bin_path) exposes both from the release archive when `github:knu/tcrit` comes before the tool providing Codex in `[tools]`.
 
-With `go install`, install both binaries using `go install github.com/knu/tcrit/cmd/...@latest`.  Keep the wrapper in a separate directory from the original Codex.  The bundled wrapper searches forward from its own position in PATH, skips itself and mise shims, and can chain with forward-searching wrappers such as tfil in either order.  `tcrit codex` starts the first `codex` in PATH.
-
-The [mise GitHub backend](https://mise.jdx.dev/dev-tools/backends/github.html#bin_path) exposes both binaries from the release archive.  Place `github:knu/tcrit` before the tool providing the original Codex in `[tools]`, reactivate the shell, and check `type -a codex`.  Use `mise activate` so actual installation directories appear in PATH.  To expose only `tcrit`, configure `"github:knu/tcrit" = { version = "latest", filter_bins = "tcrit" }` and launch with `tcrit codex`.
-
-Before each Codex review round, the TCrit skill runs `tcrit terminal prepare`, displays the returned marker, and adds `--terminal-request <id>` to the review command.  TCrit first checks for a terminal-filter notification.  Otherwise it searches only the visible text in panes with live wrapper registrations, using their recorded server sockets and pane IDs.  It does not enumerate all multiplexer instances or read scrollback.  A missing, unreadable, or ambiguous match fails without opening a review in a guessed pane.  Keep the marker visible and use a terminal wide enough to display it on one line.
-
-Registrations and short-lived requests are stored under `$XDG_STATE_HOME/tcrit/terminals` (default `~/.local/state/tcrit/terminals`).  Registrations include the launcher PID and process start time; stale processes are discarded during lookup.  A request expires after two minutes and is consumed when its destination is selected.  Prepare a fresh marker for every round or retry, including a saved `--session` review.  Pane text is never saved or returned to the agent.
-
-The wrapper and TCrit must run on the same host with the same state directory, and TCrit needs access to the multiplexer socket.  When both tmux and Herdr are present, the wrapper uses process ancestry to select the nearer pane.  If registration fails, it prints a warning and still starts Codex unchanged.  Resume from the intended terminal through the wrapper after installing it; an already-running Codex process has no registration.  The daemon's inherited PATH may differ from your current shell.
-
-#### Terminal filter notification interface
-
-Filters such as tfil can avoid pane text searches by reporting a marker they observe in the agent's terminal output.  [tfil](https://github.com/knu/tfil) 0.4.0 supports this with `--tcrit-notify`.  Add that option to your tfil launch or generated Codex wrapper and restart the wrapped session.  The filter is optional; without it, TCrit searches the visible text in registered panes.
-
-- Protocol v1 marker: `TCRIT-` followed by exactly 32 lowercase hexadecimal characters.  Extract the complete marker across output chunks and terminal escape sequences; the hexadecimal suffix is the request ID.  Inspect rendered output rather than assuming one PTY read equals one line.
-- On detection, execute `tcrit terminal notify <request-id>` as an argument vector, inheriting the filter's original terminal environment and the same `XDG_STATE_HOME` as TCrit.  Use `TMUX` and `TMUX_PANE`, or `HERDR_SOCKET_PATH`, `HERDR_WORKSPACE_ID`, `HERDR_TAB_ID`, and `HERDR_PANE_ID`.  Run this from the filter, not from a daemon-backed agent shell.
-- The prepare command creates the inbox before the marker is displayed.  Notification may precede the review command; no running receiver process is required.  Notifications have priority over pane text matches.  TCrit allows a short delivery/settling interval before selecting a target.
-- Exit 0 means accepted (including a repeated report from the same pane).  Invalid, expired, or consumed requests return nonzero.  Report each marker once; do not block or change the terminal stream on a rejected report.  Distinct pane notifications received before selection make the request ambiguous.  Reports arriving after consumption are rejected.
-- This is local routing, not authentication or remote control.  Neither the marker nor other pane text is executed.  This protocol works with `tfil → tcrit wrapper → codex` and `tcrit wrapper → tfil → codex` because the inbox is found by request ID, not process parentage.
+Before each review round the TCrit skill displays a one-time marker, and TCrit looks for it in the registered panes to find where to open the review, so keep the marker visible.  A terminal filter such as [tfil](https://github.com/knu/tfil) 0.4.0 with `--tcrit-notify` can report the marker directly instead; the protocol is described in [docs/terminal-filter.md](docs/terminal-filter.md).
 
 ### Agent skills
 
@@ -90,11 +72,7 @@ The binary embeds the integration for each agent and installs it with `tcrit ins
 - `tcrit [file]` — the interactive review loop. It opens the TUI on the git changes (`tcrit`), a document (`tcrit <file>`), or a versioned plan (`tcrit plan <file>`), then has the agent address the comments round by round.
 - `tcrit-cli` — a reference skill the agent loads when it needs `tcrit comment`, `tcrit comments`, session or plan targeting, bulk JSON input, or the review file format.
 
-The finish output includes resolved threads and replies, even on approval, so final reviewer instructions remain available after automatic cleanup. The review loop reads all returned threads for new instructions before committing or continuing. Unanswered agent comments and completion replies remain unchanged until there is new feedback or a substantive update. When you cancel a review or switch tasks, the agent stops its TUI and checks that its dedicated pane or tab has closed before opening a replacement. Each round closes its TUI automatically. `tcrit stop --session <id>` preserves saved state for later resumption; `tcrit clear` explicitly deletes it and refuses active reviews.
-
-If the review is interrupted after the TUI opens, the agent reads any new saved comments and replies, preserves the work and session, and reports the interruption in chat.  It then waits for explicit chat instructions before making changes or restarting TCrit.  Launch failures before the TUI is usable may be corrected and retried.
-
-The agent waits up to 10 minutes for review submission by default, using blocking tool waits without file changes or status polling.  Shorter tool timeouts continue within the same deadline.  If the deadline expires, it leaves TCrit running, retains the execution handle and recoverable output, and ends its turn.  Send `hey` after submitting to resume if the host does not resume the agent automatically.  The timeout ends only the agent's wait, not the review process.
+When you submit a round, the agent receives every thread, including resolved ones, so your final instructions reach it even on approval.  It replies only where there is new feedback, and it waits for your submission for 10 minutes by default; if that wait times out, send `hey` after submitting.  `tcrit stop --session <id>` keeps a review for later and `tcrit clear` deletes it.
 
 Run the installer from your home directory to install globally, or from a repository root to install for that project only.
 
@@ -134,7 +112,7 @@ tcrit install gemini                # From a repo root: install for that project
 
 Ask Gemini to use the `tcrit` skill to review your changes or a document. The current agent runs the review loop using the same instructions as the other integrations. Use `/skills reload` if Gemini CLI is already running, and `/skills list` to check discovery.
 
-When upgrading from the previous `@tcrit` subagent integration, remove the old `.gemini/agents/tcrit.md` (or `~/.gemini/agents/tcrit.md` for a global install) after preserving any customizations. The installer does not delete existing agent definitions.
+If you used the earlier `@tcrit` subagent integration, remove the old `.gemini/agents/tcrit.md` yourself; the installer leaves it in place.
 
 #### Prompt templates
 
@@ -226,11 +204,8 @@ git diff main feature | tcrit review --diff
 
 Detects changed files in your git repo and opens a tabbed TUI with syntax highlighting, diff markers, and inline commenting across all changed files.
 
-- Diffs staged, unstaged, and untracked changes against `HEAD` by default (`--scope=all`); reports no changes when the worktree is clean
-- With `--staged`, reads both the file list and displayed contents from the index, excluding unstaged and untracked work
-- With `--diff`, reads the supplied unified diff and labels the scope **Supplied diff**; it cannot be combined with `--scope`, `--code`, `--staged`, or `--unstaged`
-- Green gutter markers highlight changed lines
-- Comments are aggregated across all files in the session
+- Reviews staged, unstaged, and untracked changes against `HEAD` by default; `--staged` reviews only the index, and `--diff` reviews a supplied unified diff
+- Green gutter markers highlight changed lines, and comments from all files belong to one session
 
 ```bash
 # Get unresolved comments in the agent-facing format
@@ -239,21 +214,13 @@ tcrit comments --json
 
 ### Supplied diffs
 
-`tcrit --diff=changes.diff` or `tcrit --diff changes.diff` accepts one Git unified diff, with additions, deletions, renames, and binary-file placeholders. Relative and absolute paths are accepted; bare `--diff`, `--diff=-`, and `--diff -` read standard input. It works without a Git repository and uses the controlling terminal for keyboard input when stdin is a pipe. TCrit saves the input diff and the file content prepared for display in the review session directory. The separate TUI process launched in Herdr or tmux reads this saved data, so it shows the same changes without needing access to the original input.
-
-When the diff identifies the pre-change file content stored in the local Git object database, TCrit reads that content and applies the diff in memory to reconstruct the complete changed file. Otherwise it shows only the supplied context and changes at their original line numbers, marking omitted context explicitly. It never fills missing context from the working tree. Suggestions cannot span omitted lines. Input is limited to 64 MiB; when only partial file content is available, line numbers up to 1,000,000 are supported.
-
-Every supplied diff starts an independent session. For another round with updated input, regenerate it and target the saved session explicitly from its original directory:
+`tcrit --diff=changes.diff` reviews one Git unified diff, and bare `--diff` reads it from standard input, even outside a Git repository.  When the pre-change files are in the local Git object database, TCrit reconstructs the complete files; otherwise it shows the supplied context and marks omitted lines.  For another round with updated input, regenerate the diff and pass the saved session:
 
 ```bash
 git diff main feature | tcrit --diff --session <id>
 ```
 
-A new TUI opens with the replaced snapshot and saved comments. Plain `tcrit --session <id>` opens the saved diff without replacing its input. When incomplete context prevents reliable comment relocation, changed snapshots preserve the original coordinates and mark the comments as drifted for inspection.
-
 ### How code review works
-
-`--base`, its `--base-branch` alias, and the `base_branch` configuration key have been removed. Use `--scope=A..B` or `--scope=A...B` for committed comparisons; these compare committed snapshots, whereas the old `--base` compared against the working tree.
 
 Choose an explicit scope or a committed comparison:
 
@@ -266,15 +233,13 @@ tcrit --scope=main...             # compare the merge base with HEAD (omitted B)
 tcrit --scope=v0.7.0..v0.7.3      # review a historical comparison
 ```
 
-`--scope` also works with `tcrit review` and cannot be combined with a document or `--diff`.  In `A..B` and `A...B`, endpoints are resolved by Git and an omitted endpoint means HEAD: `main..` compares main with HEAD, while `main...` compares their merge base with HEAD.  Three-dot comparisons require a unique merge base.  The displayed contents come from the right endpoint, even if the working tree differs.  Keep the dots when omitting B so the comparison method remains explicit.
-
-The selected scope stays fixed for the session.  To inspect another comparison, start a separate review with a different scope; each new invocation receives an independent session ID, even with identical scope arguments.  `--staged` and `--scope=staged` select the same kind of comparison, as do `--unstaged` and `--scope=unstaged`.  Conflicting scope flags are rejected.  Use `tcrit comments --session <id>` and `tcrit comment --session <id>` for these reviews; the finish prompt identifies the session.  Reconnecting for the next round retains the selected scope and refreshes comparison endpoints.  An empty comparison is rejected for a new review; a resumed review can still display saved comments when all changes have been removed.  Without explicit flags, the scope is all: HEAD versus the working tree plus untracked files.  A clean working tree does not fall back to committed changes.
+An omitted endpoint means HEAD, and committed comparisons show the right endpoint's contents even if the working tree differs.  The scope stays fixed for the session, and every new invocation gets its own session ID, so use `--session <id>` with the comment commands when several reviews exist.
 
 1. An agent (or you) runs `tcrit review --code` — the TUI opens in a Herdr tab or tmux split and the command blocks
 2. Navigate between files and leave inline comments on the changes
 3. Press `q` or click **Submit** in the top bar — the finish dialog offers **Finish Review** with unresolved comments and **Approve** without any
-4. On finish, the blocked command prints all comment threads and replies, including resolved threads on approval, with instructions on stdout and `approved: true|false` on stderr
-5. The agent edits the files, replies with `tcrit comment --reply-to`, and runs the printed `tcrit --session <id>` to start the next round; a new TUI restores the comments and remaps their anchors onto the updated contents
+4. On finish, the blocked command prints every thread with instructions for the agent and `approved: true|false`
+5. The agent edits the files, replies with `tcrit comment --reply-to`, and runs the printed `tcrit --session <id>` for the next round, where the comments follow the updated code
 6. Resolve comments with `r` and approve to end the loop
 
 ## Stopping and resuming
@@ -286,9 +251,7 @@ tcrit --session <id>             # reopen from the original directory
 tcrit clear --session <id>       # explicitly delete a stopped review
 ```
 
-The TUI and its dedicated Herdr tab or tmux pane close after every submitted round, including rounds with unresolved comments. Stopping mid-round keeps saved comments, replies, resolution status, and the current round number. Submitting a round advances the number when it is reopened. Saved source context supports comment relocation after edits; unsaved editor input and cursor position are not restored. Code and document reviews read their current source when resumed, while plan and supplied-diff reviews reopen the saved input unless replacement input is provided.
-
-The session ID is printed when a review starts and included in the finish prompt. Use it for all comment operations when multiple reviews exist. Starting a new task does not delete earlier reviews. Approval retains the existing `cleanup_on_approve` behavior, which deletes approved review data by default.
+The TUI closes after every submitted round.  Stopping mid-round keeps the comments, replies, and round number; code and document reviews reread their sources when resumed, while plan and supplied-diff reviews reopen the saved input.  The session ID is printed when a review starts and in the finish prompt.  Approval deletes the review data by default (`cleanup_on_approve`).
 
 ## Plan Review (versioned)
 
@@ -297,7 +260,7 @@ tcrit plan docs/plans/my-plan.md            # slug derived from the first headin
 tcrit plan --name auth docs/plans/plan.md   # pinned slug
 ```
 
-Saves numbered versions and `current.md` inside the session directory, normally `~/.local/state/tcrit/reviews/<id>/`. Each new invocation creates an independent review, even with the same plan name. Run `tcrit plan --session <id> <file>` to submit a revised version, or `tcrit --session <id>` to reopen the saved version. The plan command also accepts stdin. Comments carry forward onto revised text.
+Saves numbered versions of the plan in the session directory.  Run `tcrit plan --session <id> <file>` to submit a revised version (stdin works too), or `tcrit --session <id>` to reopen the saved one.  Comments carry forward onto the revised text.
 
 ## Document Review (single file)
 
@@ -311,7 +274,7 @@ Opens a full-screen terminal UI with syntax-highlighted markdown, a comment side
 
 When `tcrit review` runs inside Herdr, the TUI automatically opens in a dedicated full-width tab. Inside tmux, it opens in a side-by-side split pane. In both cases the invoking command blocks until you finish the review — the same feedback loop as [crit](https://github.com/tomasz-tomczyk/crit), with a TUI in place of the browser.
 
-Tcrit resolves the Herdr workspace, tab, and pane or the tmux server and pane from the invoking process tree.  This also works when command runners omit multiplexer environment variables but remain in the terminal's process tree.  For Codex's shared daemon, use the [Codex wrapper](#codex-with-a-background-server).  When multiplexers are nested, the nearest one in the process ancestry owns the review.
+TCrit finds the pane that ran the command from the process tree, even when the agent's tool runner drops the multiplexer environment variables.  For Codex's background server, use the [Codex wrapper](#codex-with-a-background-server).
 
 ### How document review works
 
@@ -336,58 +299,49 @@ Tcrit resolves the Herdr workspace, tab, and pane or the tmux server and pane fr
 | `v`                                   | Visual select mode (multi-line comments) |
 | `s`                                   | Toggle comment sidebar                   |
 | `t`                                   | Switch the sidebar between the file tree and comments, and focus it |
-| `j` / `k`, `enter`, `h` / `l`, `←` / `→` (file tree) | Move (moving onto a file opens its tab); toggle a folder or open the file and focus the source; fold a folder or go to its parent / unfold a folder or enter it.  On a row too long for the sidebar, `→` and `l` scroll it to reveal the rest and `←` and `h` scroll back before folding |
+| `j` / `k`, `enter`, `h` / `l` (file tree) | Move (moving onto a file opens its tab), open the file or toggle a folder, fold / unfold |
 | `[` / `]`                             | Jump to prev / next comment; skip resolved comments unless unfolded with `h`.  `]` on the last comment opens the finish dialog |
 | `h`                                   | Toggle folding resolved comments across all files |
 | `H`                                   | Hide/show comment boxes across all files; show line markers in a narrow right gutter |
 | `w`                                   | Toggle ignore whitespace across all files in code reviews |
 | `r`                                   | Resolve / unresolve the focused comment in place |
-| `R`                                   | Resolve the focused comment, or leave it resolved, and jump to the next unresolved thread, or open the finish dialog if none remain |
+| `R`                                   | Resolve the focused comment and jump to the next unresolved thread, or open the finish dialog if none remain |
 | `d`                                   | Delete the selected comment after confirmation |
 | `ctrl+PgUp` / `ctrl+PgDn`               | Scroll the selected inline or sidebar thread |
 | `?`                                   | Show all keyboard shortcuts              |
 | `q`                                   | Finish review (Approve when no unresolved comments remain) |
 
-Ignore whitespace is off by default and lasts for the current TUI run.  It ignores changes in spaces, tabs, carriage returns (CR, `\r`, including LF ↔ CRLF changes), and other ASCII whitespace within a line, including inside strings; it still shows added or deleted blank lines.  The header indicates when it is enabled.  Existing comments on ignored old-side lines retain their context, and files remain available even if all their changes are ignored.
+Ignore whitespace (`w`) hides changes in spaces and tabs within a line, including LF and CRLF differences, while still showing added or deleted blank lines.
 
-**File references:** Comments and replies recognize `@path/to/file` with an optional space followed by `L` and a positive line number.  Click an underlined reference to navigate.  No boundary is required after the digits: `@file L40にある通り` and `@file L40-45` both target line 40.  Paths are relative to the review's working directory, or absolute.  Letters, digits, and combining marks of any script, plus `.`, `_`, `-`, and `/`, need no escaping; extensionless names such as `@Makefile` are supported.  A backslash escapes the next character, including spaces, other punctuation, and backslashes: `@my\ file.md L40` refers to `my file.md`.  Escapes cannot cross a newline.  The `@` must start the body or follow whitespace.  Only existing regular files become links.  When prose without word spacing follows a path directly, as in `@main.goを参照`, the longest leading part naming an existing file is linked.  Copied and completed paths are escaped automatically; an underscore is escaped unless it sits between two word characters, so `__init__.py` does not turn into emphasis in Markdown viewers, while both spellings are recognized.
+**File references:** `@path/to/file`, optionally followed by ` L40`, in a comment or reply becomes a clickable link to that file and line.  Paths are relative to the review's working directory; escape a space with a backslash.  `alt+w` copies a ready-made reference for the current line, `ctrl+y` pastes it, and typing `@` completes paths, as described below.
 
-Line numbers refer to the new side of the review.  Unchanged lines available in a complete file are valid destinations; lines missing from a partial supplied diff are not.  A reference without a line opens the file's tab at its start.  If the file or line is unavailable in the review, a confirmation dialog offers to open it in `$EDITOR`, with Cancel selected by default.  TCrit does not check whether the requested line exists on disk.  Missing files are never created through these actions.  The shortcuts apply outside comment editors and other dialogs.
+A reference without a line opens the file's tab.  When the file or line is not part of the review, a dialog offers to open it in `$EDITOR`, which also serves `alt+e` and `alt+g`; TCrit passes `--goto FILE:LINE` to editors that advertise it and `+LINE FILE` to the rest.
 
-`$EDITOR` may include quoted arguments, which are preserved.  With a line number, TCrit probes `--help` once per editor setting during the TUI run: an advertised `--goto` option selects `--goto FILE:LINE`; otherwise it uses `+LINE FILE`.  Help output on either stream is accepted, including nonzero exits such as nvi's unsupported-option response; a timed-out probe falls back to `+LINE FILE`.  Without a line number it passes only the filename.  An unset `$EDITOR` defaults to `vi`.
-
-**Copying references:** Outside dialogs, `alt+w` (`M-w`) adds a separate kill-ring entry for the current source line (`@path L42`) or focused thread (`c_a3f8b2`), including sidebar threads.  Paste with `ctrl+y` in a comment or reply and cycle earlier entries with `alt+y`.  Source paths are escaped automatically.  Deleted source lines and files without a current source line produce a file reference without a line number; paths containing newlines cannot be copied in this notation.
-
-**Thread references:** A comment ID such as `c_a3f8b2` in a comment or reply links to that thread in the current review, including when surrounded by backticks.  Clicking it switches files as needed, reveals hidden comments, and focuses the thread, including resolved threads.  Comment IDs stay unchanged across review rounds.  Unknown or ambiguous IDs remain plain text; references to other sessions and individual replies are not supported.
+**Thread references:** A comment ID such as `c_a3f8b2` in a comment or reply links to that thread, even across review rounds; click it to jump there.  `alt+w` copies the focused thread's ID, as it does for source lines.
 
 **Comment dialogs:**
 
-When editing an existing reply, its saved body is omitted from the reference thread and appears only in the input field.  The other messages remain available for context.
-
 | Key      | Action                                                        |
 |----------|---------------------------------------------------------------|
-| `ctrl+s` | Save the comment or reply; delete an existing entry if cleared; close if unchanged or a new entry is empty |
+| `ctrl+s` | Save the comment or reply (an existing one cleared to empty is deleted) |
 | `ctrl+o` | Edit the comment or reply in `$EDITOR`                         |
 | `alt+s` | Insert a suggestion block and select its code for replacement |
 | `ctrl+y` | Yank the latest kill at the cursor, replacing selected text |
-| `alt+y` | After a yank or yank-pop, replace the yanked text with the next older kill; wrap at the end |
+| `alt+y` | After a yank, replace the yanked text with the next older kill |
 | `ctrl+v` | Paste an image or text from the host's clipboard              |
-| `ctrl+k` | Kill the selection, or text from the cursor to line end; at line end, kill the next newline |
-| `ctrl+u` | Kill the selection, or text back to line start; at line start, kill the previous newline |
+| `ctrl+k` | Kill the selection, or text from the cursor to line end |
+| `ctrl+u` | Kill the selection, or text back to line start |
 | `ctrl+w` / `alt+Backspace` | Kill the selection or the previous word |
 | `alt+d` / `alt+Delete` | Kill the selection or the next word |
 | `Delete` / `Backspace` | Delete the selected text, or the next / previous character |
 | `ctrl+PgUp` / `ctrl+PgDn` | Scroll code context and thread history             |
-| `@path` + `tab` | Complete the file name at the cursor with the first candidate; a directory completes with `/` and lists its entries |
-| `↑` / `↓` + `enter` | Choose a completion candidate and accept it; `esc` closes the list |
+| `@path` + `tab` | Complete the file name at the cursor; `↑` / `↓` and `enter` pick another candidate |
 
-**File completion:** Typing `@` at the start of a line or after whitespace, followed by at least one path character, lists matching entries of that directory below the `@`, or above it when there is no room below.  Only one directory level is listed, with directories shown as `name/`.  Candidates are matched fuzzily against the typed segment; dot files appear only when the segment starts with `.`, and `.git` is never listed.  Keep typing to narrow the list.  `tab` accepts the first candidate, and `↑` / `↓` with `enter` accept the highlighted one.  A completed file name is followed by a space and closes the list; a completed directory keeps the list open on its entries.  `esc` closes the list until the text changes, and `enter` without a highlighted candidate inserts a newline as usual.  The list is hidden when nothing matches or the screen has no room, but `tab` still completes with the first candidate.
+**File completion:** Typing `@` followed by a path lists the matching entries of that directory, one level at a time, matched fuzzily.  `tab` accepts the first candidate and `esc` closes the list.
 
-The kill ring holds up to 60 entries, shared across comment and reply dialogs during the current TUI run.  Consecutive kills combine into one entry in text order.  Other keys, mouse actions, or pasted input end the sequence and disable yank-pop until the next `ctrl+y`.  Ordinary Delete/Backspace do not add entries.  `alt` is the terminal's Meta modifier (`M-y` / `M-s`); configure your terminal to send Meta for these shortcuts.
+The kill ring is shared across comment and reply dialogs for the TUI run and is independent of the system clipboard.  `alt` is the terminal's Meta modifier; configure your terminal to send Meta for these shortcuts.
 
-The kill ring is independent of the system clipboard.  `ctrl+v` first checks for an image, then falls back to text.  On macOS, AppKit reads copied image files and clipboard bitmaps and converts them to PNG.  On Linux, image paste requires `wl-paste` on Wayland or `xclip` on X11.  PNG, JPEG, GIF, and WebP attachments are limited to 5 MiB each.  Press Escape to cancel a pending paste.  When TCrit runs over SSH, it reads the remote host's clipboard.  The input box has no undo/redo; use `ctrl+o` to edit in your external editor when you need those commands.
-
-Images are stored in the review session's `attachments/` directory; comments contain `![clipboard image](attachments/<id>.png)` references.  The TUI displays the reference, without an inline image preview.  Files remain available across rounds and stop/resume, including images from discarded drafts.  With the default `cleanup_on_approve` setting, approval defers deletion until the agent has read the images and runs the printed `tcrit clear --session <id>` command.  For a review without an agent, run that command yourself after reading the result.  Clearing a session removes all its attachments; disabling approval cleanup retains them with the rest of the review.
+`ctrl+v` pastes an image when the clipboard holds one and text otherwise.  Image paste uses AppKit on macOS and needs `wl-paste` or `xclip` on Linux; over SSH it reads the remote host's clipboard.  Images are saved under the session's `attachments/` directory and referenced from the comment as Markdown, and they survive rounds and stop/resume.  With the default `cleanup_on_approve`, approval defers deletion until the agent has read them and runs the printed `tcrit clear --session <id>`.
 
 **Code review only:**
 
@@ -395,24 +349,18 @@ Images are stored in the review session's `attachments/` directory; comments con
 |---------------------|--------------------------------|
 | `tab` / `shift+tab` | Next / previous file tab from the content pane or sidebar; keep pane focus |
 | `n` / `N`           | Jump to next / previous change or unresolved comment from either pane |
-| `alt+p` (`M-p`)     | Open the file selector: type to filter tabs fuzzily, `↑` / `↓` or `ctrl+p` / `ctrl+n` choose, `enter` switches, `esc` cancels |
+| `alt+p` (`M-p`)     | Open the file selector: type to filter tabs fuzzily, `↑` / `↓` choose, `enter` switches |
 | `1`-`9`             | Switch to the numbered file tab from the content pane |
 
-`f` opens a new reply to the first existing file-comment thread, including resolved threads, or creates a file comment if none exists.  Saving a reply reopens a resolved thread.
-
-The file selector lists every tab in order when the search field is empty, with the current file preselected.  Typing filters with a fuzzy match that allows gaps; separate several words with spaces to require all of them, as in VS Code.  Files whose basename matches the most words come first, ranked by basename score, then whole-path score, then tab order.  Matched characters are highlighted, and the list scrolls to keep the choice visible.  `/` no longer searches tabs; it is reserved for a future in-source search.
-
-`n` / `N` visit change hunks and unresolved comments in display order across files, including file comments and separate threads on the same line.  They stop at the review boundaries and skip resolved comments even when unfolded with `h`.  Jumping to a comment reveals comments hidden with `H`.
+`f` replies to the file's existing thread, or creates a file comment when there is none.  The file selector matches like VS Code's: gaps are allowed, several words must all match, and basename matches rank first.  `n` / `N` visit change hunks and unresolved comments in display order across files and reveal comments hidden with `H`.
 
 ## Mouse controls
 
 - Click a file tab, code line, inline comment, sidebar, or sidebar comment to focus it.  Click the sidebar's **Comments** or **Files** tab to switch views; in the file tree, click a folder to fold or unfold it and a file to open it.
-- Every inline or sidebar thread header ends with a right-aligned button group.  Click **☐ Resolve** to resolve the thread, or **☑︎ Resolved** to reopen it; file comments support the same toggle.  Both states reserve the same button width, and collapsed headers keep the reply count without adding the author's name, so the buttons stay in the same position when a thread is toggled.  Resolving by click releases focus so the thread folds; reopening keeps the thread focused so its history stays visible.  `r` toggles in place without moving focus.
-- Click **↑** or **↓** next to the toggle to move to the previous or next thread, exactly as `[` and `]` do: across files and skipping folded resolved threads.  **↑** wraps from the first thread to the last; **↓** on the last thread opens the finish dialog.  When a header is too narrow for all the buttons, the arrows are omitted before the group moves to its own row.
-- Click the red **x** at the right edge to delete a comment after confirmation.  It appears only on your own comments from the current round that have no replies, including file comments; other headers leave its slot blank so the buttons line up.
-- Scroll code with the mouse wheel.  Over an inline or sidebar thread, the wheel focuses it and scrolls its full history; at the thread's limit, scrolling continues through the surrounding pane.
-- Hover over the `+`/`-` gutter to reveal a yellow `>` comment marker, then click to comment on a current or deleted line, or drag to select multiple lines on the same diff side.  Dragging to the top or bottom edge scrolls one line at a time.
-- Click inside a comment text box to focus it and position the cursor, or use the mouse wheel to move through longer comments.
+- Every thread header ends with a button group.  **☐ Resolve** resolves the thread and lets it fold; **☑︎ Resolved** reopens it and keeps it focused so its history stays visible.  **↑** / **↓** move to the previous or next thread like `[` / `]`, and **↓** on the last thread opens the finish dialog.  The red **x** deletes your own unanswered comment from the current round after confirmation.
+- Scroll code with the mouse wheel; over a thread, the wheel scrolls its history first.
+- Click the gutter to comment on a current or deleted line, or drag along it to select several lines.
+- Click inside a comment text box to focus it and position the cursor.
 - Click actions in comment and finish dialogs, including **Close**.  The **Submit** button in the top bar opens the finish dialog, and the footer **Help** button opens the keyboard help.
 
 ## Scriptable CLI
