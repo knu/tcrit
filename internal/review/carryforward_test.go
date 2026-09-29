@@ -88,6 +88,33 @@ func TestCarryForwardToleratesInPlaceEdit(t *testing.T) {
 	}
 }
 
+func TestCarryForwardToleratesMiddleCut(t *testing.T) {
+	for _, tt := range []struct{ name, before, after string }{
+		{"removed clause", `continue. If this organization has no locations yet,{" "}`, `continue.{" "}`},
+		{"inserted clause", `continue.{" "}`, `continue. If this organization has no locations yet,{" "}`},
+		{"Japanese clause", "処理を開始し、必要な設定をすべて読み込んでから終了します。", "処理を終了します。"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := Comment{ID: "c_1", StartLine: 2, EndLine: 2, Anchor: tt.before}
+			got := carryOne(t, c, "first\n"+tt.before+"\nlast\n", "first\n"+tt.after+"\nlast\n")
+			if got.Drifted || got.StartLine != 2 || got.EndLine != 2 {
+				t.Errorf("middle cut should keep position: %+v", got)
+			}
+		})
+	}
+}
+
+func TestCarryForwardPrefersExactMovedAnchor(t *testing.T) {
+	const anchor = "the quick brown fox jumps"
+	prev := anchor + "\nfirst\nsecond\nthird\n"
+	next := anchor + " again\nfirst\nsecond\nthird\n" + anchor + "\n"
+	c := Comment{ID: "c_1", StartLine: 1, EndLine: 1, Anchor: anchor}
+	got := carryOne(t, c, prev, next)
+	if got.Drifted || got.StartLine != 5 || got.EndLine != 5 {
+		t.Errorf("exact moved anchor should beat similar text: %+v", got)
+	}
+}
+
 func TestCarryForwardSkipsFileScopeAndOldSide(t *testing.T) {
 	prev := "a\nb\n"
 	next := "x\ny\nz\n"
@@ -120,6 +147,31 @@ func TestCarryForwardClampsBeyondEOF(t *testing.T) {
 	}
 }
 
+func TestOneMiddleCut(t *testing.T) {
+	for _, tt := range []struct {
+		short, long string
+		want        bool
+	}{
+		{"abef", "abcdef", true},
+		{"ab", "abcdef", true},
+		{"ef", "abcdef", true},
+		{"", "abcdef", true},
+		{"abde", "abcdexf", false},
+		{"efab", "abcdef", false},
+		{"abcdef", "abcdef", false},
+		{"abcdefg", "abcdef", false},
+		{"a—f", "a—cdf", true},
+		{"af", "a—f", true},
+		{"é", "ê©", false}, // Matching bytes must not split UTF-8 runes.
+	} {
+		t.Run(tt.short+"/"+tt.long, func(t *testing.T) {
+			if got := oneMiddleCut(tt.short, tt.long); got != tt.want {
+				t.Errorf("oneMiddleCut(%q, %q) = %v, want %v", tt.short, tt.long, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAnchorSimilar(t *testing.T) {
 	tests := []struct {
 		a, b string
@@ -130,6 +182,8 @@ func TestAnchorSimilar(t *testing.T) {
 		{"}", "} // end", false},                                // short anchors never contain-match
 		{"the quick brown fox", "the quick brwon fox", true},    // small typo, ratio >= 0.7
 		{"completely different", "nothing alike here!", false},
+		{"return nil, err", `return fmt.Errorf("failed to open config file %q: %w", path, err)`, false},
+		{"t.Fatal(err)", `t.Fatalf("unexpected error reading %s: %v", path, err)`, false},
 	}
 	for _, tt := range tests {
 		if got := anchorSimilar(tt.a, tt.b); got != tt.want {

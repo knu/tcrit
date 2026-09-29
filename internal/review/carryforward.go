@@ -135,23 +135,26 @@ func verifyAndCorrectPosition(newLines []string, anchor string, lcsStart, lcsEnd
 	anchorLines := strings.Split(anchor, "\n")
 	anchorLen := len(anchorLines)
 
-	// Check if the LCS position still matches.
+	var candidate string
 	if lcsStart >= 1 && lcsStart+anchorLen-1 <= len(newLines) {
-		candidate := strings.Join(newLines[lcsStart-1:lcsStart+anchorLen-1], "\n")
+		candidate = strings.Join(newLines[lcsStart-1:lcsStart+anchorLen-1], "\n")
 		if candidate == anchor {
 			return lcsStart, lcsStart + anchorLen - 1, 0
 		}
+	}
+
+	// Prefer exact text, including moved text, over an in-place near match.
+	if found := findAnchorInLines(newLines, anchor, lcsStart); found > 0 {
+		return found, found + anchorLen - 1, 0
+	}
+
+	if candidate != "" {
 		// Edited-but-recognizable: if LCS predicts the same row and the line
 		// is still close enough to the original, treat as anchored. Avoids
 		// false drift when text was appended/trimmed/tweaked in place.
 		if anchorSimilar(candidate, anchor) {
 			return lcsStart, lcsStart + anchorLen - 1, 0
 		}
-	}
-
-	// LCS position doesn't match — search the entire file.
-	if found := findAnchorInLines(newLines, anchor, lcsStart); found > 0 {
-		return found, found + anchorLen - 1, 0
 	}
 
 	// Anchor not found anywhere — mark drifted, keep the LCS position.
@@ -207,14 +210,31 @@ func anchorSimilar(candidate, anchor string) bool {
 	if a == "" || b == "" {
 		return false
 	}
-	// Common case: text was appended to or trimmed from the anchor line.
+	// Text may be appended, trimmed, or cut from the middle of the line.
 	// Gate on a minimum length so trivial anchors (`}`, `return nil`) don't
 	// match any longer line that happens to contain them.
-	minLen := min(len(a), len(b))
-	if minLen >= 8 && (strings.Contains(a, b) || strings.Contains(b, a)) {
+	shorter, longer := a, b
+	if len(longer) < len(shorter) {
+		shorter, longer = longer, shorter
+	}
+	if len(shorter) >= 8 && (strings.Contains(longer, shorter) || oneMiddleCut(shorter, longer)) {
 		return true
 	}
 	return levenshteinRatio(a, b) >= 0.7
+}
+
+// oneMiddleCut follows crit's contiguous-cut matching.  Only split at rune
+// boundaries so an edit cannot retain part of a multi-byte character.
+func oneMiddleCut(short, long string) bool {
+	if len(short) >= len(long) {
+		return false
+	}
+	for k := range short {
+		if strings.HasPrefix(long, short[:k]) && strings.HasSuffix(long, short[k:]) {
+			return true
+		}
+	}
+	return strings.HasPrefix(long, short)
 }
 
 // levenshteinRatio returns 1 - (distance / maxLen), clamped to [0, 1].
