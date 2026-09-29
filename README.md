@@ -19,7 +19,7 @@ Your agent writes code or a plan, you review it in the TUI, and the agent reads 
 - **Review in the terminal** — read plans, documents, and multi-file diffs with syntax highlighting, and comment on a line, a range, a deleted line, or a whole file.
 - **Round trips with your agent** — the agent opens the review in a Herdr tab or a tmux split, waits for you to submit, reads your comments, and comes back with the next round.  `tcrit install` sets this up for Claude Code, Codex, OpenCode, and Gemini CLI.
 - **Any change set** — staged, unstaged, or committed ranges such as `main...`, supplied diffs from `git diff | tcrit --diff`, single documents, and versioned plans that carry comment threads across revisions.
-- **Comments made for code review** — replies, resolve and reopen, GitHub-style suggestions, clipboard images, `@path L40` and comment-ID references, and editing in `$EDITOR`.
+- **Comments made for code review** — replies, resolve and reopen, GitHub-style suggestions, clipboard images, `@path L40` and comment-ID references, and editing in `$EDITOR`.  Multi-line comments follow insertions and deletions within the selected range across review rounds.
 - **Fast navigation** — a file tree sidebar, fuzzy file switching, `n` / `N` across changes and open threads, whitespace-insensitive diffs, and `H` to hide comments while reading.
 - **Mouse and keyboard** — vim-style keys throughout, plus clickable tabs, lines, threads, and buttons, gutter drag to select ranges, and wheel scrolling.
 - **Scriptable and Crit-compatible** — [Crit](https://crit.md/)-compatible `review.json`, `tcrit comment` and `tcrit comments` for automation, and sessions that stop and resume by ID.

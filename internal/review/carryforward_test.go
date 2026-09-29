@@ -1,6 +1,7 @@
 package review
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -64,6 +65,33 @@ func TestCarryForwardFindsMovedAnchor(t *testing.T) {
 	}
 }
 
+func TestCarryForwardResizesRange(t *testing.T) {
+	for _, tt := range []struct {
+		name, before, after string
+		wantEnd             int
+	}{
+		{"insert inside", "begin\nmiddle\nend", "begin\nadded one\nadded two\nmiddle\nend", 6},
+		{"delete inside", "begin\nremoved one\nremoved two\nmiddle\nend", "begin\nmiddle\nend", 4},
+		{"separate insertions", "begin\nmiddle\nend", "begin\nfirst large addition\nmiddle\nsecond large addition\nend", 6},
+		{"separate deletions", "begin\nfirst large removal\nmiddle\nsecond large removal\nend", "begin\nmiddle\nend", 4},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			prev := "outside before\n" + tt.before + "\noutside after\n"
+			next := "outside before\n" + tt.after + "\noutside after\n"
+			c := Comment{ID: "c_range", StartLine: 2, EndLine: 2 + strings.Count(tt.before, "\n"), Anchor: tt.before}
+			got := carryOne(t, c, prev, next)
+			if got.StartLine != 2 || got.EndLine != tt.wantEnd || got.Drifted {
+				t.Fatalf("resized range = %d-%d, drifted=%v; want 2-%d", got.StartLine, got.EndLine, got.Drifted, tt.wantEnd)
+			}
+			// A later round must retain the resized range and original anchor.
+			got = carryOne(t, got, next, "new heading\n"+next)
+			if got.StartLine != 3 || got.EndLine != tt.wantEnd+1 || got.Drifted || got.Anchor != tt.before {
+				t.Errorf("next round lost resized range: %+v", got)
+			}
+		})
+	}
+}
+
 func TestCarryForwardMarksDriftedWhenAnchorRemoved(t *testing.T) {
 	prev := "keep\nremove me entirely\nkeep too\n"
 	next := "keep\nkeep too\n"
@@ -73,6 +101,29 @@ func TestCarryForwardMarksDriftedWhenAnchorRemoved(t *testing.T) {
 
 	if !got.Drifted {
 		t.Errorf("expected drifted, got %+v", got)
+	}
+}
+
+func TestCarryForwardRangeBoundaries(t *testing.T) {
+	for _, tt := range []struct {
+		name, next string
+		start, end int
+		drifted    bool
+	}{
+		{"outside insertions", "before\nnew before\nbegin\nmiddle\nend\nnew after\nafter", 3, 5, false},
+		{"entire range removed", "before\nafter", 2, 2, true},
+		{"entire range replaced", "before\nunrelated\nreplacement\ntext\nafter", 2, 2, true},
+		{"exact moved range", "before\nbegin\nchanged\nend\nafter\nbegin\nmiddle\nend", 6, 8, false},
+		{"shrinks at EOF", "before\nbegin\nend", 2, 3, false},
+		{"in-place edits on every line", "before\nbegin!\nmiddle!\nend!\nafter", 2, 4, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := Comment{ID: "c_range", StartLine: 2, EndLine: 4, Anchor: "begin\nmiddle\nend"}
+			got := carryOne(t, c, "before\nbegin\nmiddle\nend\nafter", tt.next)
+			if got.StartLine != tt.start || got.EndLine != tt.end || got.Drifted != tt.drifted {
+				t.Errorf("range = %d-%d, drifted=%v; want %d-%d, drifted=%v", got.StartLine, got.EndLine, got.Drifted, tt.start, tt.end, tt.drifted)
+			}
+		})
 	}
 }
 

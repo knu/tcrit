@@ -148,6 +148,16 @@ func verifyAndCorrectPosition(newLines []string, anchor string, lcsStart, lcsEnd
 		return found, found + anchorLen - 1, 0
 	}
 
+	if anchorLen > 1 && lcsStart >= 1 && lcsEnd >= lcsStart && lcsEnd <= len(newLines) {
+		// Preserve both mapped boundaries when edits change the range's size.
+		// Unchanged endpoints identify internal edits even when the inserted
+		// or removed text is too large for the similarity threshold.
+		if lcsEnd > lcsStart && lcsEnd-lcsStart+1 != anchorLen &&
+			newLines[lcsStart-1] == anchorLines[0] && newLines[lcsEnd-1] == anchorLines[anchorLen-1] {
+			return lcsStart, lcsEnd, 0
+		}
+	}
+
 	if candidate != "" {
 		// Edited-but-recognizable: if LCS predicts the same row and the line
 		// is still close enough to the original, treat as anchored. Avoids
