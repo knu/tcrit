@@ -40,11 +40,15 @@ func (m *AppModel) rebuildContent() {
 			if c.Scope == "file" {
 				continue
 			}
-			endAt := c.EndAt()
-			if c.Side == "old" {
-				oldAnnosByEndLine[endAt] = append(oldAnnosByEndLine[endAt], newAnnotation(c))
+			ref := commentLocation(t, c)
+			if ref.line == 0 {
+				continue
+			}
+			endAt := ref.line
+			if ref.side == "old" {
+				oldAnnosByEndLine[endAt] = append(oldAnnosByEndLine[endAt], tabAnnotation(t, c))
 			} else {
-				annosByEndLine[endAt] = append(annosByEndLine[endAt], newAnnotation(c))
+				annosByEndLine[endAt] = append(annosByEndLine[endAt], tabAnnotation(t, c))
 			}
 		}
 	}
@@ -54,7 +58,7 @@ func (m *AppModel) rebuildContent() {
 	oldAnnotatedLines := make(map[int]int)
 	if t.state != nil {
 		for _, c := range t.state.Comments {
-			if c.Scope == "file" {
+			if c.Scope == "file" || commentDrifted(t, c) {
 				continue
 			}
 			lines := annotatedLines
@@ -73,7 +77,12 @@ func (m *AppModel) rebuildContent() {
 	// Determine which lines to highlight from the selected annotation.
 	sidebarHighlightStart, sidebarHighlightEnd, sidebarHighlightSide := m.highlightedCommentLines()
 
+	groups := m.driftedGroups()
 	contentWidth := m.contentViewport.Width()
+	for _, ids := range groups {
+		width := lipgloss.Width(fmt.Sprintf("💬 %d", len(ids))) + 1
+		contentWidth = min(contentWidth, m.contentViewport.Width()-width)
+	}
 	boxWidth := contentWidth - gutterWidth
 	if boxWidth < 20 {
 		boxWidth = 20
@@ -104,11 +113,17 @@ func (m *AppModel) rebuildContent() {
 	b.Grow(len(sourceLines) * 200) // pre-allocate to reduce allocations
 	layout := newRenderedContentLayout()
 	appendAnnotation := func(ann annotation, focused bool, target contentMouseTarget) {
+		if ann.drifted && !focused {
+			return
+		}
 		box, button := m.renderAnnotationBox(ann, boxWidth, focused)
 		button.translate(0, len(layout.rows))
 		button.id = ann.id
 		layout.actions = append(layout.actions, button)
 		layout.appendBlock(&b, box, target)
+	}
+	if len(groups[lineRef{}]) > 0 {
+		layout.appendBlock(&b, "", contentMouseTarget{drifted: true})
 	}
 	if !m.hideComments {
 		for idx, ann := range m.annotationsAfterLine(0, "") {
@@ -123,7 +138,7 @@ func (m *AppModel) rebuildContent() {
 			layout.appendBlock(&b, "\n  Added file removed — no longer part of the changes.", contentMouseTarget{})
 		}
 		m.contentLayout = layout
-		m.contentViewport.SetContent(b.String())
+		m.contentViewport.SetContent(m.decorateDrifted(b.String(), &m.contentLayout, groups))
 		return
 	}
 	renderDeleted := func(afterLine int) {
@@ -317,7 +332,7 @@ func (m *AppModel) rebuildContent() {
 	}
 
 	m.contentLayout = layout
-	m.contentViewport.SetContent(b.String())
+	m.contentViewport.SetContent(m.decorateDrifted(b.String(), &m.contentLayout, groups))
 }
 
 // renderAnnotationBox renders a bordered annotation box indented under the gutter.
@@ -333,6 +348,9 @@ func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused boo
 	}
 	if ann.side == "old" {
 		lineLabel += " (deleted)"
+	}
+	if ann.drifted {
+		lineLabel += " (drifted)"
 	}
 
 	var boxContent strings.Builder

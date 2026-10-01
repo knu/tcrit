@@ -643,6 +643,7 @@ func TestDeleteKeyDeletesFocusedInlineCommentAfterConfirmation(t *testing.T) {
 	comment.Author = "Tester"
 	comment.ReviewRound = 1
 	app, _ := newFinishTestApp(t, []review.Comment{comment})
+	app.tab().doc = document.FromContent("test.go", []byte("line\n"))
 	app.focused = contentPane
 	app.tabs[0].cursorLine = comment.EndAt()
 	app.tabs[0].cursorOnAnnotation = true

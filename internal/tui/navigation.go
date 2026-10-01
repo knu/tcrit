@@ -97,12 +97,12 @@ func (m *AppModel) commentTargets(tabIndex int) []commentTarget {
 	indices := make(map[lineRef]int)
 	var fileTargets, lineTargets []commentTarget
 	for _, c := range t.state.Comments {
-		if c.Scope == "file" {
-			fileTargets = append(fileTargets, commentTarget{id: c.ID, scope: "file", resolved: c.Resolved, annoIdx: len(fileTargets)})
+		ref := commentLocation(t, c)
+		if ref.line == 0 {
+			fileTargets = append(fileTargets, commentTarget{id: c.ID, scope: c.Scope, resolved: c.Resolved, annoIdx: len(fileTargets)})
 			continue
 		}
-		line := c.EndAt()
-		ref := lineRef{side: c.Side, line: line}
+		line := ref.line
 		lineTargets = append(lineTargets, commentTarget{id: c.ID, resolved: c.Resolved, line: line, side: c.Side, annoIdx: indices[ref]})
 		indices[ref]++
 	}
@@ -128,8 +128,8 @@ func (m *AppModel) commentTargets(tabIndex int) []commentTarget {
 // targetPosition orders a target against the content cursor.  File comments
 // sit before the first line.
 func (m *AppModel) targetPosition(t *FileTab, target commentTarget) int {
-	if target.scope == "file" {
-		if m.hideComments {
+	if target.line == 0 {
+		if target.scope == "file" && m.hideComments {
 			m.hideComments = false
 			m.recalculateLayout()
 		}
@@ -266,6 +266,9 @@ func (m *AppModel) selectComment(tabIndex int, target commentTarget) {
 	m.rebuildContent()
 	m.updateCommentSidebar()
 	m.scrollToCursor()
+	if _, drifted := m.driftedComment(target.id); drifted && m.hideComments {
+		m.openCommentThread(target.id)
+	}
 }
 
 type changeTarget struct {
@@ -291,7 +294,7 @@ func (m *AppModel) changeTargets(tabIndex int) []changeTarget {
 	}
 	for _, comment := range m.commentTargets(tabIndex) {
 		position := -1
-		if comment.scope != "file" {
+		if comment.line != 0 {
 			var ok bool
 			position, ok = positions[lineRef{side: comment.side, line: comment.line}]
 			if !ok {

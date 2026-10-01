@@ -81,9 +81,16 @@ func (m *AppModel) threadHeight(sidebar bool) int {
 
 func (m *AppModel) renderThread(key threadViewKey, author, body string, replies []review.Reply, width int, focused bool) string {
 	key.path = m.tab().path
+	c, drifted := m.driftedComment(key.id)
+	if drifted {
+		body = driftedContext(c) + "\n\n" + body
+	}
 	layout := m.layoutThread(author, body, replies, "", width)
 	height := min(m.threadHeight(key.sidebar), len(layout.lines))
 	initial := layout.initialOffset(height)
+	if drifted {
+		initial = 0
+	}
 	lastReply := ""
 	if len(replies) > 0 {
 		lastReply = replies[len(replies)-1].ID

@@ -158,6 +158,7 @@ type renderedContentLayout struct {
 	lineRanges map[int]renderedRange
 	oldRanges  map[int]renderedRange
 	actions    []commentHeaderRegion
+	markers    []commentMarker
 }
 
 type commentHeaderRegion struct {
@@ -1912,14 +1913,8 @@ func (m *AppModel) annotationsAfterLine(lineNum int, side string) []annotation {
 	}
 	var anns []annotation
 	for _, c := range t.state.Comments {
-		if c.Scope == "file" {
-			if lineNum == 0 && side == "" {
-				anns = append(anns, newAnnotation(c))
-			}
-			continue
-		}
-		if c.EndAt() == lineNum && c.Side == side {
-			anns = append(anns, newAnnotation(c))
+		if commentLocation(t, c) == (lineRef{line: lineNum, side: side}) {
+			anns = append(anns, tabAnnotation(t, c))
 		}
 	}
 	return anns
@@ -1936,6 +1931,7 @@ type commentTarget struct {
 
 // sidebarItem represents a comment in the sidebar list.
 type sidebarItem struct {
+	drifted  bool
 	id       string
 	scope    string
 	line     int
@@ -1949,6 +1945,7 @@ type sidebarItem struct {
 
 // annotation represents an inline comment to render.
 type annotation struct {
+	drifted  bool
 	id       string
 	scope    string
 	body     string
@@ -1989,7 +1986,7 @@ func (m *AppModel) updateCommentSidebar() {
 			continue
 		}
 		t.sidebarItems = append(t.sidebarItems, sidebarItem{
-			id: c.ID, scope: c.Scope, line: c.StartLine, endLine: c.EndLine,
+			id: c.ID, scope: c.Scope, line: c.StartLine, endLine: c.EndLine, drifted: commentDrifted(t, c),
 			side: c.Side, body: c.Body, author: c.Author, replies: c.Replies,
 			resolved: c.Resolved,
 		})
@@ -2032,7 +2029,7 @@ func (m *AppModel) updateCommentSidebar() {
 
 	for idx, it := range t.sidebarItems {
 		isSelected := m.focused == commentPane && idx == t.sidebarCursor
-		collapsed := it.resolved && !m.showResolved && !isSelected
+		collapsed := (it.drifted || (it.resolved && !m.showResolved)) && !isSelected
 		var item strings.Builder
 
 		var lineInfo string
@@ -2045,6 +2042,9 @@ func (m *AppModel) updateCommentSidebar() {
 		}
 		if it.side == "old" {
 			lineInfo += " (deleted)"
+		}
+		if it.drifted {
+			lineInfo += " (drifted)"
 		}
 		lineInfo = commentLineStyle.Foreground(lipgloss.Cyan).Render(lineInfo)
 		if len(it.replies) > 0 {
@@ -2564,6 +2564,15 @@ func (m *AppModel) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 
 	left, top, right, bottom := m.contentBounds()
 	if mouse.X >= left && mouse.X < right && mouse.Y >= top && mouse.Y < bottom {
+		if !m.tab().selecting {
+			point := tea.Mouse{X: mouse.X - left, Y: mouse.Y - top + m.contentViewport.YOffset()}
+			for _, marker := range m.contentLayout.markers {
+				if marker.rect.contains(point) {
+					m.selectMarker(marker.ids)
+					return m, nil
+				}
+			}
+		}
 		wasFocused := m.focused == contentPane
 		m.focused = contentPane
 		if target, ok := m.contentMouseTarget(mouse.Y - top + m.contentViewport.YOffset()); ok {
@@ -2885,6 +2894,7 @@ type contentMouseTarget struct {
 	side            string
 	annotation      bool
 	annotationIndex int
+	drifted         bool
 }
 
 func (m *AppModel) contentMouseTarget(y int) (contentMouseTarget, bool) {
@@ -2898,12 +2908,18 @@ func (m *AppModel) highlightedCommentLines() (int, int, string) {
 	t := m.tab()
 	if m.focused == commentPane && len(t.sidebarItems) > 0 && t.sidebarCursor < len(t.sidebarItems) {
 		item := t.sidebarItems[t.sidebarCursor]
+		if item.drifted {
+			return 0, 0, ""
+		}
 		return item.line, max(item.line, item.endLine), item.side
 	}
 	if m.focused == contentPane && t.cursorOnAnnotation {
 		annotations := m.annotationsAfterLine(t.cursorLine, t.cursorSide)
 		if t.cursorAnnoIdx < len(annotations) {
 			ann := annotations[t.cursorAnnoIdx]
+			if ann.drifted {
+				return 0, 0, ""
+			}
 			return ann.line, max(ann.line, ann.endLine), ann.side
 		}
 	}
@@ -2932,7 +2948,7 @@ func (m AppModel) gutterComment(row int) string {
 		}
 	}
 	for _, c := range m.tab().state.Comments {
-		if c.Scope != "file" && c.Side == target.side && c.StartLine <= target.line && target.line <= c.EndLine {
+		if !commentDrifted(m.tab(), c) && c.Scope != "file" && c.Side == target.side && c.StartLine <= target.line && target.line <= c.EndLine {
 			return c.ID
 		}
 	}
@@ -3770,7 +3786,9 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		var threadStart int
 		for _, c := range m.tabs[m.activeTab].state.Comments {
 			if c.ID == m.editingID {
-				if c.Scope == "file" {
+				if commentDrifted(m.tab(), c) {
+					referenceContent = driftedContext(c)
+				} else if c.Scope == "file" {
 					referenceContent = m.tab().path
 				} else {
 					start := c.StartLine
@@ -3843,6 +3861,9 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		initialOffset := -1
 		if len(thread.starts) > 0 {
 			initialOffset = threadStart + thread.initialOffset(referenceHeight-2)
+		}
+		if _, drifted := m.driftedComment(m.editingID); drifted {
+			initialOffset = 0
 		}
 		referenceSection, scrollOffset, scrollMaxOffset := renderModalBoxAt(
 			referenceContent, innerWidth-2, referenceHeight, m.modalReferenceOffset, initialOffset)

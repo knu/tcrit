@@ -204,6 +204,8 @@ git diff main feature | tcrit review --diff
 
 Detects changed files in your git repo and opens a tabbed TUI with syntax highlighting, diff markers, and inline commenting across all changed files.
 
+Comments whose positions can no longer be tracked appear as a small `💬` at the right edge of the code, or at the top of the file when the line is gone.  Click the marker or use `[` / `]` to open a thread and read its original quoted text.
+
 - Reviews staged, unstaged, and untracked changes against `HEAD` by default; `--staged` reviews only the index, and `--diff` reviews a supplied unified diff
 - Green gutter markers highlight changed lines, and comments from all files belong to one session
 

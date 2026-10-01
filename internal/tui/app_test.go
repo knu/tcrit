@@ -592,6 +592,7 @@ func TestCommentSidebarHidesResolvedThreads(t *testing.T) {
 	resolved.Resolved = true
 
 	app, _ := newFinishTestApp(t, []review.Comment{resolved, unresolved})
+	app.tab().doc = document.FromContent("test.go", []byte("line\n"))
 	app.commentViewport.SetWidth(40)
 	app.commentViewport.SetHeight(20)
 	app.updateCommentSidebar()
@@ -908,8 +909,12 @@ func TestRevertedAdditionShowsPlaceholderAndKeepsComments(t *testing.T) {
 	if !strings.Contains(content, "no longer part of the changes") || strings.Contains(content, "var x = 1") {
 		t.Fatalf("content = %q, want placeholder without stale content", content)
 	}
-	if got := ansi.Strip(app.commentViewport.View()); !strings.Contains(got, "why one?") {
-		t.Fatalf("sidebar = %q, want the kept comment", got)
+	if !strings.Contains(content, "💬") {
+		t.Fatalf("content = %q, want a marker for the kept comment", content)
+	}
+	app.jumpToComment(1)
+	if got := ansi.Strip(app.contentViewport.View()); !strings.Contains(got, "why one?") || !strings.Contains(got, "var x = 1") {
+		t.Fatalf("opened thread = %q, want the comment and its original text", got)
 	}
 	app.persist()
 	fresh, err := review.OpenSessionAt(sess.Key, sess.Dir)
