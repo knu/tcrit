@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.15.0
+
+### Added
+
+- **Displaced comment markers** — comments whose positions no longer match the source stay accessible through faint `💬` markers.  Focus a marker and press `enter` to expand it, or click it; the thread shows its original text for context.
+- **Unresolved thread navigation** — `{` / `}` visits only unresolved comments; `[` / `]` visits all comments.
+- A custom review-and-commit flow demo, plus MP4 recording targets for the demos.
+
+### Changed
+
+- Resolved threads stay folded when focused; `enter` opens their contents in the comment editor.  The `h` folding toggle is removed.
+- Clicking **Resolve** folds the thread; clicking **Resolved** reopens it with its history visible.
+- `]`, `}`, and the thread header's **↓** open the finish dialog at the last eligible thread.  `R` opens it when no unresolved threads remain.
+- The whitespace indicator is shortened to `[WS: ignored]` and placed beside **Submit**, remaining visible on narrow terminals.
+- Bundled agent skills wait on the review command itself and explain how to keep its execution timeout from interrupting an open review.
+- The README focuses on usage, with the full fork comparison in `docs/upstream-differences.md` and recording instructions in `demo/README.md`.
+- `tcrit comment --help` describes the fields accepted by bulk JSON import.
+
+### Fixed
+
+- Comment anchors prefer exact matches over nearby similar text and follow edits within a line more reliably.
+- Multi-line comment ranges expand or shrink with internal insertions and deletions, preserving their original anchor text across rounds.
+
+### Removed
+
+- The Claude Code plugin.  Use `tcrit install claude-code` to install the bundled review skills.
+
 ## 0.14.0
 
 ### Added

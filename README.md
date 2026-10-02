@@ -315,6 +315,8 @@ TCrit finds the pane that ran the command from the process tree, even when the a
 
 Ignore whitespace (`w`) hides changes in spaces and tabs within a line, including LF and CRLF differences, while still showing added or deleted blank lines.
 
+Use `[` / `]` to revisit all threads and `{` / `}` to work through unresolved ones.  Resolved threads stay folded; press `enter` to read them in the comment editor.  Comments displaced by source edits appear as `💬` markers; click one or focus it and press `enter` to see the original context.
+
 **File references:** `@path/to/file`, optionally followed by ` L40`, in a comment or reply becomes a clickable link to that file and line.  Paths are relative to the review's working directory; escape a space with a backslash.  `alt+w` copies a ready-made reference for the current line, `ctrl+y` pastes it, and typing `@` completes paths, as described below.
 
 A reference without a line opens the file's tab.  When the file or line is not part of the review, a dialog offers to open it in `$EDITOR`, which also serves `alt+e` and `alt+g`; TCrit passes `--goto FILE:LINE` to editors that advertise it and `+LINE FILE` to the rest.
