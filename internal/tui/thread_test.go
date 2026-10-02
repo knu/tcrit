@@ -347,9 +347,6 @@ func TestToggleCommentVisibility(t *testing.T) {
 					t.Fatalf("folded=%t: unexpected body visibility in %q", folded, ansi.Strip(view))
 				}
 			}
-			if strings.Contains(ansi.Strip(app.renderHeader()), "Comments hidden") != folded {
-				t.Fatal("header does not reflect folding mode")
-			}
 		}
 	}
 	app := newCommentNavigationTestApp()

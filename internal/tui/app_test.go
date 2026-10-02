@@ -1155,12 +1155,12 @@ func TestReviewBarHostsSubmitButton(t *testing.T) {
 	}
 
 	app.host = ""
-	app.ignoreWhitespace, app.hideComments = true, true
-	app.width = 60
+	app.ignoreWhitespace, app.hideComments = true, false
+	app.width = 45
 	app.recalculateLayout()
 	rows = strings.Split(app.renderHeader(), "\n")
 	plain = ansi.Strip(rows[0])
-	if lipgloss.Width(rows[0]) != app.width || !strings.HasPrefix(plain, " TCrit: review the document.  [Whitespace") || !strings.Contains(plain, "…") || !strings.HasSuffix(plain, " Submit q ") {
+	if lipgloss.Width(rows[0]) != app.width || !strings.Contains(plain, "[WS: ignored]") || !strings.Contains(plain, "…") || !strings.HasSuffix(plain, " Submit q ") {
 		t.Fatalf("narrow bar = %q, want the text truncated ahead of the button", plain)
 	}
 }

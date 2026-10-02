@@ -18,7 +18,7 @@ func TestWhitespaceToggleAcrossFiles(t *testing.T) {
 	m.tab().cursorLine, m.tab().cursorSide = 1, "old"
 	m.tab().selecting, m.tab().selectSide = true, "old"
 	m = pressKey(m, 'w')
-	if !m.ignoreWhitespace || !strings.Contains(m.renderHeader(), "[Whitespace ignored]") {
+	if !m.ignoreWhitespace || !strings.Contains(m.renderHeader(), "[WS: ignored]") {
 		t.Fatal("missing whitespace mode")
 	}
 	if m.tabs[0].changedLines[1] || !m.tabs[0].changedLines[2] || len(m.tabs[1].changeChunks) != 0 {
@@ -40,7 +40,7 @@ func TestWhitespaceToggleAcrossFiles(t *testing.T) {
 			t.Fatal("original diff not restored")
 		}
 	}
-	if m.ignoreWhitespace || strings.Contains(m.renderHeader(), "[Whitespace ignored]") {
+	if m.ignoreWhitespace || strings.Contains(m.renderHeader(), "[WS: ignored]") {
 		t.Fatal("mode not cleared")
 	}
 }

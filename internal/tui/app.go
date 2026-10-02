@@ -2220,30 +2220,31 @@ func (m AppModel) renderReviewBar() string {
 		subject += " on " + m.host
 	}
 	subject += "."
-	if m.ignoreWhitespace {
-		subject += "  [Whitespace ignored]"
-	}
-	if m.hideComments {
-		subject += "  [Comments hidden: H]"
-	}
 	text := reviewBarStyle.Bold(true).Render(" TCrit") + reviewBarStyle.Render(": review the ")
 	if style, ok := scopeWordStyle(scope); ok {
 		text += style.Render(scope) + reviewBarStyle.Render(" ")
 	}
 	text += reviewBarStyle.Render(subject)
 	button := m.submitButton()
-	if m.width <= 0 {
-		return text + reviewBarStyle.Render(" ") + button + reviewBarStyle.Render(" ")
+	right := button + reviewBarStyle.Render(" ")
+	if m.ignoreWhitespace {
+		right = reviewBarStyle.Render("[WS: ignored] ") + right
 	}
-	available := m.width - lipgloss.Width(button) - 1
+	if m.width <= 0 {
+		return text + reviewBarStyle.Render(" ") + right
+	}
+	available := m.width - lipgloss.Width(right) - 1
 	if available < 0 {
-		return ansi.Truncate(text, m.width, "")
+		return ansi.Truncate(right, m.width, "")
 	}
 	if lipgloss.Width(text) > available {
-		text = ansi.Truncate(text, available-1, "") + reviewBarStyle.Render("…")
+		text = ansi.Truncate(text, max(0, available-1), "")
+		if available > 0 {
+			text += reviewBarStyle.Render("…")
+		}
 	}
-	gap := available - lipgloss.Width(text)
-	return text + reviewBarStyle.Render(strings.Repeat(" ", gap)) + button + reviewBarStyle.Render(" ")
+	gap := m.width - lipgloss.Width(text) - lipgloss.Width(right)
+	return text + reviewBarStyle.Render(strings.Repeat(" ", gap)) + right
 }
 
 // submitButton renders the button that opens the finish dialog.
