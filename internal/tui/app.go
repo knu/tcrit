@@ -89,7 +89,6 @@ type AppModel struct {
 	author           string
 	authorColors     map[string]int
 	threadScrolls    map[threadViewKey]threadScroll
-	showResolved     bool
 	hideComments     bool
 	ignoreWhitespace bool
 	previousReplyIDs []string // submission baseline pending initial window dimensions
@@ -635,27 +634,23 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case key.Matches(msg, keys.FoldResolved, keys.HideComments):
+	case key.Matches(msg, keys.HideComments):
 		selectedID := ""
 		if t.sidebarCursor < len(t.sidebarItems) {
 			selectedID = t.sidebarItems[t.sidebarCursor].id
 		}
-		if key.Matches(msg, keys.HideComments) {
-			m.hideComments = !m.hideComments
-			if m.hideComments {
-				for i := range m.tabs {
-					clear(m.tabs[i].expandedDrifted)
-				}
+		m.hideComments = !m.hideComments
+		if m.hideComments {
+			for i := range m.tabs {
+				clear(m.tabs[i].expandedDrifted)
 			}
-			m.focused = contentPane
-			t.cursorOnAnnotation = false
-			if t.cursorLine == 0 {
-				m.moveCursorBy(t, 1, 1)
-			}
-			m.recalculateLayout()
-		} else {
-			m.showResolved = !m.showResolved
 		}
+		m.focused = contentPane
+		t.cursorOnAnnotation = false
+		if t.cursorLine == 0 {
+			m.moveCursorBy(t, 1, 1)
+		}
+		m.recalculateLayout()
 		m.updateCommentSidebar()
 		for i, item := range t.sidebarItems {
 			if item.id == selectedID {
@@ -781,11 +776,17 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	if m.focused == contentPane && !t.selecting {
 		switch {
+		case key.Matches(msg, keys.NextUnresolved):
+			m.nextCommentOrFinish(false)
+			return m, nil
+		case key.Matches(msg, keys.PrevUnresolved):
+			m.jumpToComment(-1, false)
+			return m, nil
 		case key.Matches(msg, keys.NextComment):
-			m.nextCommentOrFinish()
+			m.nextCommentOrFinish(true)
 			return m, nil
 		case key.Matches(msg, keys.PrevComment):
-			m.jumpToComment(-1)
+			m.jumpToComment(-1, true)
 			return m, nil
 		}
 	}
@@ -922,11 +923,17 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	if m.focused == commentPane {
 		switch {
+		case key.Matches(msg, keys.NextUnresolved):
+			m.nextCommentOrFinish(false)
+			return m, nil
+		case key.Matches(msg, keys.PrevUnresolved):
+			m.jumpToComment(-1, false)
+			return m, nil
 		case key.Matches(msg, keys.NextComment):
-			m.nextCommentOrFinish()
+			m.nextCommentOrFinish(true)
 			return m, nil
 		case key.Matches(msg, keys.PrevComment):
-			m.jumpToComment(-1)
+			m.jumpToComment(-1, true)
 			return m, nil
 		}
 	}
@@ -1998,11 +2005,6 @@ func (m *AppModel) updateCommentSidebar() {
 
 	t.sidebarItems = nil
 	for _, c := range t.state.Comments {
-		// Folded line comments remain reachable inline; file comments
-		// have no inline box, so keep their headers in the sidebar.
-		if c.Resolved && !m.showResolved && c.Scope != "file" {
-			continue
-		}
 		t.sidebarItems = append(t.sidebarItems, sidebarItem{
 			id: c.ID, scope: c.Scope, line: c.StartLine, endLine: c.EndLine, drifted: commentDrifted(t, c),
 			side: c.Side, body: c.Body, author: c.Author, replies: c.Replies,
@@ -2047,7 +2049,7 @@ func (m *AppModel) updateCommentSidebar() {
 
 	for idx, it := range t.sidebarItems {
 		isSelected := m.focused == commentPane && idx == t.sidebarCursor
-		collapsed := (it.drifted && !m.tab().expandedDrifted[it.id]) || (it.resolved && !m.showResolved && !isSelected)
+		collapsed := (it.drifted && !m.tab().expandedDrifted[it.id]) || it.resolved
 		var item strings.Builder
 
 		var lineInfo string
@@ -2680,9 +2682,9 @@ func (m *AppModel) handleCommentHeaderClick(region commentHeaderRegion, point te
 	case region.resolve.contains(point):
 		m.clickResolve(region.id)
 	case region.up.contains(point):
-		m.jumpToComment(-1)
+		m.jumpToComment(-1, true)
 	case region.down.contains(point):
-		m.nextCommentOrFinish()
+		m.nextCommentOrFinish(true)
 	case region.delete.contains(point):
 		m.openCommentDelete(region.id)
 	default:
@@ -3353,12 +3355,14 @@ func (m AppModel) renderFooter() string {
 		}
 	} else {
 		enterAction := "comment"
-		_, drifted := m.driftedComment(m.selectedCommentID())
+		comment, drifted := m.driftedComment(m.selectedCommentID())
+		drifted = drifted && !comment.Resolved
 		if drifted {
 			enterAction = "toggle thread"
 		}
 		items = []string{
-			k("[/]", "prev/next comment"),
+			k("[/]", "all comments"),
+			k("{/}", "unresolved"),
 			k("s", "sidebar"),
 			k("t", "files/comments"),
 			k("v", "select lines"),
@@ -3444,7 +3448,7 @@ func (m AppModel) renderHelp(innerWidth int) string {
 		{keys: "v", desc: "select"},
 		{keys: "s/t", desc: "sidebar/view"},
 		{keys: "r/R", desc: "resolve/+next"},
-		{keys: "h/H", desc: "fold/hide"},
+		{keys: "H", desc: "hide/show"},
 		{keys: "w", desc: "ignore WS"},
 		{keys: "d", desc: "delete comment"},
 		{keys: "q/ctrl+c", desc: "finish"},
@@ -3458,6 +3462,7 @@ func (m AppModel) renderHelp(innerWidth int) string {
 		{keys: "[/]", desc: "comments"},
 	}, columnWidth)
 	codeReview := renderHelpGroup("Code review / search", []helpItem{
+		{keys: "{/}", desc: "unresolved"},
 		{keys: "alt+e/g", desc: "editor/line"},
 		{keys: "alt+w", desc: "copy ref"},
 		{keys: "alt+p", desc: "open file"},

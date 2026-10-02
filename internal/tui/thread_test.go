@@ -191,7 +191,7 @@ func TestThreadScrollingUsesSelectedSurface(t *testing.T) {
 	}
 }
 
-func TestResolvedThreadsExpandOnFocus(t *testing.T) {
+func TestResolvedThreadsStayFoldedOnFocus(t *testing.T) {
 	for _, surface := range []string{"inline", "sidebar"} {
 		for _, action := range []string{"keyboard", "click", "wheel"} {
 			t.Run(surface+"/"+action, func(t *testing.T) {
@@ -230,15 +230,11 @@ func TestResolvedThreadsExpandOnFocus(t *testing.T) {
 				case "wheel":
 					app = wheelMouse(app, x, y, tea.MouseWheelUp)
 				}
-				if got := view(); !strings.Contains(got, "history") || !strings.Contains(got, "Resolved") {
+				if got := view(); strings.Contains(got, "history") || strings.Contains(got, "latest reply") || !strings.Contains(got, "Resolved") {
 					t.Fatalf("focused resolved thread = %q", got)
 				}
 				if !app.tab().state.Comments[0].Resolved {
 					t.Fatal("expanding the thread changed its resolution")
-				}
-				scroll := app.threadScrolls[threadViewKey{path: app.tab().path, id: comment.ID, sidebar: surface == "sidebar"}]
-				if action == "wheel" && (!scroll.manual || scroll.offset >= scroll.maxOffset) {
-					t.Fatalf("wheel did not scroll the expanded thread: %+v", scroll)
 				}
 				app = pressKey(app, 's')
 				if got := view(); strings.Contains(got, "history") || strings.Contains(got, "latest reply") {
@@ -250,93 +246,81 @@ func TestResolvedThreadsExpandOnFocus(t *testing.T) {
 }
 
 func TestResolveThreadAdvancesToUnresolved(t *testing.T) {
-	for _, expanded := range []bool{false, true} {
-		for _, sidebar := range []bool{false, true} {
-			t.Run(fmt.Sprintf("expanded=%t/sidebar=%t", expanded, sidebar), func(t *testing.T) {
-				app := newCommentNavigationTestApp()
-				app.showResolved = expanded
-				app.tabs[0].state.Comments[2].Resolved = true
-				app.tabs[2].state.Comments[1].Resolved = true
-				app.tabs[0].state.Comments = append(app.tabs[0].state.Comments,
-					review.Comment{ID: "first-file", Scope: "file"})
-				app.tabs[2].state.Comments = append(app.tabs[2].state.Comments,
-					review.Comment{ID: "last-file-a", Scope: "file"},
-					review.Comment{ID: "last-file-b", Scope: "file"})
-				app.selectComment(0, app.commentTargets(0)[1])
-				if sidebar {
-					app.focused = commentPane
-					app.tab().sidebarCursor = 1
-					app.updateCommentSidebar()
-				}
-				for _, want := range []string{"first-b", "last-file-a", "last-file-b", "last-a", "first-file", ""} {
-					app = pressKey(app, 'R')
-					targets := app.commentTargets(app.activeTab)
-					current := app.currentCommentTarget(targets)
-					if want == "" {
-						if current >= 0 || app.focused != contentPane || app.unresolvedTotal() != 0 {
-							t.Fatal("final resolution did not release focus with all threads resolved")
-						}
-						if app.modal != finishModal {
-							t.Fatalf("final resolution opened modal %v, want the finish dialog", app.modal)
-						}
-					} else if app.modal != noModal || current < 0 || targets[current].id != want || targets[current].resolved {
-						t.Fatalf("selected target %d in %+v (modal %v), want unresolved %s", current, targets, app.modal, want)
+	for _, sidebar := range []bool{false, true} {
+		t.Run(fmt.Sprintf("sidebar=%t", sidebar), func(t *testing.T) {
+			app := newCommentNavigationTestApp()
+			app.tabs[0].state.Comments[2].Resolved = true
+			app.tabs[2].state.Comments[1].Resolved = true
+			app.tabs[0].state.Comments = append(app.tabs[0].state.Comments,
+				review.Comment{ID: "first-file", Scope: "file"})
+			app.tabs[2].state.Comments = append(app.tabs[2].state.Comments,
+				review.Comment{ID: "last-file-a", Scope: "file"},
+				review.Comment{ID: "last-file-b", Scope: "file"})
+			app.selectComment(0, app.commentTargets(0)[1])
+			if sidebar {
+				app.focused = commentPane
+				app.tab().sidebarCursor = 1
+				app.updateCommentSidebar()
+			}
+			for _, want := range []string{"first-b", "last-file-a", "last-file-b", "last-a", "first-file", ""} {
+				app = pressKey(app, 'R')
+				targets := app.commentTargets(app.activeTab)
+				current := app.currentCommentTarget(targets)
+				if want == "" {
+					if current >= 0 || app.focused != contentPane || app.unresolvedTotal() != 0 {
+						t.Fatal("final resolution did not release focus with all threads resolved")
 					}
-					if app.showResolved != expanded {
-						t.Fatal("resolving changed the global folding preference")
+					if app.modal != finishModal {
+						t.Fatalf("final resolution opened modal %v, want the finish dialog", app.modal)
 					}
+				} else if app.modal != noModal || current < 0 || targets[current].id != want || targets[current].resolved {
+					t.Fatalf("selected target %d in %+v (modal %v), want unresolved %s", current, targets, app.modal, want)
 				}
-			})
-		}
+			}
+		})
 	}
 }
 
 func TestResolveThreadReleasesFocus(t *testing.T) {
 	for _, surface := range []string{"inline", "sidebar-line", "sidebar-file"} {
-		for _, expanded := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/expanded=%t", surface, expanded), func(t *testing.T) {
-				app := setupAppWithDoc(t, "source\n")
-				app.width, app.height = 120, 40
-				app.recalculateLayout()
-				comment := review.Comment{ID: "thread", StartLine: 1, EndLine: 1, Body: "thread body"}
-				if surface == "sidebar-file" {
-					comment.Scope = "file"
-				}
-				app.tab().state.Comments = []review.Comment{comment}
-				app.tab().cursorLine = 1
-				app.tab().cursorOnAnnotation = true
-				app.showResolved = expanded
-				app.focused = contentPane
-				if surface != "inline" {
-					app.focused = commentPane
-				}
-				app.rebuildContent()
-				app.updateCommentSidebar()
+		t.Run(surface, func(t *testing.T) {
+			app := setupAppWithDoc(t, "source\n")
+			app.width, app.height = 120, 40
+			app.recalculateLayout()
+			comment := review.Comment{ID: "thread", StartLine: 1, EndLine: 1, Body: "thread body"}
+			if surface == "sidebar-file" {
+				comment.Scope = "file"
+			}
+			app.tab().state.Comments = []review.Comment{comment}
+			app.tab().cursorLine = 1
+			app.tab().cursorOnAnnotation = true
+			app.focused = contentPane
+			if surface != "inline" {
+				app.focused = commentPane
+			}
+			app.rebuildContent()
+			app.updateCommentSidebar()
 
-				app = pressKey(app, 'R')
+			app = pressKey(app, 'R')
 
-				if !app.tab().state.Comments[0].Resolved {
-					t.Fatal("R did not resolve the thread")
-				}
-				if app.focused != contentPane || app.tab().cursorOnAnnotation {
-					t.Fatal("resolved thread retained focus")
-				}
-				if app.modal != finishModal {
-					t.Fatalf("resolving the last thread opened modal %v, want the finish dialog", app.modal)
-				}
-				app = pressKey(app, tea.KeyEscape)
-				if app.showResolved != expanded {
-					t.Fatal("resolving changed the global folding preference")
-				}
-				view := app.contentViewport.View()
-				if surface == "sidebar-file" {
-					view = app.commentViewport.View()
-				}
-				if strings.Contains(ansi.Strip(view), comment.Body) != expanded {
-					t.Fatalf("resolved thread did not follow the folding preference: %q", view)
-				}
-			})
-		}
+			if !app.tab().state.Comments[0].Resolved {
+				t.Fatal("R did not resolve the thread")
+			}
+			if app.focused != contentPane || app.tab().cursorOnAnnotation {
+				t.Fatal("resolved thread retained focus")
+			}
+			if app.modal != finishModal {
+				t.Fatalf("resolving the last thread opened modal %v, want the finish dialog", app.modal)
+			}
+			app = pressKey(app, tea.KeyEscape)
+			view := app.contentViewport.View()
+			if surface == "sidebar-file" {
+				view = app.commentViewport.View()
+			}
+			if strings.Contains(ansi.Strip(view), comment.Body) {
+				t.Fatalf("resolved thread did not stay folded: %q", view)
+			}
+		})
 	}
 }
 
@@ -349,13 +333,12 @@ func TestToggleCommentVisibility(t *testing.T) {
 			{ID: "line", StartLine: 1, EndLine: 1, Body: "line body"},
 			{ID: "file", Scope: "file", Body: "file body", Resolved: true},
 		}
-		app.showResolved = true
 		app.focused = focus
 		app.tab().cursorOnAnnotation = true
 		app.updateCommentSidebar()
 		for _, folded := range []bool{true, false} {
 			app = pressKey(app, 'H')
-			if app.hideComments != folded || !app.showResolved {
+			if app.hideComments != folded {
 				t.Fatal("folding changed the wrong preference")
 			}
 			screen, _ := app.renderReviewScreen()
@@ -474,62 +457,13 @@ func TestHideCommentsShortcutPreservesInput(t *testing.T) {
 	}
 }
 
-func TestToggleResolvedFolding(t *testing.T) {
-	for _, focus := range []pane{contentPane, commentPane} {
-		app := newCommentNavigationTestApp()
-		app.width, app.height = 120, 50
-		app.recalculateLayout()
-		app.focused = focus
-		app.tabs[0].state.Comments = []review.Comment{
-			{ID: "resolved", StartLine: 1, EndLine: 1, Body: "resolved body", Resolved: true},
-			{ID: "open", StartLine: 3, EndLine: 3, Body: "open body"},
-			{ID: "file", Scope: "file", Body: "filebody", Resolved: true},
-		}
-		app.updateCommentSidebar()
-		app.tab().sidebarCursor = 1 // Keep the open line thread selected as rows appear and disappear.
-		app.updateCommentSidebar()
-		app.rebuildContent()
-		for _, expanded := range []bool{true, false} {
-			app = pressKey(app, 'h')
-			if app.showResolved != expanded {
-				t.Fatalf("focus %v: showResolved = %t", focus, app.showResolved)
-			}
-			if got := strings.Contains(ansi.Strip(app.contentViewport.View()), "resolved body"); got != expanded {
-				t.Fatalf("focus %v: inline body visibility = %t, want %t", focus, got, expanded)
-			}
-			if got := strings.Contains(ansi.Strip(app.commentViewport.View()), "filebody"); got != expanded {
-				t.Fatalf("focus %v: file body visibility = %t, want %t", focus, got, expanded)
-			}
-			wantItems := 2
-			if expanded {
-				wantItems = 3
-			}
-			if len(app.tab().sidebarItems) != wantItems || app.tab().sidebarItems[app.tab().sidebarCursor].id != "open" {
-				t.Fatalf("sidebar lost selection or has wrong items: %+v", app.tab().sidebarItems)
-			}
-			if !app.tab().state.Comments[0].Resolved || !app.tab().state.Comments[2].Resolved {
-				t.Fatal("folding changed resolution")
-			}
-		}
-		app = pressKey(app, 'h')
-		app.focused = contentPane
-		app = pressKey(app, '3')
-		if app.activeTab != 2 || !app.showResolved {
-			t.Fatal("folding preference did not survive tab switch")
-		}
-	}
-}
-
-func TestFoldShortcutPreservesInputAndDialogs(t *testing.T) {
+func TestHInputAndDialogs(t *testing.T) {
 	for _, modal := range []modalType{commentModal, fileCommentModal, replyModal, editModal, finishModal, discardChangesModal, deleteConfirmModal, helpModal} {
 		app := setupAppWithDoc(t, "source\n")
 		app.modal = modal
 		app.modalTextarea.Focus()
 		updated, _ := app.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
 		app = *updated.(*AppModel)
-		if app.showResolved {
-			t.Fatalf("modal %v toggled folding", modal)
-		}
 		if modal == commentModal || modal == fileCommentModal || modal == replyModal || modal == editModal {
 			if app.modalTextarea.Value() != "h" {
 				t.Fatalf("modal %v swallowed input", modal)
@@ -544,7 +478,7 @@ func TestFoldShortcutPreservesInputAndDialogs(t *testing.T) {
 	app := newCommentNavigationTestApp()
 	app, _ = updateApp(app, tea.KeyPressMsg{Code: 'p', Mod: tea.ModAlt})
 	app, _ = updateApp(app, tea.KeyPressMsg{Code: 'h', Text: "h"})
-	if app.fileSelect.input.Value() != "h" || app.showResolved {
+	if app.fileSelect.input.Value() != "h" {
 		t.Fatal("fold shortcut intercepted the file selector")
 	}
 }
@@ -611,5 +545,36 @@ func TestReplyModalStartsAtLatestHeaderAndKeepsFullLines(t *testing.T) {
 		if region.action.scrollable && !strings.Contains(rows[region.rect.bottom-2], "short final reply") {
 			t.Fatalf("blank padding below the latest modal reply: %q", rows[region.rect.top:region.rect.bottom])
 		}
+	}
+}
+
+func TestResolvedThreadsOpenWithEnter(t *testing.T) {
+	for _, surface := range []string{"inline", "sidebar", "drifted", "drifted-sidebar"} {
+		t.Run(surface, func(t *testing.T) {
+			app := setupAppWithDoc(t, "source\n")
+			app.width, app.height = 120, 40
+			app.recalculateLayout()
+			drifted := strings.HasPrefix(surface, "drifted")
+			app.tab().state.Comments = []review.Comment{{ID: "resolved", StartLine: 1, EndLine: 1, Resolved: true, Drifted: drifted, Body: "resolved body", Author: "Agent"}}
+			app.selectComment(0, app.commentTargets(0)[0])
+			if strings.Contains(surface, "sidebar") {
+				app.focused = commentPane
+				app.updateCommentSidebar()
+			}
+			app = pressKey(app, 'h')
+			if strings.Contains(ansi.Strip(app.contentViewport.View()), "resolved body") || strings.Contains(ansi.Strip(app.commentViewport.View()), "resolved body") {
+				t.Fatal("resolved body expanded on focus or h")
+			}
+			app = pressKey(app, tea.KeyEnter)
+			if app.modal == noModal || app.editingID != "resolved" {
+				t.Fatal("Enter did not open the resolved thread")
+			}
+			if !strings.Contains(ansi.Strip(app.View().Content), "resolved body") {
+				t.Fatal("resolved body is not accessible in the editor")
+			}
+			if app.tab().expandedDrifted["resolved"] || !app.tab().state.Comments[0].Resolved {
+				t.Fatal("opening changed expansion or resolution")
+			}
+		})
 	}
 }

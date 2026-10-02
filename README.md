@@ -204,7 +204,7 @@ git diff main feature | tcrit review --diff
 
 Detects changed files in your git repo and opens a tabbed TUI with syntax highlighting, diff markers, and inline commenting across all changed files.
 
-Comments whose positions can no longer be tracked appear as a small `💬` at the right edge of the code, or at the top of the file when the line is gone.  Use `[` / `]` to focus a marker, then press Enter to expand or collapse its thread and read the original quoted text.  Press `e` to edit or reply.  Clicking a marker also opens a thread.
+Comments whose positions can no longer be tracked appear as a small `💬` at the right edge of the code, or at the top of the file when the line is gone.  Use `[` / `]` to focus a marker, then press Enter to expand or collapse its thread and read the original quoted text.  Press `e` to edit or reply.  Clicking a marker also opens a thread.  Resolved threads stay folded; Enter opens their contents in the comment editor.
 
 - Reviews staged, unstaged, and untracked changes against `HEAD` by default; `--staged` reviews only the index, and `--diff` reviews a supplied unified diff
 - Green gutter markers highlight changed lines, and comments from all files belong to one session
@@ -302,8 +302,8 @@ TCrit finds the pane that ran the command from the process tree, even when the a
 | `s`                                   | Toggle comment sidebar                   |
 | `t`                                   | Switch the sidebar between the file tree and comments, and focus it |
 | `j` / `k`, `enter`, `h` / `l` (file tree) | Move (moving onto a file opens its tab), open the file or toggle a folder, fold / unfold |
-| `[` / `]`                             | Jump to prev / next comment; skip resolved comments unless unfolded with `h`.  `]` on the last comment opens the finish dialog |
-| `h`                                   | Toggle folding resolved comments across all files |
+| `[` / `]`                             | Jump to prev / next comment, including resolved threads.  `]` on the last comment opens the finish dialog |
+| `{` / `}`                             | Jump to prev / next unresolved comment.  `}` on the last unresolved comment opens the finish dialog |
 | `H`                                   | Hide/show comment boxes across all files; show line markers in a narrow right gutter |
 | `w`                                   | Toggle ignore whitespace across all files in code reviews |
 | `r`                                   | Resolve / unresolve the focused comment in place |

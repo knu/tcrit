@@ -22,7 +22,8 @@ type keyMap struct {
 	PrevChange       key.Binding
 	Resolve          key.Binding
 	ResolveNext      key.Binding
-	FoldResolved     key.Binding
+	NextUnresolved   key.Binding
+	PrevUnresolved   key.Binding
 	HideComments     key.Binding
 	IgnoreWhitespace key.Binding
 	Delete           key.Binding
@@ -40,6 +41,8 @@ var keys = keyMap{
 	HalfPageDown:     key.NewBinding(key.WithKeys("ctrl+d", "shift+down", "pgdown"), key.WithHelp("shift+down", "half page down")),
 	Top:              key.NewBinding(key.WithKeys("g", "home", "<"), key.WithHelp("<", "file top")),
 	Bottom:           key.NewBinding(key.WithKeys("G", "end", ">"), key.WithHelp(">", "file bottom")),
+	NextUnresolved:   key.NewBinding(key.WithKeys("}"), key.WithHelp("}", "next unresolved comment")),
+	PrevUnresolved:   key.NewBinding(key.WithKeys("{"), key.WithHelp("{", "prev unresolved comment")),
 	NextComment:      key.NewBinding(key.WithKeys("]"), key.WithHelp("]", "next comment")),
 	PrevComment:      key.NewBinding(key.WithKeys("["), key.WithHelp("[", "prev comment")),
 	Cancel:           key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
@@ -51,7 +54,6 @@ var keys = keyMap{
 	PrevChange:       key.NewBinding(key.WithKeys("N"), key.WithHelp("N", "prev change/open comment")),
 	Resolve:          key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "resolve/unresolve")),
 	ResolveNext:      key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "resolve and go to next")),
-	FoldResolved:     key.NewBinding(key.WithKeys("h"), key.WithHelp("h", "fold/unfold resolved")),
 	HideComments:     key.NewBinding(key.WithKeys("H"), key.WithHelp("H", "hide/show comments")),
 	IgnoreWhitespace: key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "ignore whitespace")),
 	Delete:           key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete comment")),

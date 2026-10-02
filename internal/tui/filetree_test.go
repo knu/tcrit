@@ -102,8 +102,8 @@ func TestFileTreeCursorSelectsFilesAndKeysFoldDirectories(t *testing.T) {
 		t.Fatalf("k onto b/x.go: tab = %d", app.activeTab)
 	}
 	app = pressKey(app, 'h') // to parent b/
-	if row := app.fileTree.rows[app.fileTree.cursor]; row.path != "b" || app.activeTab != 2 || app.showResolved {
-		t.Fatalf("h: cursor = %q, tab = %d, showResolved = %t", row.path, app.activeTab, app.showResolved)
+	if row := app.fileTree.rows[app.fileTree.cursor]; row.path != "b" || app.activeTab != 2 {
+		t.Fatalf("h: cursor = %q, tab = %d", row.path, app.activeTab)
 	}
 	app = pressKey(app, 'h') // fold b/
 	if !app.fileTree.collapsed["b"] {

@@ -184,11 +184,7 @@ func TestDriftedDeletedMarkerAndHiddenMode(t *testing.T) {
 	app.releaseThreadFocus()
 	app.tab().state.Comments[0].Resolved = true
 	app.rebuildContent()
-	if len(app.contentLayout.markers) != 0 {
-		t.Fatal("resolved drifted marker should follow the resolved visibility setting")
-	}
-	app = pressKey(app, 'h')
 	if len(app.contentLayout.markers) != 1 {
-		t.Fatal("showing resolved comments did not restore the marker")
+		t.Fatal("resolved thread lost its marker")
 	}
 }

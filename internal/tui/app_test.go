@@ -561,10 +561,10 @@ func TestResolveKey_TogglesSelectedComment(t *testing.T) {
 	if !comment.Resolved || comment.ResolvedRound != 1 {
 		t.Fatalf("expected resolved comment in round 1, got %+v", comment)
 	}
-	if len(app.tabs[0].sidebarItems) != 0 {
-		t.Fatalf("resolved comment remained in sidebar: %+v", app.tabs[0].sidebarItems)
+	if len(app.tabs[0].sidebarItems) != 1 || !app.tabs[0].sidebarItems[0].resolved {
+		t.Fatalf("resolved comment lost its sidebar header: %+v", app.tabs[0].sidebarItems)
 	}
-	if got := app.commentViewport.View(); !strings.Contains(got, "All comments resolved.") {
+	if got := app.commentViewport.View(); strings.Contains(got, comment.Body) {
 		t.Fatalf("resolved sidebar message = %q", got)
 	}
 
@@ -582,7 +582,7 @@ func TestResolveKey_TogglesSelectedComment(t *testing.T) {
 	}
 }
 
-func TestCommentSidebarHidesResolvedThreads(t *testing.T) {
+func TestCommentSidebarFoldsResolvedThreads(t *testing.T) {
 	unresolved := testComment()
 	unresolved.ID = "c_unresolved"
 	unresolved.Body = "still open"
@@ -598,8 +598,8 @@ func TestCommentSidebarHidesResolvedThreads(t *testing.T) {
 	app.updateCommentSidebar()
 
 	items := app.tabs[0].sidebarItems
-	if len(items) != 1 || items[0].id != unresolved.ID {
-		t.Fatalf("sidebar items = %+v, want only %s", items, unresolved.ID)
+	if len(items) != 2 || items[0].id != resolved.ID || items[1].id != unresolved.ID {
+		t.Fatalf("sidebar items = %+v, want both threads", items)
 	}
 	rendered := app.commentViewport.View()
 	if strings.Contains(rendered, resolved.Body) {
@@ -912,7 +912,7 @@ func TestRevertedAdditionShowsPlaceholderAndKeepsComments(t *testing.T) {
 	if !strings.Contains(content, "💬") {
 		t.Fatalf("content = %q, want a marker for the kept comment", content)
 	}
-	app.jumpToComment(1)
+	app.jumpToComment(1, true)
 	app = pressKey(app, tea.KeyEnter)
 	if got := ansi.Strip(app.contentViewport.View()); !strings.Contains(got, "why one?") || !strings.Contains(got, "var x = 1") {
 		t.Fatalf("opened thread = %q, want the comment and its original text", got)

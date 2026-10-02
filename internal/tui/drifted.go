@@ -70,7 +70,7 @@ func (m *AppModel) driftedGroups() map[lineRef][]string {
 	groups := make(map[lineRef][]string)
 	if m.tab().state != nil {
 		for _, c := range m.tab().state.Comments {
-			if commentDrifted(m.tab(), c) && (!c.Resolved || m.showResolved || c.ID == m.selectedCommentID()) {
+			if commentDrifted(m.tab(), c) {
 				ref := commentLocation(m.tab(), c)
 				groups[ref] = append(groups[ref], c.ID)
 			}
@@ -135,6 +135,10 @@ func (m *AppModel) selectMarker(ids []string) {
 }
 
 func (m *AppModel) toggleDrifted(id string) {
+	if c, _ := m.driftedComment(id); c.Resolved {
+		m.openCommentThread(id)
+		return
+	}
 	t := m.tab()
 	if t.expandedDrifted == nil {
 		t.expandedDrifted = make(map[string]bool)

@@ -174,56 +174,51 @@ func TestChangeNavigationCrossesFilesWithoutWrapping(t *testing.T) {
 }
 
 func TestChangeNavigationIncludesUnresolvedComments(t *testing.T) {
-	for _, showResolved := range []bool{false, true} {
-		t.Run(fmt.Sprintf("showResolved=%t", showResolved), func(t *testing.T) {
-			app := newChangeNavigationTestApp()
-			app.showResolved = showResolved
-			app.tabs[0].state.Comments[1].Resolved = true
-			app.tabs[0].state.Comments = append(app.tabs[0].state.Comments,
-				review.Comment{ID: "same-line", StartLine: 2, EndLine: 2},
-				review.Comment{ID: "inside-hunk", StartLine: 3, EndLine: 3},
-				review.Comment{ID: "file", Scope: "file"})
-			app.tabs[0].changeChunks[0].endLine = 3
-			app.tabs[1].state.Comments = []review.Comment{{ID: "comments-only", Scope: "file"}}
-			app = pressKey(app, 'N')
-			if app.selectedCommentID() != "file" || app.focused != contentPane {
-				t.Fatal("previous target should be the file comment")
-			}
-			type stop struct {
-				tab  int
-				line int
-				id   string
-			}
-			stops := []stop{
-				{0, 0, "file"}, {0, 2, ""}, {0, 2, "first-a"}, {0, 2, "same-line"},
-				{0, 3, "inside-hunk"}, {0, 4, ""}, {0, 4, "first-c"},
-				{1, 0, "comments-only"}, {2, 1, ""}, {2, 1, "last-a"},
-				{2, 3, ""}, {2, 3, "last-b"},
-			}
-			check := func(want stop) {
-				t.Helper()
-				if app.activeTab != want.tab || app.selectedCommentID() != want.id ||
-					(want.line != 0 && app.tab().cursorLine != want.line) {
-					t.Fatalf("got tab=%d line=%d comment=%q, want %+v", app.activeTab, app.tab().cursorLine, app.selectedCommentID(), want)
-				}
-				if want.id == "" && app.focused != contentPane {
-					t.Fatal("change should focus content")
-				}
-			}
-			for _, want := range stops[1:] {
-				app = pressKey(app, 'n')
-				check(want)
-			}
-			app = pressKey(app, 'n')
-			check(stops[len(stops)-1])
-			for i := len(stops) - 2; i >= 0; i-- {
-				app = pressKey(app, 'N')
-				check(stops[i])
-			}
-			app = pressKey(app, 'N')
-			check(stops[0])
-		})
+	app := newChangeNavigationTestApp()
+	app.tabs[0].state.Comments[1].Resolved = true
+	app.tabs[0].state.Comments = append(app.tabs[0].state.Comments,
+		review.Comment{ID: "same-line", StartLine: 2, EndLine: 2},
+		review.Comment{ID: "inside-hunk", StartLine: 3, EndLine: 3},
+		review.Comment{ID: "file", Scope: "file"})
+	app.tabs[0].changeChunks[0].endLine = 3
+	app.tabs[1].state.Comments = []review.Comment{{ID: "comments-only", Scope: "file"}}
+	app = pressKey(app, 'N')
+	if app.selectedCommentID() != "file" || app.focused != contentPane {
+		t.Fatal("previous target should be the file comment")
 	}
+	type stop struct {
+		tab  int
+		line int
+		id   string
+	}
+	stops := []stop{
+		{0, 0, "file"}, {0, 2, ""}, {0, 2, "first-a"}, {0, 2, "same-line"},
+		{0, 3, "inside-hunk"}, {0, 4, ""}, {0, 4, "first-c"},
+		{1, 0, "comments-only"}, {2, 1, ""}, {2, 1, "last-a"},
+		{2, 3, ""}, {2, 3, "last-b"},
+	}
+	check := func(want stop) {
+		t.Helper()
+		if app.activeTab != want.tab || app.selectedCommentID() != want.id ||
+			(want.line != 0 && app.tab().cursorLine != want.line) {
+			t.Fatalf("got tab=%d line=%d comment=%q, want %+v", app.activeTab, app.tab().cursorLine, app.selectedCommentID(), want)
+		}
+		if want.id == "" && app.focused != contentPane {
+			t.Fatal("change should focus content")
+		}
+	}
+	for _, want := range stops[1:] {
+		app = pressKey(app, 'n')
+		check(want)
+	}
+	app = pressKey(app, 'n')
+	check(stops[len(stops)-1])
+	for i := len(stops) - 2; i >= 0; i-- {
+		app = pressKey(app, 'N')
+		check(stops[i])
+	}
+	app = pressKey(app, 'N')
+	check(stops[0])
 }
 
 func TestChangeNavigationFromResolvedAndHiddenComments(t *testing.T) {
@@ -383,7 +378,7 @@ func TestCommentNavigationSkipsResolvedComments(t *testing.T) {
 	for _, step := range []struct {
 		key rune
 		tab int
-	}{{']', 0}, {']', 2}, {']', -1}, {'[', 0}, {'[', 2}, {'[', 0}} {
+	}{{'}', 0}, {'}', 2}, {'}', -1}, {'{', 0}, {'{', 2}, {'{', 0}} {
 		app = pressKey(app, step.key)
 		if step.tab < 0 {
 			if app.modal != finishModal {
@@ -403,18 +398,18 @@ func TestCommentNavigationSkipsResolvedComments(t *testing.T) {
 	// Navigation from a resolved annotation preserves the order of same-line threads.
 	app.activeTab = 0
 	app.tab().cursorLine, app.tab().cursorAnnoIdx = 2, 0
-	app = pressKey(app, ']')
+	app = pressKey(app, '}')
 	if app.activeTab != 0 || app.tab().cursorAnnoIdx != 1 {
 		t.Fatal("next from resolved annotation skipped its unresolved neighbor")
 	}
 	app.tabs[0].state.Comments[1].Resolved = true
 	app.tabs[2].state.Comments[1].Resolved = true
-	if app.jumpToComment(1) || app.jumpToComment(-1) {
+	if app.jumpToComment(1, false) || app.jumpToComment(-1, false) {
 		t.Fatal("navigation found a target in an entirely resolved review")
 	}
 }
 
-func TestCommentNavigationVisitsUnfoldedResolvedComments(t *testing.T) {
+func TestCommentNavigationVisitsResolvedComments(t *testing.T) {
 	app := newCommentNavigationTestApp()
 	for i := range app.tabs {
 		for j := range app.tabs[i].state.Comments {
@@ -422,7 +417,6 @@ func TestCommentNavigationVisitsUnfoldedResolvedComments(t *testing.T) {
 		}
 	}
 	app.tabs[1].state.Comments = []review.Comment{{ID: "file", Scope: "file", Body: "file comment", Resolved: true}}
-	app = pressKey(app, 'h')
 	for _, step := range []struct {
 		key rune
 		id  string
@@ -435,7 +429,7 @@ func TestCommentNavigationVisitsUnfoldedResolvedComments(t *testing.T) {
 		app = pressKey(app, step.key)
 		if step.id == "" {
 			if app.modal != finishModal {
-				t.Fatalf("key %c on the last unfolded thread opened modal %v, want the finish dialog", step.key, app.modal)
+				t.Fatalf("key %c on the last resolved thread opened modal %v, want the finish dialog", step.key, app.modal)
 			}
 			app = pressKey(app, tea.KeyEscape)
 			continue
@@ -446,16 +440,15 @@ func TestCommentNavigationVisitsUnfoldedResolvedComments(t *testing.T) {
 			t.Fatalf("key %c: selected target %d in %+v, want %s", step.key, current, targets, step.id)
 		}
 	}
-	// Backward navigation from a source line also includes unfolded threads.
+	// Backward navigation from a source line also includes resolved threads.
 	app.tab().cursorOnAnnotation = false
 	app.tab().cursorLine = 3
 	app = pressKey(app, '[')
 	if app.activeTab != 0 || app.tab().cursorAnnoIdx != 1 || !app.tab().cursorOnAnnotation {
-		t.Fatal("previous from source skipped an unfolded resolved thread")
+		t.Fatal("previous from source skipped a resolved thread")
 	}
-	app = pressKey(app, 'h')
-	if app.jumpToComment(1) || app.jumpToComment(-1) {
-		t.Fatal("refolding did not exclude resolved threads from navigation")
+	if app.jumpToComment(1, false) || app.jumpToComment(-1, false) {
+		t.Fatal("unresolved navigation included resolved threads")
 	}
 }
 

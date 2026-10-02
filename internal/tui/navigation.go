@@ -165,26 +165,26 @@ func (m *AppModel) currentCommentTarget(targets []commentTarget) int {
 }
 
 // jumpToComment moves to the adjacent comment in tab, line, and annotation
-// order, wrapping across the entire review and skipping folded resolved comments.
-func (m *AppModel) jumpToComment(step int) bool {
-	tabIndex, target, ok := m.adjacentComment(step, m.showResolved)
+// order, wrapping across the entire review.
+func (m *AppModel) jumpToComment(step int, includeResolved bool) bool {
+	tabIndex, target, ok := m.adjacentComment(step, includeResolved)
 	if ok {
 		m.selectComment(tabIndex, target)
 	}
 	return ok
 }
 
-// nextCommentOrFinish moves to the next comment like jumpToComment(1), except
+// nextCommentOrFinish moves to the next comment like jumpToComment, except
 // that on the last thread of the review it opens the finish dialog instead of
 // wrapping around to the first.
-func (m *AppModel) nextCommentOrFinish() {
+func (m *AppModel) nextCommentOrFinish(includeResolved bool) {
 	if m.currentCommentTarget(m.commentTargets(m.activeTab)) >= 0 {
-		if _, _, ok := m.adjacentCommentNoWrap(1, m.showResolved); !ok {
+		if _, _, ok := m.adjacentCommentNoWrap(1, includeResolved); !ok {
 			m.openFinishModal()
 			return
 		}
 	}
-	m.jumpToComment(1)
+	m.jumpToComment(1, includeResolved)
 }
 
 func (m *AppModel) adjacentComment(step int, includeResolved bool) (int, commentTarget, bool) {
@@ -392,7 +392,7 @@ func (m *AppModel) scrollToCursor() {
 	t := m.tab()
 	if t.cursorOnAnnotation {
 		id := m.selectedCommentID()
-		if _, drifted := m.driftedComment(id); drifted && !t.expandedDrifted[id] {
+		if c, drifted := m.driftedComment(id); drifted && (c.Resolved || !t.expandedDrifted[id]) {
 			for _, marker := range m.contentLayout.markers {
 				for _, candidate := range marker.ids {
 					if candidate == id {

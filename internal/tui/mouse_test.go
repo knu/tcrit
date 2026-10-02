@@ -561,7 +561,6 @@ func TestMouseClickTogglesCommentResolution(t *testing.T) {
 						comment.Scope, comment.StartLine, comment.EndLine = "file", 0, 0
 					}
 					app.tab().state.Comments = []review.Comment{comment}
-					app.showResolved = location == "sidebar"
 					app.recalculateLayout()
 					app.updateCommentSidebar()
 					app.rebuildContent()
@@ -800,7 +799,6 @@ func TestMouseClickHeaderDelete(t *testing.T) {
 						comment.Scope, comment.StartLine, comment.EndLine = "file", 0, 0
 					}
 					app.tab().state.Comments = []review.Comment{comment}
-					app.showResolved = location == "sidebar"
 					app.recalculateLayout()
 					app.updateCommentSidebar()
 					app.rebuildContent()
