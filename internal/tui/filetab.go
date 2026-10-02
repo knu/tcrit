@@ -42,6 +42,7 @@ type FileTab struct {
 	// Annotation focus
 	cursorOnAnnotation bool
 	cursorAnnoIdx      int
+	expandedDrifted    map[string]bool
 
 	// Placeholder tabs
 	isBinary  bool

@@ -642,6 +642,11 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		if key.Matches(msg, keys.HideComments) {
 			m.hideComments = !m.hideComments
+			if m.hideComments {
+				for i := range m.tabs {
+					clear(m.tabs[i].expandedDrifted)
+				}
+			}
 			m.focused = contentPane
 			t.cursorOnAnnotation = false
 			if t.cursorLine == 0 {
@@ -782,6 +787,19 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, keys.PrevComment):
 			m.jumpToComment(-1)
 			return m, nil
+		}
+	}
+
+	if id := m.selectedCommentID(); id != "" {
+		if _, drifted := m.driftedComment(id); drifted {
+			if key.Matches(msg, keys.Confirm) {
+				m.toggleDrifted(id)
+				return m, nil
+			}
+			if msg.String() == "e" {
+				m.openCommentThread(id)
+				return m, nil
+			}
 		}
 	}
 
@@ -2029,7 +2047,7 @@ func (m *AppModel) updateCommentSidebar() {
 
 	for idx, it := range t.sidebarItems {
 		isSelected := m.focused == commentPane && idx == t.sidebarCursor
-		collapsed := (it.drifted || (it.resolved && !m.showResolved)) && !isSelected
+		collapsed := (it.drifted && !m.tab().expandedDrifted[it.id]) || (it.resolved && !m.showResolved && !isSelected)
 		var item strings.Builder
 
 		var lineInfo string
@@ -3334,13 +3352,21 @@ func (m AppModel) renderFooter() string {
 			k("v", "toggle select"),
 		}
 	} else {
+		enterAction := "comment"
+		_, drifted := m.driftedComment(m.selectedCommentID())
+		if drifted {
+			enterAction = "toggle thread"
+		}
 		items = []string{
 			k("[/]", "prev/next comment"),
 			k("s", "sidebar"),
 			k("t", "files/comments"),
 			k("v", "select lines"),
-			k("enter", "comment"),
+			k("enter", enterAction),
 			k("f", "file comment"),
+		}
+		if drifted {
+			items = append(items, k("e", "edit/reply"))
 		}
 		if len(t.state.Comments) > 0 {
 			items = append(items, k("r/R", "resolve/+next"))

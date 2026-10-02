@@ -266,9 +266,6 @@ func (m *AppModel) selectComment(tabIndex int, target commentTarget) {
 	m.rebuildContent()
 	m.updateCommentSidebar()
 	m.scrollToCursor()
-	if _, drifted := m.driftedComment(target.id); drifted && m.hideComments {
-		m.openCommentThread(target.id)
-	}
 }
 
 type changeTarget struct {
@@ -393,6 +390,25 @@ func (m *AppModel) selectChange(tabIndex int, chunk changeChunk) {
 
 func (m *AppModel) scrollToCursor() {
 	t := m.tab()
+	if t.cursorOnAnnotation {
+		id := m.selectedCommentID()
+		if _, drifted := m.driftedComment(id); drifted && !t.expandedDrifted[id] {
+			for _, marker := range m.contentLayout.markers {
+				for _, candidate := range marker.ids {
+					if candidate == id {
+						top := m.contentViewport.YOffset()
+						if marker.rect.top < top {
+							m.contentViewport.SetYOffset(marker.rect.top)
+						}
+						if marker.rect.bottom > top+m.contentViewport.Height() {
+							m.contentViewport.SetYOffset(marker.rect.bottom - m.contentViewport.Height())
+						}
+						return
+					}
+				}
+			}
+		}
+	}
 	if t.cursorLine == 0 && t.cursorOnAnnotation {
 		start, end := -1, 0
 		for row, target := range m.contentLayout.rows {

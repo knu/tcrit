@@ -13,6 +13,50 @@ import (
 	"github.com/knu/tcrit/internal/review"
 )
 
+func TestDriftedFocusDoesNotExpandUntilEnter(t *testing.T) {
+	for _, hidden := range []bool{false, true} {
+		app := setupAppWithDoc(t, strings.Repeat("source\n", 50))
+		app.width, app.height = 100, 30
+		app.hideComments = hidden
+		app.tab().cursorLine = 1
+		app.recalculateLayout()
+		app.tab().state.Comments = []review.Comment{
+			{ID: "lost", StartLine: 200, EndLine: 200, Body: "lost body", Anchor: "old source"},
+			{ID: "drifted", StartLine: 40, EndLine: 40, Body: "drifted body", Drifted: true},
+		}
+		app.rebuildContent()
+		app.updateCommentSidebar()
+		height := len(app.contentLayout.rows)
+		app = pressKey(app, ']')
+		if app.selectedCommentID() != "drifted" || app.modal != noModal || len(app.contentLayout.rows) != height {
+			t.Fatal("navigation expanded a folded thread")
+		}
+		if view := ansi.Strip(app.contentViewport.View()); !strings.Contains(view, "> 💬") || strings.Contains(view, "drifted body") {
+			t.Fatalf("focused marker = %q", view)
+		}
+		app = pressKey(app, tea.KeyEnter)
+		if view := ansi.Strip(app.contentViewport.View()); !strings.Contains(view, "drifted body") || app.modal != noModal {
+			t.Fatalf("Enter did not expand inline: %q", view)
+		}
+		app = pressKey(app, tea.KeyEnter)
+		if view := ansi.Strip(app.contentViewport.View()); strings.Contains(view, "drifted body") || !strings.Contains(view, "> 💬") || len(app.contentLayout.rows) != height {
+			t.Fatalf("Enter did not collapse inline: %q", view)
+		}
+		app = pressKey(app, '[')
+		if app.selectedCommentID() != "lost" || !strings.Contains(ansi.Strip(app.contentViewport.View()), "> 💬") || app.contentViewport.YOffset() != 0 {
+			t.Fatal("unplaced marker did not gain focus and scroll into view")
+		}
+		app = pressKey(app, tea.KeyEnter)
+		if !strings.Contains(ansi.Strip(app.contentViewport.View()), "old source") {
+			t.Fatal("unplaced thread did not expand")
+		}
+		app = pressKey(app, 'e')
+		if app.modal == noModal || app.editingID != "lost" {
+			t.Fatal("editor is no longer keyboard-accessible")
+		}
+	}
+}
+
 func TestDriftedMarkersOpenAndCycleThreads(t *testing.T) {
 	app := setupAppWithDoc(t, strings.Repeat("long source ", 30)+"\nsecond\n")
 	app.width, app.height = 100, 35
@@ -101,15 +145,17 @@ func TestUnplacedCommentsStayReachable(t *testing.T) {
 			app.tab().cursorLine = 0
 			app = pressKey(app, ']')
 			app = pressKey(app, ']')
+			app = pressKey(app, tea.KeyEnter)
 			if app.selectedCommentID() != c.ID || !strings.Contains(ansi.Strip(app.contentViewport.View()), c.Anchor) {
 				t.Fatalf("thread not reachable: selected %q, view %q", app.selectedCommentID(), ansi.Strip(app.contentViewport.View()))
 			}
 			if app.tab().state.Comments[1].Drifted || app.tab().state.Comments[1].Scope != "" {
 				t.Fatal("fallback changed stored drift or scope")
 			}
+			app = pressKey(app, tea.KeyEnter)
 			app = pressKey(app, 'H')
 			app.selectMarker([]string{c.ID})
-			if !app.hideComments || app.editingID != c.ID || app.modal == noModal {
+			if !app.hideComments || app.modal != noModal || !strings.Contains(ansi.Strip(app.contentViewport.View()), c.Anchor) {
 				t.Fatal("unplaced comment cannot be opened while comments are hidden")
 			}
 		})
@@ -129,13 +175,13 @@ func TestDriftedDeletedMarkerAndHiddenMode(t *testing.T) {
 	}
 	left, top, _, _ := app.contentBounds()
 	app = clickMouse(app, left+marker.rect.left, top+marker.rect.top)
-	if !app.hideComments || app.modal == noModal || app.editingID != "old" {
+	if !app.hideComments || app.modal != noModal || !app.tab().expandedDrifted["old"] {
 		t.Fatal("hidden marker did not open its thread")
 	}
 	if view := ansi.Strip(app.View().Content); !strings.Contains(view, "old anchor") {
 		t.Fatalf("modal lacks original context: %q", view)
 	}
-	app = pressKey(app, tea.KeyEscape)
+	app.releaseThreadFocus()
 	app.tab().state.Comments[0].Resolved = true
 	app.rebuildContent()
 	if len(app.contentLayout.markers) != 0 {

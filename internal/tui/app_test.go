@@ -913,6 +913,7 @@ func TestRevertedAdditionShowsPlaceholderAndKeepsComments(t *testing.T) {
 		t.Fatalf("content = %q, want a marker for the kept comment", content)
 	}
 	app.jumpToComment(1)
+	app = pressKey(app, tea.KeyEnter)
 	if got := ansi.Strip(app.contentViewport.View()); !strings.Contains(got, "why one?") || !strings.Contains(got, "var x = 1") {
 		t.Fatalf("opened thread = %q, want the comment and its original text", got)
 	}

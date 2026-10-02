@@ -80,7 +80,7 @@ func (m *AppModel) rebuildContent() {
 	groups := m.driftedGroups()
 	contentWidth := m.contentViewport.Width()
 	for _, ids := range groups {
-		width := lipgloss.Width(fmt.Sprintf("💬 %d", len(ids))) + 1
+		width := lipgloss.Width(fmt.Sprintf("> 💬 %d", len(ids))) + 1
 		contentWidth = min(contentWidth, m.contentViewport.Width()-width)
 	}
 	boxWidth := contentWidth - gutterWidth
@@ -113,7 +113,7 @@ func (m *AppModel) rebuildContent() {
 	b.Grow(len(sourceLines) * 200) // pre-allocate to reduce allocations
 	layout := newRenderedContentLayout()
 	appendAnnotation := func(ann annotation, focused bool, target contentMouseTarget) {
-		if ann.drifted && !focused {
+		if ann.drifted && (!t.expandedDrifted[ann.id] || (ann.resolved && !m.showResolved && !focused)) {
 			return
 		}
 		box, button := m.renderAnnotationBox(ann, boxWidth, focused)
@@ -125,8 +125,8 @@ func (m *AppModel) rebuildContent() {
 	if len(groups[lineRef{}]) > 0 {
 		layout.appendBlock(&b, "", contentMouseTarget{drifted: true})
 	}
-	if !m.hideComments {
-		for idx, ann := range m.annotationsAfterLine(0, "") {
+	for idx, ann := range m.annotationsAfterLine(0, "") {
+		if !m.hideComments || ann.drifted {
 			focused := m.focused == contentPane && t.cursorOnAnnotation && t.cursorLine == 0 && t.cursorAnnoIdx == idx
 			appendAnnotation(ann, focused, contentMouseTarget{annotation: true, annotationIndex: idx})
 		}
@@ -190,8 +190,8 @@ func (m *AppModel) rebuildContent() {
 				}
 			}
 			for idx, ann := range oldAnnosByEndLine[del.OldLineNum] {
-				if m.hideComments {
-					break
+				if m.hideComments && !ann.drifted {
+					continue
 				}
 				focused := m.focused == contentPane && t.cursorOnAnnotation && isCursor && t.cursorAnnoIdx == idx
 				appendAnnotation(ann, focused, contentMouseTarget{
@@ -316,8 +316,8 @@ func (m *AppModel) rebuildContent() {
 		// Render inline annotations after this line
 		if anns, ok := annosByEndLine[lineNum]; ok {
 			for idx, ann := range anns {
-				if m.hideComments {
-					break
+				if m.hideComments && !ann.drifted {
+					continue
 				}
 				focused := m.focused == contentPane && t.cursorOnAnnotation && t.cursorSide == "" && t.cursorLine == lineNum && t.cursorAnnoIdx == idx
 				appendAnnotation(ann, focused, contentMouseTarget{

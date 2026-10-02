@@ -70,7 +70,7 @@ func (m *AppModel) driftedGroups() map[lineRef][]string {
 	groups := make(map[lineRef][]string)
 	if m.tab().state != nil {
 		for _, c := range m.tab().state.Comments {
-			if commentDrifted(m.tab(), c) && (!c.Resolved || m.showResolved) {
+			if commentDrifted(m.tab(), c) && (!c.Resolved || m.showResolved || c.ID == m.selectedCommentID()) {
 				ref := commentLocation(m.tab(), c)
 				groups[ref] = append(groups[ref], c.ID)
 			}
@@ -100,8 +100,15 @@ func (m *AppModel) decorateDrifted(content string, layout *renderedContentLayout
 		if len(ids) > 1 {
 			label += fmt.Sprintf(" %d", len(ids))
 		}
-		x := max(0, m.contentViewport.Width()-lipgloss.Width(label))
-		rows[y] = lipgloss.NewStyle().Width(x).Render(rows[y]) + commentLineStyle.Faint(true).Render(label)
+		prefix := "  "
+		for _, id := range ids {
+			if id == m.selectedCommentID() {
+				prefix = cursorMarker.Render(">") + " "
+				break
+			}
+		}
+		x := max(0, m.contentViewport.Width()-lipgloss.Width(label)-2)
+		rows[y] = lipgloss.NewStyle().Width(x).Render(rows[y]) + prefix + commentLineStyle.Faint(true).Render(label)
 		layout.markers = append(layout.markers, commentMarker{
 			rect: mouseRect{left: x, right: m.contentViewport.Width(), top: y, bottom: y + 1}, ids: ids,
 		})
@@ -121,7 +128,19 @@ func (m *AppModel) selectMarker(ids []string) {
 	for _, target := range m.commentTargets(m.activeTab) {
 		if target.id == id {
 			m.selectComment(m.activeTab, target)
+			m.toggleDrifted(id)
 			return
 		}
 	}
+}
+
+func (m *AppModel) toggleDrifted(id string) {
+	t := m.tab()
+	if t.expandedDrifted == nil {
+		t.expandedDrifted = make(map[string]bool)
+	}
+	t.expandedDrifted[id] = !t.expandedDrifted[id]
+	m.rebuildContent()
+	m.updateCommentSidebar()
+	m.scrollToCursor()
 }
