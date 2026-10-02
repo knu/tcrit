@@ -42,6 +42,8 @@ For a supplied diff, use `tcrit --diff=changes.diff` or `tcrit --diff changes.di
 
 Choose a wait mechanism before launching the Step 1 command.  Use the tools exposed by the host: a background task with retained output, or a resumable execution handle.  Distinguish a wait timeout from an execution timeout that terminates the process.  A longer execution timeout alone does not ensure that TCrit and its output survive it.  If the host cannot preserve both, ask the user to run TCrit in their terminal and return its finish output instead.
 
+When the background task tool takes a `timeout`, that value is the execution limit: when it expires the host kills TCrit and the open round is lost.  Set it to the maximum the tool allows so it outlasts the review; it is not the 10-minute wait deadline below.  A host that notifies on command exit resumes the agent itself, so end the turn at the deadline instead of polling.
+
 For Codex, prepare a terminal marker immediately before **every** review launch, including retries and later rounds:
 
 1. Run `tcrit terminal prepare` and read its JSON `id` and `marker`.
