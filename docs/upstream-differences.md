@@ -8,7 +8,7 @@ tcrit is a fork of [kevindutra/crit](https://github.com/kevindutra/crit).  This 
 
 - **Dialog opening clicks** — the second click of a double-click that opens a dialog cannot activate a control newly placed beneath the pointer, including Resolved when opening a drifted thread.
 
-- **Visible thread resolution** — drifted markers show a checkbox for the focused thread, or for all grouped threads when unfocused.  Add/Edit Reply shows the current resolution beside its close button, with a clickable checkbox and `alt+r` shortcut.  Both use the same yellow/green colors as expanded threads.  Resolution changes apply immediately, independently of saving or discarding reply text.  Adding a reply preserves the displayed resolution instead of reopening the thread automatically.
+- **Visible thread resolution** — drifted markers show a checkbox for the focused thread, or for all grouped threads when unfocused.  Add/Edit Reply shows the current resolution beside its close button, with a clickable checkbox and `alt+r` shortcut.  Both use the same yellow/green colors as expanded threads.  Resolution changes apply immediately, independently of saving or discarding reply text.  Adding a reply preserves the displayed resolution instead of reopening the thread automatically.  At the start of a new round, focusing a fresh agent reply also expands an unresolved drifted thread.
 
 - **Demo release assets** — `demo/release.sh` lists release assets and uploads GIFs as `{name}-{version}.gif`.  It reuses matching names only when SHA-256 and size also match, and rejects name collisions with different content.  Recordings are ignored by Git; documentation uses HTTPS release-asset URLs.
 

@@ -43,10 +43,13 @@ func TestNewRoundReplyFocusFromEmptyBaseline(t *testing.T) {
 
 func TestNewRoundFocusesFreshReplies(t *testing.T) {
 	for _, tt := range []struct {
-		name, scope, side    string
-		resolved, lateWindow bool
+		name, scope, side             string
+		resolved, lateWindow, drifted bool
 	}{
 		{name: "line"},
+		{name: "drifted line", drifted: true},
+		{name: "drifted resolved line", drifted: true, resolved: true},
+		{name: "drifted late window", drifted: true, lateWindow: true},
 		{name: "file resolved", scope: "file", resolved: true},
 		{name: "deleted line", side: "old"},
 		{name: "window arrives after documents", lateWindow: true},
@@ -60,7 +63,7 @@ func TestNewRoundFocusesFreshReplies(t *testing.T) {
 				{ID: "old-reply", StartLine: 2, EndLine: 2, Body: "already seen", Replies: []review.Reply{{ID: "seen", Author: "Agent", Body: "old answer"}}},
 			}
 			target := review.Comment{ID: "target", StartLine: 2, EndLine: 2, Scope: tt.scope, Side: tt.side,
-				Body: strings.Repeat("long original comment\n", 25)}
+				Body: strings.Repeat("long original comment\n", 25), Drifted: tt.drifted}
 			if tt.scope == "file" {
 				target.StartLine, target.EndLine = 0, 0
 			}

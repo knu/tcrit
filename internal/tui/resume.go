@@ -68,7 +68,8 @@ func (m *AppModel) focusNewReply() {
 			}
 		}
 		for _, target := range m.commentTargets(i) {
-			replies := comments[target.id].Replies
+			comment := comments[target.id]
+			replies := comment.Replies
 			for j := len(replies) - 1; j >= 0; j-- {
 				reply := replies[j]
 				if seen[reply.ID] || reply.Author == m.author {
@@ -79,6 +80,12 @@ func (m *AppModel) focusNewReply() {
 				}
 				if m.threadScrolls == nil {
 					m.threadScrolls = make(map[threadViewKey]threadScroll)
+				}
+				if !comment.Resolved && commentDrifted(tab, comment) {
+					if tab.expandedDrifted == nil {
+						tab.expandedDrifted = make(map[string]bool)
+					}
+					tab.expandedDrifted[comment.ID] = true
 				}
 				m.threadScrolls[threadViewKey{path: tab.path, id: target.id}] = threadScroll{revealReply: reply.ID}
 				m.hideComments = false
