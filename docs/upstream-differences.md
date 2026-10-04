@@ -1,5 +1,7 @@
 # Differences from upstream
 
+- **Inline README videos** — GitHub video attachments render the demos as embedded players.  Versioned release assets remain available for downloads.
+
 - **Reuse draft releases** — automated releases update an existing draft, retain its attached recordings, and replace its notes with the matching `CHANGELOG.md` section before publication.
 
 tcrit is a fork of [kevindutra/crit](https://github.com/kevindutra/crit).  This file lists every change the fork carries beyond upstream, including small fixes; the README keeps only the highlights.  Add an entry here when a feature lands.

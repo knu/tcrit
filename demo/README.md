@@ -14,6 +14,8 @@ Each recording runs `setup.sh`, then `vhs`, then `clean-recording.sh`.  The setu
 
 MP4s are local build outputs ignored by Git.  Published recordings are hosted as release assets.  After the first recording, MP4s only rebuild when a tape, script, or fixture is newer.
 
+For inline playback in the GitHub README, upload the MP4s as GitHub video attachments and use their `https://github.com/user-attachments/assets/...` URLs in `<video controls>` elements.  Keep the versioned release assets for downloads.
+
 ## Uploading recordings
 
 Use an existing draft or published release to host recordings without adding them to Git:

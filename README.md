@@ -12,8 +12,7 @@ Read a plan or review code changes across multiple files, leave inline comments,
 
 Your agent writes code or a plan, you review it in the TUI, and the agent reads your comments and makes changes for the next round.
 
-<!-- v0.16.0 recordings are prepared on the draft release; links become public on publication. -->
-[Watch the TCrit code review demo](https://github.com/knu/tcrit/releases/download/v0.16.0/code-review-claude-v0.16.0.mp4)
+<video controls src="https://github.com/user-attachments/assets/4e62b68e-6532-4716-a5ad-d15a3d994f5b"></video>
 
 ## Key Features
 
@@ -143,11 +142,11 @@ In the second round, select the message body from line 3 with `v` and press Ente
 
 **Claude Code**
 
-[Watch the Claude Code review-and-commit demo](https://github.com/knu/tcrit/releases/download/v0.16.0/review-flow-claude-v0.16.0.mp4)
+<video controls src="https://github.com/user-attachments/assets/116b604b-3af0-4c53-9978-2eff82a6bda0"></video>
 
 **Codex**
 
-[Watch the Codex review-and-commit demo](https://github.com/knu/tcrit/releases/download/v0.16.0/review-flow-codex-v0.16.0.mp4)
+<video controls src="https://github.com/user-attachments/assets/66ab9a17-03f5-445c-a97c-834221c36b0c"></video>
 
 ## Requirements
 
