@@ -18,6 +18,8 @@ MP4s are local build outputs ignored by Git.  Published recordings are hosted as
 
 Use an existing draft or published release to host recordings without adding them to Git:
 
+For an upcoming release, create a draft with both its tag and title set to the version, such as `v0.17.0`.  Upload the recordings before pushing the release tag.  After tag CI passes, GoReleaser reuses the draft, keeps its attached recordings, replaces its notes with the matching `CHANGELOG.md` section, and publishes it.  If no matching draft exists, it creates a new release.
+
 ```sh
 ./demo/release.sh -t v0.16.0 list
 ./demo/release.sh -t v0.16.0 upload demo/review-flow-codex.mp4 v0.16.0

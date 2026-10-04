@@ -29,3 +29,6 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
 
 # The release workflow supplies the matching CHANGELOG.md section with --release-notes.
+release:
+  use_existing_draft: true
+  mode: replace
