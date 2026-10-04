@@ -343,8 +343,8 @@ func TestResolveThreadReleasesFocus(t *testing.T) {
 			if surface == "sidebar-file" {
 				view = app.commentViewport.View()
 			}
-			if strings.Contains(ansi.Strip(view), comment.Body) {
-				t.Fatalf("resolved thread did not stay folded: %q", view)
+			if !strings.Contains(ansi.Strip(view), comment.Body) {
+				t.Fatalf("thread resolved this round was folded in normal mode: %q", view)
 			}
 		})
 	}
@@ -380,6 +380,42 @@ func TestToggleCommentVisibility(t *testing.T) {
 	app = pressKey(app, '3')
 	if app.activeTab != 2 || !app.hideComments {
 		t.Fatal("folding mode did not survive tab switch")
+	}
+}
+
+func TestCommentVisibilityThreeStates(t *testing.T) {
+	for _, initial := range []rune{0, 'h', 'H'} {
+		for _, pressed := range []rune{'h', 'H'} {
+			t.Run(fmt.Sprintf("%d/%c", initial, pressed), func(t *testing.T) {
+				comments := []review.Comment{
+					{ID: "open", Scope: "file", Body: "open body"},
+					{ID: "current", Scope: "file", Body: "current body", Resolved: true, ResolvedRound: 3},
+					{ID: "past", Scope: "file", Body: "past body", Resolved: true, ResolvedRound: 2},
+				}
+				app, _ := newFinishTestApp(t, comments)
+				app.session.CJ.ReviewRound = 3
+				app.width, app.height = 160, 60
+				app.recalculateLayout()
+				if initial != 0 {
+					app = pressKey(app, initial)
+				}
+				app = pressKey(app, pressed)
+				want := pressed
+				if initial == pressed {
+					want = 0
+				}
+				if app.hideComments != (want == 'H') || app.foldResolved != (want == 'h') {
+					t.Fatalf("state: hidden=%v folded=%v, want %d", app.hideComments, app.foldResolved, want)
+				}
+				for _, view := range []string{app.contentViewport.View(), app.commentViewport.View()} {
+					plain := ansi.Strip(view)
+					if strings.Contains(plain, "open body") != (want != 'H') ||
+						strings.Contains(plain, "current body") != (want == 0) || strings.Contains(plain, "past body") {
+						t.Fatalf("state %d: incorrect bodies: %q", want, plain)
+					}
+				}
+			})
+		}
 	}
 }
 

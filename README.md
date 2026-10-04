@@ -304,7 +304,7 @@ TCrit finds the pane that ran the command from the process tree, even when the a
 | `j` / `k`, `enter`, `h` / `l` (file tree) | Move (moving onto a file opens its tab), open the file or toggle a folder, fold / unfold |
 | `[` / `]`                             | Jump to prev / next comment, including resolved threads.  `]` on the last comment opens the finish dialog |
 | `{` / `}`                             | Jump to prev / next unresolved comment.  `}` on the last unresolved comment opens the finish dialog |
-| `H`                                   | Hide/show comment boxes across all files; show line markers in a narrow right gutter |
+| `h` / `H`                             | Fold all resolved threads / hide all comment boxes; press the same key again to return to normal |
 | `w`                                   | Toggle ignore whitespace across all files in code reviews |
 | `r`                                   | Resolve / unresolve the focused comment in place |
 | `R`                                   | Resolve the focused comment and jump to the next unresolved thread, or open the finish dialog if none remain |
@@ -357,12 +357,14 @@ The kill ring is shared across comment and reply dialogs for the TUI run and is 
 | `alt+p` (`M-p`)     | Open the file selector: type to filter tabs fuzzily, `↑` / `↓` choose, `enter` switches |
 | `1`-`9`             | Switch to the numbered file tab from the content pane |
 
+Normally, only threads resolved in earlier rounds are folded.  `h` also folds threads resolved in this round; `H` hides comments and shows line markers in a narrow right gutter.  Press either key to switch directly to its mode, or press it again to return to normal.  In the file tree, `h` keeps its folder-navigation role.
+
 `f` replies to the file's existing thread, or creates a file comment when there is none.  The file selector matches like VS Code's: gaps are allowed, several words must all match, and basename matches rank first.  `n` / `N` visit change hunks and unresolved comments in display order across files and reveal comments hidden with `H`.
 
 ## Mouse controls
 
 - Click a file tab, code line, inline comment, sidebar, or sidebar comment to focus it.  Click the sidebar's **Comments** or **Files** tab to switch views; in the file tree, click a folder to fold or unfold it and a file to open it.
-- Every thread header ends with a button group.  **☐ Resolve** resolves the thread and lets it fold; **☑︎ Resolved** reopens it and keeps it focused so its history stays visible.  **↑** / **↓** move to the previous or next thread like `[` / `]`, and **↓** on the last thread opens the finish dialog.  The red **x** deletes your own unanswered comment from the current round after confirmation.
+- Every thread header ends with a button group.  **☐ Resolve** resolves the thread and releases focus; **☑︎ Resolved** reopens it and keeps it focused so its history stays visible.  **↑** / **↓** move to the previous or next thread like `[` / `]`, and **↓** on the last thread opens the finish dialog.  The red **x** deletes your own unanswered comment from the current round after confirmation.
 - Scroll code with the mouse wheel; over a thread, the wheel scrolls its history first.
 - Click the gutter to comment on a current or deleted line, or drag along it to select several lines.
 - Click inside a comment text box to focus it and position the cursor.

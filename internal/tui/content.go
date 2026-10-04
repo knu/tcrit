@@ -337,7 +337,10 @@ func (m *AppModel) rebuildContent() {
 
 // renderAnnotationBox renders a bordered annotation box indented under the gutter.
 func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused bool) (string, commentHeaderRegion) {
-	collapsed := ann.resolved && (!ann.drifted || !m.tab().expandedDrifted[ann.id])
+	collapsed := m.collapseResolved(ann.resolved, ann.resolvedRound)
+	if ann.drifted && m.tab().expandedDrifted[ann.id] && !m.foldResolved {
+		collapsed = false
+	}
 	var lineLabel string
 	if ann.scope == "file" {
 		lineLabel = "File"
@@ -387,6 +390,10 @@ func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused boo
 	}
 	button.translate(gutterWidth+2, 1)
 	return b.String(), button
+}
+
+func (m *AppModel) collapseResolved(resolved bool, round int) bool {
+	return resolved && (m.foldResolved || round == 0 || round < m.reviewRound())
 }
 
 func renderResolution(resolved bool, label string) string {

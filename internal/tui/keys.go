@@ -25,6 +25,7 @@ type keyMap struct {
 	NextUnresolved   key.Binding
 	PrevUnresolved   key.Binding
 	HideComments     key.Binding
+	FoldResolved     key.Binding
 	IgnoreWhitespace key.Binding
 	Delete           key.Binding
 	FileComment      key.Binding
@@ -55,6 +56,7 @@ var keys = keyMap{
 	Resolve:          key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "resolve/unresolve")),
 	ResolveNext:      key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "resolve and go to next")),
 	HideComments:     key.NewBinding(key.WithKeys("H"), key.WithHelp("H", "hide/show comments")),
+	FoldResolved:     key.NewBinding(key.WithKeys("h"), key.WithHelp("h", "fold resolved comments")),
 	IgnoreWhitespace: key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "ignore whitespace")),
 	Delete:           key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete comment")),
 	FileComment:      key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "comment on file")),

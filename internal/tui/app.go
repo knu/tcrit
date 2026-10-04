@@ -91,6 +91,7 @@ type AppModel struct {
 	authorColors     map[string]int
 	threadScrolls    map[threadViewKey]threadScroll
 	hideComments     bool
+	foldResolved     bool
 	ignoreWhitespace bool
 	previousReplyIDs []string // submission baseline pending initial window dimensions
 
@@ -637,12 +638,21 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case key.Matches(msg, keys.FoldResolved):
+		m.foldResolved = !m.foldResolved
+		m.hideComments = false
+		m.recalculateLayout()
+		m.updateCommentSidebar()
+		m.rebuildContent()
+		return m, nil
+
 	case key.Matches(msg, keys.HideComments):
 		selectedID := ""
 		if t.sidebarCursor < len(t.sidebarItems) {
 			selectedID = t.sidebarItems[t.sidebarCursor].id
 		}
 		m.hideComments = !m.hideComments
+		m.foldResolved = false
 		if m.hideComments {
 			for i := range m.tabs {
 				clear(m.tabs[i].expandedDrifted)
@@ -1388,8 +1398,7 @@ func (m *AppModel) resolveThread(id string, advance bool) {
 	}
 }
 
-// releaseThreadFocus returns focus to the source line under the cursor so a
-// resolved thread folds.
+// releaseThreadFocus returns focus to the source line under the cursor.
 func (m *AppModel) releaseThreadFocus() {
 	t := m.tab()
 	m.focused = contentPane
@@ -1401,7 +1410,7 @@ func (m *AppModel) releaseThreadFocus() {
 }
 
 // clickResolve toggles thread id from its header button.  Resolving releases
-// focus so the thread folds out of the way; reopening keeps the thread
+// focus; reopening keeps the thread
 // focused so its history is visible again.
 func (m *AppModel) clickResolve(id string) {
 	wasResolved := false
@@ -1962,37 +1971,39 @@ type commentTarget struct {
 
 // sidebarItem represents a comment in the sidebar list.
 type sidebarItem struct {
-	drifted  bool
-	id       string
-	scope    string
-	line     int
-	endLine  int
-	side     string
-	body     string
-	author   string
-	replies  []review.Reply
-	resolved bool // shown collapsed; only file comments stay listed once resolved
+	drifted       bool
+	id            string
+	scope         string
+	line          int
+	endLine       int
+	side          string
+	body          string
+	author        string
+	replies       []review.Reply
+	resolved      bool
+	resolvedRound int
 }
 
 // annotation represents an inline comment to render.
 type annotation struct {
-	drifted  bool
-	id       string
-	scope    string
-	body     string
-	line     int
-	endLine  int
-	side     string
-	author   string
-	resolved bool
-	replies  []review.Reply
+	drifted       bool
+	id            string
+	scope         string
+	body          string
+	line          int
+	endLine       int
+	side          string
+	author        string
+	resolved      bool
+	resolvedRound int
+	replies       []review.Reply
 }
 
 func newAnnotation(c review.Comment) annotation {
 	return annotation{
 		id: c.ID, body: c.Body, scope: c.Scope,
 		line: c.StartLine, endLine: c.EndLine, side: c.Side,
-		author: c.Author, resolved: c.Resolved, replies: c.Replies,
+		author: c.Author, resolved: c.Resolved, resolvedRound: c.ResolvedRound, replies: c.Replies,
 	}
 }
 
@@ -2014,7 +2025,7 @@ func (m *AppModel) updateCommentSidebar() {
 		t.sidebarItems = append(t.sidebarItems, sidebarItem{
 			id: c.ID, scope: c.Scope, line: c.StartLine, endLine: c.EndLine, drifted: commentDrifted(t, c),
 			side: c.Side, body: c.Body, author: c.Author, replies: c.Replies,
-			resolved: c.Resolved,
+			resolved: c.Resolved, resolvedRound: c.ResolvedRound,
 		})
 	}
 	sort.SliceStable(t.sidebarItems, func(i, j int) bool {
@@ -2055,9 +2066,9 @@ func (m *AppModel) updateCommentSidebar() {
 
 	for idx, it := range t.sidebarItems {
 		isSelected := m.focused == commentPane && idx == t.sidebarCursor
-		collapsed := it.resolved
+		collapsed := m.collapseResolved(it.resolved, it.resolvedRound)
 		if it.drifted {
-			collapsed = !t.expandedDrifted[it.id]
+			collapsed = !t.expandedDrifted[it.id] || (m.foldResolved && it.resolved)
 		}
 		var item strings.Builder
 
@@ -3480,7 +3491,7 @@ func (m AppModel) renderHelp(innerWidth int) string {
 		{keys: "v", desc: "select"},
 		{keys: "s/t", desc: "sidebar/view"},
 		{keys: "r/R", desc: "resolve/+next"},
-		{keys: "H", desc: "hide/show"},
+		{keys: "h/H", desc: "fold/hide"},
 		{keys: "w", desc: "ignore WS"},
 		{keys: "d", desc: "delete comment"},
 		{keys: "q/ctrl+c", desc: "finish"},
