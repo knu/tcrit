@@ -15,6 +15,19 @@ Each recording runs `setup.sh`, then `vhs`, then `clean-recording.sh`.  The setu
 
 The GIFs are committed and only rebuild when a tape, script, or fixture is newer.  The MP4s are recorded on demand and ignored by Git.
 
+## Uploading recordings
+
+Use an existing, published `demo-assets` release to host new recordings without adding them to Git:
+
+```sh
+./demo/release.sh list
+./demo/release.sh upload demo/review-flow-codex.gif
+```
+
+The script requires `gh`, `jq`, and `sha256sum` or `shasum`.  Authenticate `gh` with write access to the repository first.  The repository defaults to the current repository reported by `gh repo view`.  Use `-r OWNER/REPO` and `-t TAG` to select another repository or release.  The release must already exist; the script does not create tags or releases.
+
+`list` prints tab-separated asset names, SHA-256 digests, and download URLs.  `upload FILE` prints the download URL of an asset with the same SHA-256, regardless of its name.  Otherwise it uploads a snapshot under a hash-based filename, preserving the extension, and prints its URL.  Existing assets are never overwritten.  Use the returned URL in a README image link.
+
 ## Sending Alt keys and mouse events from a tape
 
 VHS accepts `Alt+p`, but its headless Chrome runs xterm.js on macOS, where Alt with a letter is not turned into an escape sequence, so the TUI receives a bare `p` (charmbracelet/vhs issue #442; `macOptionIsMeta` cannot be set from a tape).  Send the escape byte yourself instead:
