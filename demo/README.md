@@ -1,39 +1,38 @@
 # Demo recordings
 
-The README animation is recorded with [VHS](https://github.com/charmbracelet/vhs) from `code-review.tape`; `demo.tape` records a document review without an agent.  It needs `vhs`, `tmux`, `claude`, and GNU make on `PATH`.
+The README video is recorded with [VHS](https://github.com/charmbracelet/vhs) from `code-review.tape`; `demo.tape` records a document review without an agent.  It needs `vhs`, `tmux`, `claude`, and GNU make on `PATH`.
 
 Run these from this directory, or from the repository root with `make -C demo`:
 
 ```bash
-make            # record GIFs whose tape or scripts changed
+make            # record MP4s whose tape or scripts changed
 make rebuild    # record them again from scratch
-make mp4        # record H.264 MP4s instead, for example to post on X
-make clean      # delete the GIFs and MP4s
+make clean      # delete the MP4s
 ```
 
-Each recording runs `setup.sh`, then `vhs`, then `clean-recording.sh`.  The setup script builds the current checkout and creates the fixtures from `assets` under `$DEMO_DIR` (default `$TMPDIR/tcrit-demo`): a throwaway Git repository with staged changes, a Markdown document, the Claude Code skills with an English-only `CLAUDE.md` and the `dark-ansi` theme (MP4 recordings use Claude Code's full-color default theme, since video has no GIF palette to protect), and an isolated `XDG_STATE_HOME` for review sessions.  The fixtures live outside the checkout because Claude Code reads `CLAUDE.md` from every parent directory.  The tape starts a private tmux server inside the recording so TCrit opens its pane there rather than in the multiplexer running VHS.  Both tapes source `theme.tape`, which selects the `Pro` palette shipped with macOS Terminal so the GIFs show TCrit on a stock theme.  Claude Code runs in auto mode inside the fixture directory; set `DEMO_PERMISSION_MODE=bypassPermissions` before `vhs` if a permission prompt stalls the recording.  The cleanup script removes single blank frames that appear while typing a comment and rebuilds the GIF palette without dithering, which also shrinks the file.
+Each recording runs `setup.sh`, then `vhs`, then `clean-recording.sh`.  The setup script builds the current checkout and creates the fixtures from `assets` under `$DEMO_DIR` (default `$TMPDIR/tcrit-demo`): a throwaway Git repository with staged changes, a Markdown document, the Claude Code skills with an English-only `CLAUDE.md` and the full-color `dark` theme, and an isolated `XDG_STATE_HOME` for review sessions.  The fixtures live outside the checkout because Claude Code reads `CLAUDE.md` from every parent directory.  The tapes clear inherited `NO_COLOR` and enable truecolor so agent-host settings do not remove the recording colors.  The tape starts a private tmux server inside the recording so TCrit opens its pane there rather than in the multiplexer running VHS.  Both tapes source `theme.tape`, which selects the `Pro` palette shipped with macOS Terminal so the recordings show TCrit on a stock theme.  Claude Code runs as Opus 5.5 with low effort and fast mode disabled, in auto permission mode inside the fixture directory; set `DEMO_PERMISSION_MODE=bypassPermissions` before `vhs` if a permission prompt stalls the recording.  The cleanup script moves MP4 playback metadata to the front of the file for streaming.  It preserves every frame without re-encoding or reducing colors.
 
-GIFs and MP4s are local build outputs ignored by Git.  Published GIFs are hosted as release assets.  After the first recording, GIFs only rebuild when a tape, script, or fixture is newer.
+MP4s are local build outputs ignored by Git.  Published recordings are hosted as release assets.  After the first recording, MP4s only rebuild when a tape, script, or fixture is newer.
 
 ## Uploading recordings
 
-Use an existing, published release to host recordings without adding them to Git:
+Use an existing draft or published release to host recordings without adding them to Git:
 
 ```sh
-./demo/release.sh -t v0.15.0 list
-./demo/release.sh -t v0.15.0 upload demo/review-flow-codex.gif v0.15.0
+./demo/release.sh -t v0.16.0 list
+./demo/release.sh -t v0.16.0 upload demo/review-flow-codex.mp4 v0.16.0
 ```
 
 The script requires `gh`, `jq`, and `sha256sum` or `shasum`.  Authenticate `gh` with write access to the repository first.  The repository defaults to the current repository reported by `gh repo view`.  The default release tag is `demo-assets`.  Use `-r OWNER/REPO` and `-t TAG` to select another repository or release.  The release must already exist; the script does not create tags or releases.
 
-`list` prints tab-separated asset names, SHA-256 digests, and download URLs.  `upload FILE VERSION` uploads a GIF as `{name}-{version}.gif`, for example `review-flow-codex-v0.15.0.gif`, and prints its HTTPS URL.  The version must have the form `v0.xx.x`.  An existing asset with that name is reused only when its SHA-256 and size match; different content under the same name is rejected.  Existing assets are never overwritten.  Use the returned URL in a README image link.
+`list` prints tab-separated asset names, SHA-256 digests, and download URLs.  `upload FILE VERSION` accepts GIF or MP4 and preserves the extension, for example `review-flow-codex-v0.16.0.mp4`.  The version must have the form `v0.xx.x`.  An existing asset with that name is reused only when its SHA-256 and size match; different content under the same name is rejected.  Existing assets are never overwritten.  Draft releases are supported; their download links become public when the release is published.
 
-Published recordings:
+v0.16.0 recordings (available after the release is published):
 
-- [Code review](https://github.com/knu/tcrit/releases/download/v0.15.0/code-review-v0.15.0.gif)
-- [Document review](https://github.com/knu/tcrit/releases/download/v0.15.0/demo-v0.15.0.gif)
-- [Review and commit with Claude Code](https://github.com/knu/tcrit/releases/download/v0.15.0/review-flow-v0.15.0.gif)
-- [Review and commit with Codex](https://github.com/knu/tcrit/releases/download/v0.15.0/review-flow-codex-v0.15.0.gif)
+- [Code review](https://github.com/knu/tcrit/releases/download/v0.16.0/code-review-claude-v0.16.0.mp4)
+- [Document review](https://github.com/knu/tcrit/releases/download/v0.16.0/demo-v0.16.0.mp4)
+- [Review and commit with Claude Code](https://github.com/knu/tcrit/releases/download/v0.16.0/review-flow-claude-v0.16.0.mp4)
+- [Review and commit with Codex](https://github.com/knu/tcrit/releases/download/v0.16.0/review-flow-codex-v0.16.0.mp4)
 
 ## Sending Alt keys and mouse events from a tape
 

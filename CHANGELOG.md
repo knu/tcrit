@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.16.0
+
+### Added
+
+- Resolution indicators on displaced comment markers and a clickable resolution control in reply dialogs, also available with `alt+r`.
+- Three comment display modes: normal display, `h` to fold all resolved threads, and `H` to hide comments.  Normal display keeps threads resolved in the current round visible.
+- A Codex review-and-commit demo alongside refreshed Claude Code and document-review recordings.
+
+### Changed
+
+- Clicking a grouped displaced-comment marker expands or folds all its threads together.  Its checkbox only displays status.
+- Resolution changes in reply dialogs apply immediately, independently of saving reply text.
+- Unfocused comment borders use dark gray; grouped marker counts use blue.
+- Demo recordings use MP4 and are hosted as versioned release assets instead of being tracked in Git.  The upload helper accepts GIF and MP4 files, including attachments to draft releases.
+- `make -C demo` records full-color MP4s directly, without GIF palette processing.
+
+### Fixed
+
+- Unresolved displaced threads expand when a new round focuses a fresh agent reply.
+- Double-clicking a marker cannot accidentally toggle a dialog control that appears beneath the pointer.
+- Displaced threads and reply dialogs start at the latest message, with the original quote available by scrolling up.
+
 ## 0.15.0
 
 ### Added

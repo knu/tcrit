@@ -36,7 +36,6 @@ load_release() {
     encoded_tag=$(jq -rn --arg tag "$tag" '$tag | @uri')
     gh api --hostname github.com "repos/$repo/releases/tags/$encoded_tag" >"$work/release.json"
     release_id=$(jq -er '.id' "$work/release.json")
-    [ "$(jq -r '.draft' "$work/release.json")" = false ] || fail 'the release must be published'
 }
 
 upload_asset() {
@@ -52,8 +51,8 @@ upload_asset() {
     jq -en --arg version "$version" '$version | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")' >/dev/null || fail 'expected version v0.xx.x'
     basename=${file##*/}
     case $basename in
-        *.gif) name=${basename%.gif}-$version.gif ;;
-        *) fail 'expected a GIF recording' ;;
+        *.gif | *.mp4) name=${basename%.*}-$version.${basename##*.} ;;
+        *) fail 'expected a GIF or MP4 recording' ;;
     esac
     # Hash and upload the same snapshot even if the recording is regenerated.
     cp "$file" "$work/input"

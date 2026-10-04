@@ -1,9 +1,9 @@
 # TCrit — staged-change review loop with Claude Code
 #
 # Run `make` in this directory; it runs setup.sh (builds tcrit and prepares
-# the fixture under $DEMO_DIR), records with VHS, and strips blank frames.
+# the fixture under $DEMO_DIR) and records an MP4 with VHS.
 
-Output code-review.gif
+Output code-review-claude.mp4
 
 Require tmux
 Require claude
@@ -24,7 +24,7 @@ Hide
 
 # Detach from the recording host's multiplexer, use the demo build and an
 # isolated review state, and start a private tmux server for the recording.
-Type "unset TMUX TMUX_PANE; unset -m 'HERDR_*'; export TAPE_DIR=$PWD DEMO_DIR=${DEMO_DIR:-${${TMPDIR:-/tmp}%/}/tcrit-demo}; export XDG_STATE_HOME=$DEMO_DIR/state PATH=$DEMO_DIR/bin:$PATH; cd $DEMO_DIR/work; clear"
+Type "unset TMUX TMUX_PANE NO_COLOR; export COLORTERM=truecolor; unset -m 'HERDR_*'; export TAPE_DIR=$PWD DEMO_DIR=${DEMO_DIR:-${${TMPDIR:-/tmp}%/}/tcrit-demo}; export XDG_STATE_HOME=$DEMO_DIR/state PATH=$DEMO_DIR/bin:$PATH; cd $DEMO_DIR/work; clear"
 Enter
 Type "tmux -L demo -f $TAPE_DIR/tmux.conf new -s demo"
 Enter
@@ -35,7 +35,7 @@ Sleep 1s
 # asks to trust the folder, and Bypass Permissions mode asks for acceptance;
 # both default to "No, exit".  Down + Enter picks "Yes" for each dialog that
 # appears and is harmless on an empty prompt.
-Type "claude --permission-mode ${DEMO_PERMISSION_MODE:-auto}"
+Type "claude --model claude-opus-5-5 --effort low --settings .claude/settings.json --permission-mode ${DEMO_PERMISSION_MODE:-auto}"
 Enter
 Wait+Screen@60s /Yes, I (trust|accept)|auto mode on|bypass permissions on/
 Sleep 1s
@@ -85,7 +85,5 @@ Sleep 3s
 # Resolve the thread and approve.
 Type "R"
 Sleep 1.5s
-Type "q"
-Sleep 800ms
 Type "y"
 Sleep 8s
