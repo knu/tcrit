@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.16.1
+
+### Added
+
+- `tcrit env` prints the `TMUX`, `TMUX_PANE`, and `TTY` or `HERDR_*` variables that identify the current Herdr or tmux pane, as `NAME=value` lines or JSON with `--json`.  `tcrit env -- <command>` runs a command with those variables set.  The pane is found through process ancestry when the variables are missing.
+
+### Changed
+
+- The README embeds the demo recordings as inline video players.
+- Automated releases publish an existing draft release, keeping its attached recordings and replacing its notes with the matching `CHANGELOG.md` section.
+
 ## 0.16.0
 
 ### Added
