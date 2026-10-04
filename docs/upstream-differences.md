@@ -2,6 +2,8 @@
 
 tcrit is a fork of [kevindutra/crit](https://github.com/kevindutra/crit).  This file lists every change the fork carries beyond upstream, including small fixes; the README keeps only the highlights.  Add an entry here when a feature lands.
 
+- **Visible thread resolution** — drifted markers show a checkbox for the focused thread, or for all grouped threads when unfocused.  Add/Edit Reply shows the current resolution with a clickable checkbox and `alt+r` shortcut.  Save applies resolution changes even without reply text; Close offers to discard them.  Adding a reply preserves the displayed resolution instead of reopening the thread automatically.
+
 - **Demo release assets** — `demo/release.sh` lists release assets, reuses them by SHA-256, and uploads new recordings under hash-based names, so README animations can be hosted outside Git history.
 
 - **Review bar** — the top line names what is under review, such as `TCrit: review the staged changes on tmux.`, with `staged` or `unstaged` highlighted and the hosting multiplexer of an agent-launched review, and ends with a **Submit q** button that opens the finish dialog.  The footer keeps only key hints and **Help**, and disappears on terminals shorter than 22 rows.

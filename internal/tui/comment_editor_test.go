@@ -53,6 +53,72 @@ func TestSaveTextModalWithoutFeedback(t *testing.T) {
 	}
 }
 
+func TestReplyResolution(t *testing.T) {
+	for _, edit := range []bool{false, true} {
+		for _, resolved := range []bool{false, true} {
+			t.Run(fmt.Sprintf("edit=%v/resolved=%v", edit, resolved), func(t *testing.T) {
+				c := testComment()
+				c.Author = "Other"
+				c.Resolved = resolved
+				if resolved {
+					c.ResolvedRound = 1
+				}
+				if edit {
+					c.Replies = []review.Reply{{ID: "own", Body: "reply", Author: "Tester", ReviewRound: 1}}
+				}
+				app, _ := newFinishTestApp(t, []review.Comment{c})
+				app.width, app.height = 100, 35
+				app.recalculateLayout()
+				app.openCommentThread(c.ID)
+				if app.modalResolved != resolved || !app.hasModalResolution() {
+					t.Fatal("editor did not load the thread resolution")
+				}
+				updated, _ := app.Update(tea.KeyPressMsg{Code: 'r', Mod: tea.ModAlt})
+				app = *updated.(*AppModel)
+				if app.modalResolved == resolved || app.tab().state.Comments[0].Resolved != resolved {
+					t.Fatal("Meta-r must change only the draft resolution")
+				}
+				app.closeTextModal()
+				if app.modal != discardChangesModal {
+					t.Fatal("resolution change did not prompt before discard")
+				}
+				app.resumeTextModal()
+				clicked := false
+				for _, region := range app.modalMouseRegions() {
+					if region.action.resolve {
+						app = clickMouse(app, region.rect.left, region.rect.top)
+						clicked = true
+						break
+					}
+				}
+				if !clicked || app.modalResolved != resolved {
+					t.Fatal("checkbox click did not toggle resolution")
+				}
+				app.handleTextModal(tea.KeyPressMsg{Code: 'r', Mod: tea.ModAlt})
+				app.modalSubmit()
+				got := app.session.FileComments(app.tab().path)[0]
+				if got.Resolved == resolved || app.modal != noModal {
+					t.Fatalf("resolution-only save failed: %+v", got)
+				}
+				wantRound := 1
+				if resolved {
+					wantRound = 0
+				}
+				if got.ResolvedRound != wantRound || len(got.Replies) != len(c.Replies) {
+					t.Fatalf("save changed replies or lost resolution round: %+v", got)
+				}
+				app.openCommentThread(c.ID)
+				app.handleTextModal(tea.KeyPressMsg{Code: 'r', Mod: tea.ModAlt})
+				app.closeTextModal()
+				app.handleDiscardChangesModal(tea.KeyPressMsg{Code: 'y'})
+				if app.tab().state.Comments[0].Resolved == resolved {
+					t.Fatal("discard applied the draft resolution")
+				}
+			})
+		}
+	}
+}
+
 func TestSaveClearedCommentDeletesEditedEntry(t *testing.T) {
 	for _, reply := range []bool{false, true} {
 		for _, body := range []string{"", " \n\t"} {
@@ -900,8 +966,8 @@ func TestEnterAddsThenEditsOwnCurrentRoundReply(t *testing.T) {
 	if added.Author != "Tester" || added.ReviewRound != 1 || added.Body != "follow-up" {
 		t.Fatalf("added reply = %+v", added)
 	}
-	if app.tabs[0].state.Comments[0].Resolved || app.tabs[0].state.Comments[0].ResolvedRound != 0 {
-		t.Error("adding a reply should reopen the thread")
+	if !app.tabs[0].state.Comments[0].Resolved || app.tabs[0].state.Comments[0].ResolvedRound != 1 {
+		t.Error("adding a reply should preserve the displayed resolution")
 	}
 
 	app = pressKey(app, tea.KeyEnter)

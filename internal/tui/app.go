@@ -123,6 +123,8 @@ type AppModel struct {
 	editingID            string // ID of the parent comment being edited or replied to
 	editingReplyID       string // ID of the reply being edited; empty when editing the parent
 	modalInitial         string // textarea value when the current text modal opened
+	modalResolved        bool
+	modalInitialResolved bool
 	modalReferenceOffset int
 	discardReturn        modalType
 	deleteReturn         modalType
@@ -703,6 +705,8 @@ func (m *AppModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			for _, c := range t.state.Comments {
 				if c.Scope == "file" {
 					m.editingID = c.ID
+					m.modalResolved = c.Resolved
+					m.modalInitialResolved = c.Resolved
 					m.editingReplyID = ""
 					m.modalReferenceOffset = -1
 					m.modal = replyModal
@@ -1003,6 +1007,8 @@ func (m *AppModel) openCommentThread(id string) {
 			continue
 		}
 		m.editingID = c.ID
+		m.modalResolved = c.Resolved
+		m.modalInitialResolved = c.Resolved
 		m.editingReplyID = ""
 		m.modalReferenceOffset = -1
 		m.modalFocus = 0
@@ -1110,11 +1116,18 @@ func (m *AppModel) latestOwnReply(c *review.Comment) *review.Reply {
 func (m *AppModel) modalSubmit() {
 	t := m.tab()
 	body := strings.TrimSpace(m.modalTextarea.Value())
+	resolutionChanged := m.modalResolutionChanged()
 	if m.modalTextarea.Value() == m.modalInitial || (body == "" && m.modalInitial == "") {
+		if resolutionChanged {
+			m.toggleResolve(m.editingID)
+		}
 		m.discardTextModal()
 		return
 	}
 	if body == "" {
+		if resolutionChanged {
+			m.toggleResolve(m.editingID)
+		}
 		m.modalDelete(0)
 		return
 	}
@@ -1159,8 +1172,6 @@ func (m *AppModel) modalSubmit() {
 				ReviewRound: m.reviewRound(),
 			})
 			c.UpdatedAt = now
-			c.Resolved = false
-			c.ResolvedRound = 0
 			break
 		}
 	case commentModal:
@@ -1201,6 +1212,9 @@ func (m *AppModel) modalSubmit() {
 		}
 		addedFileCommentID = c.ID
 		t.state.Comments = append(t.state.Comments, c)
+	}
+	if resolutionChanged {
+		m.toggleResolve(m.editingID)
 	}
 	m.newFeedback = true
 	m.editingID = ""
@@ -1699,6 +1713,10 @@ func (m *AppModel) doFinish() (tea.Model, tea.Cmd) {
 
 func (m *AppModel) handleTextModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.clipboardStatus = ""
+	if msg.String() == "alt+r" && m.hasModalResolution() {
+		m.modalResolved = !m.modalResolved
+		return m, nil
+	}
 	if m.handleCompletionKey(msg) {
 		return m, nil
 	}
@@ -1798,7 +1816,7 @@ func (m *AppModel) scrollModalReference(direction int) {
 }
 
 func (m *AppModel) closeTextModal() {
-	if m.modalTextarea.Value() != m.modalInitial {
+	if m.modalTextarea.Value() != m.modalInitial || m.modalResolutionChanged() {
 		m.discardReturn = m.modal
 		m.modal = discardChangesModal
 		m.modalFocus = 1
@@ -2704,6 +2722,7 @@ func (m *AppModel) selectTab(index int) {
 }
 
 type modalMouseAction struct {
+	resolve         bool
 	dialog          bool // the whole dialog frame
 	close           bool
 	lineInput       bool
@@ -2732,12 +2751,24 @@ func (m *AppModel) isTextModal() bool {
 		m.modal == replyModal || m.modal == editModal
 }
 
+func (m *AppModel) hasModalResolution() bool {
+	return m.modal == replyModal || (m.modal == editModal && m.editingReplyID != "")
+}
+
+func (m *AppModel) modalResolutionChanged() bool {
+	return m.hasModalResolution() && m.modalResolved != m.modalInitialResolved
+}
+
 func (m *AppModel) handleTextModalMouse(mouse tea.Mouse) (tea.Model, tea.Cmd) {
 	for _, region := range m.modalMouseRegions() {
 		if !region.rect.contains(mouse) {
 			continue
 		}
 		action := region.action
+		if action.resolve {
+			m.modalResolved = !m.modalResolved
+			return m, nil
+		}
 		if action.textarea {
 			m.focusTextareaAt(mouse, region.rect)
 			return m, nil
@@ -3853,6 +3884,18 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 		buildContent := func(referenceSection string, scrollOffset, scrollMaxOffset int) (string, []modalMouseRegion) {
 			content := title + "\n"
 			var contentRegions []modalMouseRegion
+			if m.hasModalResolution() {
+				label := "☐ Resolved"
+				if m.modalResolved {
+					label = "☑︎ Resolved"
+				}
+				row, checkboxRegions := layoutModalButtonRow([]modalButtonSpec{{
+					rendered: m.renderModalButton(label, "alt+r", false),
+					action:   modalMouseAction{resolve: true},
+				}}, innerWidth, strings.Count(content, "\n"))
+				content += row + "\n"
+				contentRegions = append(contentRegions, checkboxRegions...)
+			}
 			if referenceSection != "" {
 				referenceTop := strings.Count(content, "\n")
 				content += referenceSection + "\n\n"

@@ -330,6 +330,7 @@ A reference without a line opens the file's tab.  When the file or line is not p
 | `ctrl+s` | Save the comment or reply (an existing one cleared to empty is deleted) |
 | `ctrl+o` | Edit the comment or reply in `$EDITOR`                         |
 | `alt+s` | Insert a suggestion block and select its code for replacement |
+| `alt+r` | Toggle the Resolved checkbox in Add/Edit Reply; Save applies it |
 | `ctrl+y` | Yank the latest kill at the cursor, replacing selected text |
 | `alt+y` | After a yank, replace the yanked text with the next older kill |
 | `ctrl+v` | Paste an image or text from the host's clipboard              |

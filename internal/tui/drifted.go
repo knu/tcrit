@@ -97,6 +97,23 @@ func (m *AppModel) decorateDrifted(content string, layout *renderedContentLayout
 			continue
 		}
 		label := "💬"
+		resolved := true
+		for _, id := range ids {
+			c, _ := m.driftedComment(id)
+			resolved = resolved && c.Resolved
+		}
+		for _, id := range ids {
+			if id == m.selectedCommentID() {
+				c, _ := m.driftedComment(id)
+				resolved = c.Resolved
+				break
+			}
+		}
+		if resolved {
+			label = "☑︎ " + label
+		} else {
+			label = "☐ " + label
+		}
 		if len(ids) > 1 {
 			label += fmt.Sprintf(" %d", len(ids))
 		}

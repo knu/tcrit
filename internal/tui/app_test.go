@@ -684,7 +684,7 @@ func TestFileCommentShortcutRepliesToExistingThread(t *testing.T) {
 						t.Fatalf("got %d threads, want 3", len(comments))
 					}
 					got := comments[1]
-					if got.Body != thread.Body || got.Resolved || len(got.Replies) != len(thread.Replies)+1 || got.Replies[len(got.Replies)-1].Body != "new reply" {
+					if got.Body != thread.Body || got.Resolved != thread.Resolved || len(got.Replies) != len(thread.Replies)+1 || got.Replies[len(got.Replies)-1].Body != "new reply" {
 						t.Fatalf("persisted thread = %+v, want original body and appended reply", got)
 					}
 					if ownReply && got.Replies[0].Body != "previous reply" {

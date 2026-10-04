@@ -80,7 +80,7 @@ func (m *AppModel) rebuildContent() {
 	groups := m.driftedGroups()
 	contentWidth := m.contentViewport.Width()
 	for _, ids := range groups {
-		width := lipgloss.Width(fmt.Sprintf("> 💬 %d", len(ids))) + 1
+		width := lipgloss.Width(fmt.Sprintf("> ☑︎ 💬 %d", len(ids))) + 1
 		contentWidth = min(contentWidth, m.contentViewport.Width()-width)
 	}
 	boxWidth := contentWidth - gutterWidth

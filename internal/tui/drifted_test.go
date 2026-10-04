@@ -31,7 +31,7 @@ func TestDriftedFocusDoesNotExpandUntilEnter(t *testing.T) {
 		if app.selectedCommentID() != "drifted" || app.modal != noModal || len(app.contentLayout.rows) != height {
 			t.Fatal("navigation expanded a folded thread")
 		}
-		if view := ansi.Strip(app.contentViewport.View()); !strings.Contains(view, "> 💬") || strings.Contains(view, "drifted body") {
+		if view := ansi.Strip(app.contentViewport.View()); !strings.Contains(view, "> ☐ 💬") || strings.Contains(view, "drifted body") {
 			t.Fatalf("focused marker = %q", view)
 		}
 		app = pressKey(app, tea.KeyEnter)
@@ -39,11 +39,11 @@ func TestDriftedFocusDoesNotExpandUntilEnter(t *testing.T) {
 			t.Fatalf("Enter did not expand inline: %q", view)
 		}
 		app = pressKey(app, tea.KeyEnter)
-		if view := ansi.Strip(app.contentViewport.View()); strings.Contains(view, "drifted body") || !strings.Contains(view, "> 💬") || len(app.contentLayout.rows) != height {
+		if view := ansi.Strip(app.contentViewport.View()); strings.Contains(view, "drifted body") || !strings.Contains(view, "> ☐ 💬") || len(app.contentLayout.rows) != height {
 			t.Fatalf("Enter did not collapse inline: %q", view)
 		}
 		app = pressKey(app, '[')
-		if app.selectedCommentID() != "lost" || !strings.Contains(ansi.Strip(app.contentViewport.View()), "> 💬") || app.contentViewport.YOffset() != 0 {
+		if app.selectedCommentID() != "lost" || !strings.Contains(ansi.Strip(app.contentViewport.View()), "> ☐ 💬") || app.contentViewport.YOffset() != 0 {
 			t.Fatal("unplaced marker did not gain focus and scroll into view")
 		}
 		app = pressKey(app, tea.KeyEnter)
@@ -113,6 +113,34 @@ func TestDriftedMarkersOpenAndCycleThreads(t *testing.T) {
 	}
 	if !reflect.DeepEqual(comments, app.tab().state.Comments) {
 		t.Fatal("display changed persisted comment data")
+	}
+}
+
+func TestDriftedMarkerResolution(t *testing.T) {
+	app := setupAppWithDoc(t, "source\n")
+	app.width, app.height = 100, 30
+	app.recalculateLayout()
+	app.tab().state.Comments = []review.Comment{
+		{ID: "done", StartLine: 1, EndLine: 1, Drifted: true, Resolved: true},
+		{ID: "open", StartLine: 1, EndLine: 1, Drifted: true},
+	}
+	app.rebuildContent()
+	if !strings.Contains(ansi.Strip(app.contentViewport.View()), "☐ 💬 2") {
+		t.Fatal("mixed group should be unchecked when unfocused")
+	}
+	app = pressKey(app, ']')
+	if app.selectedCommentID() != "done" || !strings.Contains(ansi.Strip(app.contentViewport.View()), "> ☑︎ 💬 2") {
+		t.Fatal("focused marker should show the selected thread's resolution")
+	}
+	app = pressKey(app, ']')
+	if app.selectedCommentID() != "open" || !strings.Contains(ansi.Strip(app.contentViewport.View()), "> ☐ 💬 2") {
+		t.Fatal("focused unresolved thread should be unchecked")
+	}
+	app.toggleResolve("open")
+	app.releaseThreadFocus()
+	app.rebuildContent()
+	if !strings.Contains(ansi.Strip(app.contentViewport.View()), "☑︎ 💬 2") {
+		t.Fatal("fully resolved group should be checked when unfocused")
 	}
 }
 
