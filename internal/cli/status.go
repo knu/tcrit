@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -49,7 +50,7 @@ var statusCmd = &cobra.Command{
 		if comments == nil {
 			comments = []review.Comment{}
 		}
-		return printJSON(docStatus{File: filePath, Comments: comments})
+		return printJSON(os.Stdout, docStatus{File: filePath, Comments: comments})
 	},
 }
 
@@ -58,11 +59,11 @@ func runCodeStatus(cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
-	return printJSON(status)
+	return printJSON(os.Stdout, status)
 }
 
-func printJSON(v any) error {
-	encoder := json.NewEncoder(os.Stdout)
+func printJSON(w io.Writer, v any) error {
+	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(v); err != nil {
 		return fmt.Errorf("encoding JSON: %w", err)
@@ -94,5 +95,5 @@ func listReviewSessions() error {
 			result = append(result, savedSession{entry, ipc.Alive(review.SocketPathFor(entry.Key))})
 		}
 	}
-	return printJSON(result)
+	return printJSON(os.Stdout, result)
 }

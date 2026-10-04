@@ -167,6 +167,8 @@ claude
 
 Without Herdr or tmux, launch tcrit yourself in an interactive terminal when an agent asks you to review.
 
+When a tool runs from the terminal's process tree but without its multiplexer variables, `tcrit env` prints the `TMUX`, `TMUX_PANE`, and `TTY` or `HERDR_*` variables that identify the pane, as `NAME=value` lines or with `--json`.  `tcrit env -- <command>` runs a command with those variables set.
+
 ## CLI overview
 
 Running `tcrit` with no subcommand reviews the current Git changes. Running `tcrit <file>` reviews one document.
@@ -190,6 +192,7 @@ Running `tcrit` with no subcommand reviews the current Git changes. Running `tcr
 | `tcrit status <file>` / `tcrit status --code` | Print the document or aggregate code-review status as JSON |
 | `tcrit install <target>` | Install `claude-code`, `codex`, `gemini`, or `prompts`; `all` installs every agent integration |
 | `tcrit check` | Report installed integration files that are stale |
+| `tcrit env [--json] [-- <command>...]` | Print the variables that identify the current Herdr or tmux pane, or run a command with them |
 | `tcrit completion <shell>` | Generate completion for Bash, Zsh, Fish, or PowerShell |
 
 ## Code Review (multi-file)
