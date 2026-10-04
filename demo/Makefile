@@ -6,8 +6,8 @@
 #   make clean      delete the GIFs and MP4s
 #
 # code-review.tape launches Claude Code and takes a few minutes; demo.tape
-# records a document review without an agent.  The GIFs are committed, so a
-# checkout only rebuilds when a tape or fixture is newer than its GIF.
+# records a document review without an agent.  GIFs are local build outputs;
+# published recordings are hosted as release assets.
 
 # Fixtures are built here, outside the checkout (see setup.sh).
 DEMO_DIR ?= $(patsubst %/,%,$(or $(TMPDIR),/tmp))/tcrit-demo

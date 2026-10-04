@@ -10,7 +10,7 @@ tcrit is a fork of [kevindutra/crit](https://github.com/kevindutra/crit).  This 
 
 - **Visible thread resolution** — drifted markers show a checkbox for the focused thread, or for all grouped threads when unfocused.  Add/Edit Reply shows the current resolution beside its close button, with a clickable checkbox and `alt+r` shortcut.  Both use the same yellow/green colors as expanded threads.  Resolution changes apply immediately, independently of saving or discarding reply text.  Adding a reply preserves the displayed resolution instead of reopening the thread automatically.
 
-- **Demo release assets** — `demo/release.sh` lists release assets, reuses them by SHA-256, and uploads new recordings under hash-based names, so README animations can be hosted outside Git history.
+- **Demo release assets** — `demo/release.sh` lists release assets and uploads GIFs as `{name}-{version}.gif`.  It reuses matching names only when SHA-256 and size also match, and rejects name collisions with different content.  Recordings are ignored by Git; documentation uses HTTPS release-asset URLs.
 
 - **Review bar** — the top line names what is under review, such as `TCrit: review the staged changes on tmux.`, with `staged` or `unstaged` highlighted and the hosting multiplexer of an agent-launched review, and ends with a **Submit q** button that opens the finish dialog.  The footer keeps only key hints and **Help**, and disappears on terminals shorter than 22 rows.
 - **Light terminal backgrounds** — text on the terminal background, the comment editor, and dialog dimming adapt to light backgrounds such as the stock macOS Terminal profile.

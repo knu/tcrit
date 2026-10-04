@@ -12,7 +12,7 @@ Read a plan or review code changes across multiple files, leave inline comments,
 
 Your agent writes code or a plan, you review it in the TUI, and the agent reads your comments and makes changes for the next round.
 
-![TCrit code review demo](demo/code-review.gif)
+![TCrit code review demo](https://github.com/knu/tcrit/releases/download/v0.15.0/code-review-v0.15.0.gif)
 
 ## Key Features
 
@@ -138,7 +138,7 @@ Every implementation request ends with a TCrit review and a commit.  After imple
 
 With that in place, an implementation request is all it takes.  Below, the agent implements the change and opens the review with its draft message as the first tab.  The reviewer sends the code back with an inline comment, then reads the updated message and asks for a shorter body with a file comment (`f`), and finally resolves the last thread with `R`, which goes straight to the approval dialog.  The agent commits with the reviewed message.
 
-![TCrit review-and-commit flow demo](demo/review-flow.gif)
+![TCrit review-and-commit flow demo](https://github.com/knu/tcrit/releases/download/v0.15.0/review-flow-v0.15.0.gif)
 
 ## Requirements
 

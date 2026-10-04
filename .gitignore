@@ -2,6 +2,7 @@
 /crit
 
 # Demo videos recorded on demand, and the temporary tapes that record them
+/demo/*.gif
 /demo/*.mp4
 /demo/.*.mp4.tape
 

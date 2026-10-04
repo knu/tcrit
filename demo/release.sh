@@ -3,7 +3,7 @@
 
 usage() {
     printf 'Usage: %s [-r OWNER/REPO] [-t TAG] list\n' "$0"
-    printf '       %s [-r OWNER/REPO] [-t TAG] upload FILE\n' "$0"
+    printf '       %s [-r OWNER/REPO] [-t TAG] upload FILE VERSION\n' "$0"
 }
 
 fail() {
@@ -27,8 +27,8 @@ list_assets() {
 }
 
 matching_url() {
-    jq -r --arg digest "sha256:$digest" --argjson size "$size" \
-        '[.[] | select(.state == "uploaded" and .size == $size and .digest == $digest)]
+    jq -r --arg digest "sha256:$digest" --argjson size "$size" --arg name "$name" \
+        '[.[] | select(.name == $name and .state == "uploaded" and .size == $size and .digest == $digest)]
         | first | .browser_download_url // empty' "$work/assets.json"
 }
 
@@ -48,6 +48,13 @@ upload_asset() {
         *) file=$PWD/$1 ;;
     esac
     [ -f "$file" ] || fail "not a regular file: $1"
+    version=$2
+    jq -en --arg version "$version" '$version | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")' >/dev/null || fail 'expected version v0.xx.x'
+    basename=${file##*/}
+    case $basename in
+        *.gif) name=${basename%.gif}-$version.gif ;;
+        *) fail 'expected a GIF recording' ;;
+    esac
     # Hash and upload the same snapshot even if the recording is regenerated.
     cp "$file" "$work/input"
     digest=$(hash_file "$work/input")
@@ -60,12 +67,9 @@ upload_asset() {
         return
     fi
 
-    extension=${file##*.}
-    case $extension in
-        '' | *[!A-Za-z0-9]*) extension= ;;
-        *) extension=.$extension ;;
-    esac
-    name=sha256-$digest$extension
+    if jq -e --arg name "$name" 'any(.[]; .name == $name)' "$work/assets.json" >/dev/null; then
+        fail "asset already exists with different content: $name"
+    fi
     mv "$work/input" "$work/$name"
     upload_status=0
     gh release upload "$tag" "$work/$name" --repo "https://github.com/$repo" >&2 || upload_status=$?
@@ -106,7 +110,7 @@ main() {
             usage >&2
             exit 2
         } ;;
-        upload) [ "$#" -eq 1 ] || {
+        upload) [ "$#" -eq 2 ] || {
             usage >&2
             exit 2
         } ;;
@@ -133,7 +137,7 @@ main() {
             list_assets
             jq -r '.[] | [.name, (.digest // ""), .browser_download_url] | @tsv' "$work/assets.json"
             ;;
-        upload) upload_asset "$1" ;;
+        upload) upload_asset "$1" "$2" ;;
     esac
 }
 
