@@ -88,9 +88,6 @@ func (m *AppModel) renderThread(key threadViewKey, author, body string, replies 
 	layout := m.layoutThread(author, body, replies, "", width)
 	height := min(m.threadHeight(key.sidebar), len(layout.lines))
 	initial := layout.initialOffset(height)
-	if drifted {
-		initial = 0
-	}
 	lastReply := ""
 	if len(replies) > 0 {
 		lastReply = replies[len(replies)-1].ID

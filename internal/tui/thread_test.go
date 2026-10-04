@@ -125,6 +125,32 @@ func TestUnfocusedThreadShrinksToLatestComment(t *testing.T) {
 	}
 }
 
+func TestDriftedThreadFocusStartsAtLatestReply(t *testing.T) {
+	for _, sidebar := range []bool{false, true} {
+		app := setupAppWithDoc(t, "source\n")
+		app.width, app.height = 120, 40
+		app.recalculateLayout()
+		c := review.Comment{ID: "drifted", StartLine: 1, EndLine: 1, Drifted: true,
+			Quote: "original source", Body: strings.Repeat("history\n", 20),
+			Replies: []review.Reply{{ID: "reply", Body: "latest reply"}}}
+		app.tab().state.Comments = []review.Comment{c}
+		key := threadViewKey{path: app.tab().path, id: c.ID, sidebar: sidebar}
+		for _, focused := range []bool{false, true, false, true} {
+			view := ansi.Strip(app.renderThread(key, c.Author, c.Body, c.Replies, 40, focused))
+			if !strings.Contains(view, "latest reply") {
+				t.Fatalf("sidebar=%v focused=%v: latest reply missing: %q", sidebar, focused, view)
+			}
+		}
+		scroll := app.threadScrolls[key]
+		scroll.manual, scroll.offset = true, 0
+		app.threadScrolls[key] = scroll
+		view := ansi.Strip(app.renderThread(key, c.Author, c.Body, c.Replies, 40, true))
+		if !strings.Contains(view, "original source") {
+			t.Fatalf("original quote is not accessible: %q", view)
+		}
+	}
+}
+
 func TestSidebarNavigationShowsExpandedThread(t *testing.T) {
 	app := setupAppWithDoc(t, "source\n")
 	app.width, app.height = 120, 24

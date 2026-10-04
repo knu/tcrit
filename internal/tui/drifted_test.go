@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -12,6 +14,70 @@ import (
 	gitpkg "github.com/knu/tcrit/internal/git"
 	"github.com/knu/tcrit/internal/review"
 )
+
+func TestClickRenderedDriftedBubblePreservesResolution(t *testing.T) {
+	for _, width := range []int{60, 80, 100, 160} {
+		for _, height := range []int{24, 40, 60} {
+			t.Run(fmt.Sprintf("%dx%d", width, height), func(t *testing.T) {
+				app := setupAppWithDoc(t, strings.Repeat("source line\n", 20))
+				app.width, app.height = width, height
+				app.recalculateLayout()
+				app.tab().state.Comments = []review.Comment{
+					{ID: "file", Scope: "file", Author: "Other", Body: "file feedback"},
+					{ID: "a", StartLine: 3, EndLine: 3, Drifted: true, Resolved: true, Author: "Other", Body: "resolved"},
+					{ID: "b", StartLine: 6, EndLine: 6, Drifted: true, Author: "Other", Body: "unresolved"},
+					{ID: "d1", StartLine: 12, EndLine: 12, Drifted: true, Resolved: true, Author: "Other", Body: "group resolved"},
+					{ID: "d2", StartLine: 12, EndLine: 12, Drifted: true, Author: "Other", Body: "group unresolved"},
+				}
+				app.rebuildContent()
+				app.updateCommentSidebar()
+				for step := range 30 {
+					rows := strings.Split(ansi.Strip(app.View().Content), "\n")
+					var bubbles []tea.Mouse
+					for y, row := range rows {
+						if x := strings.Index(row, "💬"); x >= 0 {
+							bubbles = append(bubbles, tea.Mouse{X: lipgloss.Width(row[:x]), Y: y})
+						}
+					}
+					if len(bubbles) == 0 {
+						t.Fatal("no visible bubble")
+					}
+					point := bubbles[step%len(bubbles)]
+					app = clickMouse(app, point.X, point.Y)
+					openedModal := app.modal != noModal
+					app = clickMouse(app, point.X, point.Y)
+					for _, c := range app.tab().state.Comments {
+						want := c.ID == "a" || c.ID == "d1"
+						if c.Resolved != want {
+							t.Fatalf("step %d: bubble at %d,%d changed %s resolution", step, point.X, point.Y, c.ID)
+						}
+					}
+					if openedModal {
+						if app.modal == noModal {
+							t.Fatal("second click dismissed the newly opened dialog")
+						}
+						app.modalOpenedAt = time.Now().Add(-time.Second)
+						for _, region := range app.modalMouseRegions() {
+							if region.action.resolve {
+								c, _ := app.driftedComment(app.editingID)
+								app = clickMouse(app, region.rect.left, region.rect.top)
+								got, _ := app.driftedComment(c.ID)
+								if got.Resolved == c.Resolved {
+									t.Fatal("intentional checkbox click was suppressed")
+								}
+								app.toggleResolve(c.ID)
+								break
+							}
+						}
+					}
+					if app.modal != noModal {
+						app = pressKey(app, tea.KeyEscape)
+					}
+				}
+			})
+		}
+	}
+}
 
 func TestDriftedFocusDoesNotExpandUntilEnter(t *testing.T) {
 	for _, hidden := range []bool{false, true} {
@@ -57,14 +123,14 @@ func TestDriftedFocusDoesNotExpandUntilEnter(t *testing.T) {
 	}
 }
 
-func TestDriftedMarkersOpenAndCycleThreads(t *testing.T) {
+func TestDriftedMarkersOpenAndCollapseAllThreads(t *testing.T) {
 	app := setupAppWithDoc(t, strings.Repeat("long source ", 30)+"\nsecond\n")
-	app.width, app.height = 100, 35
+	app.width, app.height = 100, 80
 	app.recalculateLayout()
 	comments := []review.Comment{
 		{ID: "normal", StartLine: 1, EndLine: 1, Body: "normal body"},
 		{ID: "first", StartLine: 1, EndLine: 1, Body: "first body", Drifted: true, Quote: "original quote", Anchor: "whole anchor"},
-		{ID: "second", StartLine: 1, EndLine: 1, Body: "second body", Drifted: true, Anchor: "original anchor"},
+		{ID: "second", StartLine: 1, EndLine: 1, Body: "second body", Drifted: true, Resolved: true, Anchor: "original anchor"},
 	}
 	app.tab().state.Comments = append([]review.Comment(nil), comments...)
 	app.rebuildContent()
@@ -99,17 +165,27 @@ func TestDriftedMarkersOpenAndCycleThreads(t *testing.T) {
 	if !strings.Contains(view, "Position could not be tracked.") || !strings.Contains(view, "original quote") || strings.Contains(view, "whole anchor") {
 		t.Fatalf("opened thread = %q", view)
 	}
-	clickMarker()
-	if app.selectedCommentID() != "second" || !strings.Contains(ansi.Strip(app.contentViewport.View()), "original anchor") {
-		t.Fatal("second click did not open the next thread with its anchor")
+	for _, body := range []string{"first body", "second body", "original anchor"} {
+		if !strings.Contains(view, body) {
+			t.Fatalf("one click did not open every grouped thread: missing %q", body)
+		}
 	}
-	app = pressKey(app, '[')
-	if app.selectedCommentID() != "first" {
-		t.Fatal("previous-thread navigation skipped a folded comment")
+	clickMarker()
+	view = ansi.Strip(app.contentViewport.View())
+	if app.selectedCommentID() != "first" || strings.Contains(view, "first body") || strings.Contains(view, "second body") {
+		t.Fatal("second click did not collapse the whole group while keeping selection")
 	}
 	app = pressKey(app, ']')
 	if app.selectedCommentID() != "second" {
 		t.Fatal("next-thread navigation skipped a folded comment")
+	}
+	clickMarker()
+	if app.modal != noModal || app.selectedCommentID() != "second" || !app.tab().expandedDrifted["first"] || !app.tab().expandedDrifted["second"] {
+		t.Fatal("clicking a group with a resolved selection must expand all threads inline")
+	}
+	app = pressKey(app, '[')
+	if app.selectedCommentID() != "first" {
+		t.Fatal("previous-thread navigation skipped a comment")
 	}
 	if !reflect.DeepEqual(comments, app.tab().state.Comments) {
 		t.Fatal("display changed persisted comment data")

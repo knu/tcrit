@@ -204,7 +204,7 @@ git diff main feature | tcrit review --diff
 
 Detects changed files in your git repo and opens a tabbed TUI with syntax highlighting, diff markers, and inline commenting across all changed files.
 
-Comments whose positions can no longer be tracked appear as a small `💬` at the right edge of the code, or at the top of the file when the line is gone.  Use `[` / `]` to focus a marker, then press Enter to expand or collapse its thread and read the original quoted text.  Press `e` to edit or reply.  Clicking a marker also opens a thread.  Resolved threads stay folded; Enter opens their contents in the comment editor.
+Comments whose positions can no longer be tracked appear as a small `💬` at the right edge of the code, or at the top of the file when the line is gone.  Use `[` / `]` to focus a marker, then press Enter to expand or collapse its thread and read the original quoted text.  Press `e` to edit or reply.  Clicking a grouped marker expands all its threads, including resolved ones; click again to fold them together.  The checkbox beside the marker only shows resolution status.  Enter on a resolved thread opens its contents in the comment editor.
 
 - Reviews staged, unstaged, and untracked changes against `HEAD` by default; `--staged` reviews only the index, and `--diff` reviews a supplied unified diff
 - Green gutter markers highlight changed lines, and comments from all files belong to one session
@@ -315,7 +315,7 @@ TCrit finds the pane that ran the command from the process tree, even when the a
 
 Ignore whitespace (`w`) hides changes in spaces and tabs within a line, including LF and CRLF differences, while still showing added or deleted blank lines.
 
-Use `[` / `]` to revisit all threads and `{` / `}` to work through unresolved ones.  Resolved threads stay folded; press `enter` to read them in the comment editor.  Comments displaced by source edits appear as `💬` markers; click one or focus it and press `enter` to see the original context.
+Use `[` / `]` to revisit all threads and `{` / `}` to work through unresolved ones.  Press `enter` on a resolved thread to read it in the comment editor.  Comments displaced by source edits appear as `💬` markers; click one to open its threads together, or focus it and press `enter` to see the selected thread's original context.
 
 **File references:** `@path/to/file`, optionally followed by ` L40`, in a comment or reply becomes a clickable link to that file and line.  Paths are relative to the review's working directory; escape a space with a backslash.  `alt+w` copies a ready-made reference for the current line, `ctrl+y` pastes it, and typing `@` completes paths, as described below.
 
@@ -330,7 +330,7 @@ A reference without a line opens the file's tab.  When the file or line is not p
 | `ctrl+s` | Save the comment or reply (an existing one cleared to empty is deleted) |
 | `ctrl+o` | Edit the comment or reply in `$EDITOR`                         |
 | `alt+s` | Insert a suggestion block and select its code for replacement |
-| `alt+r` | Toggle the Resolved checkbox in Add/Edit Reply; Save applies it |
+| `alt+r` | Immediately toggle Resolved in Add/Edit Reply |
 | `ctrl+y` | Yank the latest kill at the cursor, replacing selected text |
 | `alt+y` | After a yank, replace the yanked text with the next older kill |
 | `ctrl+v` | Paste an image or text from the host's clipboard              |

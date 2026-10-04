@@ -392,7 +392,7 @@ func (m *AppModel) scrollToCursor() {
 	t := m.tab()
 	if t.cursorOnAnnotation {
 		id := m.selectedCommentID()
-		if c, drifted := m.driftedComment(id); drifted && (c.Resolved || !t.expandedDrifted[id]) {
+		if _, drifted := m.driftedComment(id); drifted && !t.expandedDrifted[id] {
 			for _, marker := range m.contentLayout.markers {
 				for _, candidate := range marker.ids {
 					if candidate == id {

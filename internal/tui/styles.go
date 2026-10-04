@@ -56,7 +56,7 @@ var (
 	// are created later and pick their default styles from it.
 	terminalIsDark = true
 
-	commentBorderColor        = lipgloss.Blue
+	commentBorderColor        = lipgloss.BrightBlack
 	commentFocusedBorderColor = lipgloss.BrightBlue
 
 	headerStyle = lipgloss.NewStyle().

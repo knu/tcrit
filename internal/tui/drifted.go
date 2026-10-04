@@ -96,7 +96,7 @@ func (m *AppModel) decorateDrifted(content string, layout *renderedContentLayout
 		if !ok {
 			continue
 		}
-		label := "💬"
+		label := commentLineStyle.Faint(true).Render("💬")
 		resolved := true
 		for _, id := range ids {
 			c, _ := m.driftedComment(id)
@@ -109,14 +109,10 @@ func (m *AppModel) decorateDrifted(content string, layout *renderedContentLayout
 				break
 			}
 		}
-		if resolved {
-			label = "☑︎ " + label
-		} else {
-			label = "☐ " + label
-		}
 		if len(ids) > 1 {
-			label += fmt.Sprintf(" %d", len(ids))
+			label += commentLineStyle.Foreground(lipgloss.Blue).Render(fmt.Sprintf(" %d", len(ids)))
 		}
+		label = renderResolution(resolved, "") + " " + label
 		prefix := "  "
 		for _, id := range ids {
 			if id == m.selectedCommentID() {
@@ -125,7 +121,7 @@ func (m *AppModel) decorateDrifted(content string, layout *renderedContentLayout
 			}
 		}
 		x := max(0, m.contentViewport.Width()-lipgloss.Width(label)-2)
-		rows[y] = lipgloss.NewStyle().Width(x).Render(rows[y]) + prefix + commentLineStyle.Faint(true).Render(label)
+		rows[y] = lipgloss.NewStyle().Width(x).Render(rows[y]) + prefix + label
 		layout.markers = append(layout.markers, commentMarker{
 			rect: mouseRect{left: x, right: m.contentViewport.Width(), top: y, bottom: y + 1}, ids: ids,
 		})
@@ -136,16 +132,31 @@ func (m *AppModel) decorateDrifted(content string, layout *renderedContentLayout
 func (m *AppModel) selectMarker(ids []string) {
 	id := ids[0]
 	selected := m.selectedCommentID()
-	for i, candidate := range ids {
+	for _, candidate := range ids {
 		if candidate == selected {
-			id = ids[(i+1)%len(ids)]
+			id = selected
 			break
+		}
+	}
+	if len(ids) > 1 {
+		t := m.tab()
+		if t.expandedDrifted == nil {
+			t.expandedDrifted = make(map[string]bool)
+		}
+		expand := false
+		for _, id := range ids {
+			expand = expand || !t.expandedDrifted[id]
+		}
+		for _, id := range ids {
+			t.expandedDrifted[id] = expand
 		}
 	}
 	for _, target := range m.commentTargets(m.activeTab) {
 		if target.id == id {
 			m.selectComment(m.activeTab, target)
-			m.toggleDrifted(id)
+			if len(ids) == 1 {
+				m.toggleDrifted(id)
+			}
 			return
 		}
 	}

@@ -70,28 +70,34 @@ func TestReplyResolution(t *testing.T) {
 				app.width, app.height = 100, 35
 				app.recalculateLayout()
 				app.openCommentThread(c.ID)
-				if app.modalResolved != resolved || !app.hasModalResolution() {
+				if app.tab().state.Comments[0].Resolved != resolved || !app.hasModalResolution() {
 					t.Fatal("editor did not load the thread resolution")
 				}
 				updated, _ := app.Update(tea.KeyPressMsg{Code: 'r', Mod: tea.ModAlt})
 				app = *updated.(*AppModel)
-				if app.modalResolved == resolved || app.tab().state.Comments[0].Resolved != resolved {
-					t.Fatal("Meta-r must change only the draft resolution")
+				if app.session.FileComments(app.tab().path)[0].Resolved == resolved {
+					t.Fatal("Meta-r must persist resolution immediately")
 				}
 				app.closeTextModal()
-				if app.modal != discardChangesModal {
-					t.Fatal("resolution change did not prompt before discard")
+				if app.modal != noModal {
+					t.Fatal("resolution alone must not prompt before closing")
 				}
-				app.resumeTextModal()
+				app.openCommentThread(c.ID)
 				clicked := false
 				for _, region := range app.modalMouseRegions() {
 					if region.action.resolve {
+						assertRegionContainsRenderedText(t, app, region.rect, "Resolved")
+						for _, close := range app.modalMouseRegions() {
+							if close.action.close && (close.rect.top != region.rect.top || close.rect.left <= region.rect.right) {
+								t.Fatal("checkbox must be immediately left of the title's close button")
+							}
+						}
 						app = clickMouse(app, region.rect.left, region.rect.top)
 						clicked = true
 						break
 					}
 				}
-				if !clicked || app.modalResolved != resolved {
+				if !clicked || app.session.FileComments(app.tab().path)[0].Resolved != resolved {
 					t.Fatal("checkbox click did not toggle resolution")
 				}
 				app.handleTextModal(tea.KeyPressMsg{Code: 'r', Mod: tea.ModAlt})
@@ -108,11 +114,15 @@ func TestReplyResolution(t *testing.T) {
 					t.Fatalf("save changed replies or lost resolution round: %+v", got)
 				}
 				app.openCommentThread(c.ID)
+				app.modalTextarea.SetValue("unsaved reply")
 				app.handleTextModal(tea.KeyPressMsg{Code: 'r', Mod: tea.ModAlt})
 				app.closeTextModal()
+				if app.modal != discardChangesModal {
+					t.Fatal("unsaved reply text should still prompt before closing")
+				}
 				app.handleDiscardChangesModal(tea.KeyPressMsg{Code: 'y'})
-				if app.tab().state.Comments[0].Resolved == resolved {
-					t.Fatal("discard applied the draft resolution")
+				if app.session.FileComments(app.tab().path)[0].Resolved != resolved {
+					t.Fatal("discarding reply text must not undo resolution")
 				}
 			})
 		}
@@ -772,6 +782,33 @@ func TestEditModalDeletesOnlyOwnCurrentRoundReply(t *testing.T) {
 	}
 	if len(comments[0].Replies) != 2 || comments[0].Replies[0].ID != "rp_old" || comments[0].Replies[1].ID != "rp_other" {
 		t.Fatalf("remaining replies = %+v, want old and other", comments[0].Replies)
+	}
+}
+
+func TestDriftedReplyModalStartsAtLatestReply(t *testing.T) {
+	for _, edit := range []bool{false, true} {
+		t.Run(fmt.Sprintf("edit=%v", edit), func(t *testing.T) {
+			comment := testComment()
+			comment.Author = "Other"
+			comment.Drifted = true
+			comment.Quote = "original source"
+			comment.Body = strings.Repeat("old comment\n", 30)
+			comment.Replies = []review.Reply{{ID: "latest", Author: "Other", Body: "LATEST REPLY", ReviewRound: 1}}
+			if edit {
+				comment.Replies = append(comment.Replies, review.Reply{ID: "own", Author: "Tester", Body: "edit this reply", ReviewRound: 1})
+			}
+			app, _ := newFinishTestApp(t, []review.Comment{comment})
+			app.width, app.height = 100, 40
+			app.recalculateLayout()
+			app.openCommentThread(comment.ID)
+			if view := ansi.Strip(app.View().Content); !strings.Contains(view, "LATEST REPLY") {
+				t.Fatal("drifted reply dialog did not show the latest preceding reply")
+			}
+			app.scrollModalReference(-100)
+			if view := ansi.Strip(app.View().Content); !strings.Contains(view, "original source") {
+				t.Fatal("original drifted context is no longer accessible by scrolling")
+			}
+		})
 	}
 }
 

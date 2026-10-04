@@ -113,7 +113,7 @@ func (m *AppModel) rebuildContent() {
 	b.Grow(len(sourceLines) * 200) // pre-allocate to reduce allocations
 	layout := newRenderedContentLayout()
 	appendAnnotation := func(ann annotation, focused bool, target contentMouseTarget) {
-		if ann.drifted && (!t.expandedDrifted[ann.id] || ann.resolved) {
+		if ann.drifted && !t.expandedDrifted[ann.id] {
 			return
 		}
 		box, button := m.renderAnnotationBox(ann, boxWidth, focused)
@@ -337,7 +337,7 @@ func (m *AppModel) rebuildContent() {
 
 // renderAnnotationBox renders a bordered annotation box indented under the gutter.
 func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused bool) (string, commentHeaderRegion) {
-	collapsed := ann.resolved
+	collapsed := ann.resolved && (!ann.drifted || !m.tab().expandedDrifted[ann.id])
 	var lineLabel string
 	if ann.scope == "file" {
 		lineLabel = "File"
@@ -389,6 +389,19 @@ func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused boo
 	return b.String(), button
 }
 
+func renderResolution(resolved bool, label string) string {
+	checkbox := "☐"
+	style := inlineLabelComment.Foreground(lipgloss.Yellow)
+	if resolved {
+		checkbox = "☑︎"
+		style = resolvedBadge
+	}
+	if label != "" {
+		checkbox += " " + label
+	}
+	return style.Render(checkbox)
+}
+
 // renderCommentHeader appends the right-aligned action group
 // "☐ Resolve  ↑ / ↓  x" to label.  Both resolution states reserve the same
 // width, and the x slot stays blank on comments that cannot be deleted, so
@@ -396,10 +409,11 @@ func (m *AppModel) renderAnnotationBox(ann annotation, maxWidth int, focused boo
 // the arrows go first; the rest moves to its own row only when it does not
 // fit either.
 func renderCommentHeader(label string, resolved, deletable bool, width int) (string, commentHeaderRegion) {
-	resolve := inlineLabelComment.Foreground(lipgloss.Yellow).Render("☐ Resolve")
+	resolveLabel := "Resolve"
 	if resolved {
-		resolve = resolvedBadge.Render("☑︎ Resolved")
+		resolveLabel = "Resolved"
 	}
+	resolve := renderResolution(resolved, resolveLabel)
 	resolveWidth := lipgloss.Width("☑︎ Resolved")
 	group := func(arrows bool) (string, commentHeaderRegion) {
 		actions := lipgloss.NewStyle().Width(resolveWidth).Render(resolve)
