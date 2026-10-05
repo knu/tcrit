@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -15,44 +16,89 @@ import (
 var envJSON bool
 
 var envCmd = &cobra.Command{
-	Use:   "env [--json] [-- <command> [args...]]",
+	Use:   "env [--json] [all | tty | run <command> [args...]]",
 	Short: "Print the environment that identifies the review terminal, or run a command with it",
 	Long: `Locate the Herdr or tmux terminal the way review commands do, then print the
 variables a process needs to address it: TMUX, TMUX_PANE, and TTY for tmux,
 or HERDR_ENV, HERDR_SOCKET_PATH, HERDR_WORKSPACE_ID, HERDR_TAB_ID, HERDR_PANE_ID,
-and TTY for Herdr.  Each variable is printed as NAME=value; --json prints one
-JSON object instead.  With a command, this process is replaced by the command
-with those variables added to its environment.
+and TTY for Herdr.  By default, or with all, each variable is printed as
+NAME=value; --json prints one JSON object instead.  tty prints only the
+terminal device.  Flags go before the mode word.  run <command>, or -- <command>, replaces this process with
+the command and those variables added to its environment.
 
 Detection uses the multiplexer environment when present and the process
 ancestry otherwise, so a tool started from the terminal's process tree can
-recover its terminal even without the variables.  A background server such as
-Codex's daemon has no such ancestry; pass --terminal-request <id> from a
-marker prepared by ` + "`tcrit terminal prepare`" + ` to locate the pane that displays it.`,
+recover its terminal even without the variables.  Without a pane terminal, TTY
+is the controlling terminal of this process or its nearest ancestor, then
+SSH_TTY.  A background server such as Codex's daemon has no such ancestry;
+pass --terminal-request <id> from a marker prepared by ` + "`tcrit terminal prepare`" + `
+to locate the pane that displays it.`,
 	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if envJSON && len(args) > 0 {
+		mode, command, err := parseEnvArgs(cmd.ArgsLenAtDash(), args)
+		if err != nil {
+			return err
+		}
+		if envJSON && mode == "run" {
 			return fmt.Errorf("--json cannot be combined with a command")
 		}
 		vars, err := terminalEnvironment()
 		if err != nil {
 			return err
 		}
-		if len(args) > 0 {
-			return execWithEnvironment(vars, args)
+		out := cmd.OutOrStdout()
+		switch mode {
+		case "run":
+			return execWithEnvironment(vars, command)
+		case "tty":
+			i := slices.IndexFunc(vars, func(v envVar) bool { return v.name == "TTY" })
+			if i < 0 {
+				return fmt.Errorf("no terminal device found")
+			}
+			if envJSON {
+				return printJSON(out, vars[i].value)
+			}
+			fmt.Fprintln(out, vars[i].value)
+			return nil
 		}
 		if envJSON {
 			object := make(map[string]string, len(vars))
 			for _, v := range vars {
 				object[v.name] = v.value
 			}
-			return printJSON(cmd.OutOrStdout(), object)
+			return printJSON(out, object)
 		}
 		for _, v := range vars {
-			fmt.Fprintf(cmd.OutOrStdout(), "%s=%s\n", v.name, v.value)
+			fmt.Fprintf(out, "%s=%s\n", v.name, v.value)
 		}
 		return nil
 	},
+}
+
+// parseEnvArgs accepts a mode word or a command after "--" (dash is its index, -1 when absent).
+func parseEnvArgs(dash int, args []string) (mode string, command []string, err error) {
+	if dash == 0 {
+		if len(args) == 0 {
+			return "", nil, fmt.Errorf("run requires a command")
+		}
+		return "run", args, nil
+	}
+	if len(args) == 0 {
+		return "all", nil, nil
+	}
+	switch args[0] {
+	case "all", "tty":
+		if len(args) > 1 {
+			return "", nil, fmt.Errorf("%s takes no arguments", args[0])
+		}
+		return args[0], nil, nil
+	case "run":
+		if len(args) == 1 {
+			return "", nil, fmt.Errorf("run requires a command")
+		}
+		return "run", args[1:], nil
+	}
+	return "", nil, fmt.Errorf("unknown mode %q; use all, tty, run <command>, or -- <command>", args[0])
 }
 
 type envVar struct {
@@ -71,13 +117,63 @@ func terminalEnvironment() ([]envVar, error) {
 	if err != nil {
 		return nil, err
 	}
+	var vars []envVar
 	switch ctx := ctx.(type) {
 	case tmuxContext:
-		return tmuxEnvironment(ctx)
+		vars, err = tmuxEnvironment(ctx)
 	case herdrContext:
-		return herdrEnvironment(ctx)
+		vars, err = herdrEnvironment(ctx)
 	}
-	return nil, fmt.Errorf("no Herdr or tmux terminal found; run inside Herdr or tmux")
+	if err != nil {
+		return nil, err
+	}
+	if !slices.ContainsFunc(vars, func(v envVar) bool { return v.name == "TTY" }) {
+		if tty := fallbackTTY(); tty != "" {
+			vars = append(vars, envVar{"TTY", tty})
+		}
+	}
+	if len(vars) == 0 {
+		return nil, fmt.Errorf("no Herdr or tmux terminal found and no controlling terminal")
+	}
+	return vars, nil
+}
+
+// fallbackTTY reports the controlling terminal of this process or its nearest
+// ancestor, then SSH_TTY.  Hooks often run detached from the terminal that
+// started their agent.
+func fallbackTTY() string {
+	if tty := processTTY(os.Getpid()); tty != "" {
+		return tty
+	}
+	seen := make(map[int]bool)
+	for pid := parentProcessID(); pid > 1 && !seen[pid]; {
+		seen[pid] = true
+		if tty := processTTY(pid); tty != "" {
+			return tty
+		}
+		ppid, err := inspectProcess(pid)
+		if err != nil {
+			break
+		}
+		pid = ppid
+	}
+	return os.Getenv("SSH_TTY")
+}
+
+// processTTY returns the controlling terminal device of a process, or "" when it has none.
+func processTTY(pid int) string {
+	out, err := commandOutput(exec.Command("ps", "-o", "tty=", "-p", strconv.Itoa(pid)))
+	if err != nil {
+		return ""
+	}
+	tty := strings.TrimSpace(string(out))
+	if tty == "" || tty == "-" || strings.HasPrefix(tty, "?") {
+		return ""
+	}
+	if !strings.HasPrefix(tty, "/") {
+		tty = "/dev/" + tty
+	}
+	return tty
 }
 
 // tmuxEnvironment asks the server for the pane's current identity, so a

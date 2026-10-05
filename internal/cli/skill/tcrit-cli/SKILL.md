@@ -1,6 +1,6 @@
 ---
 name: tcrit-cli
-description: Reference for TCrit's headless commands. Use when an agent needs to list, add, or reply to review comments with tcrit comment and tcrit comments, target a specific session or plan, read a TCrit review.json file, stop or resume a saved review, or clear review state. Not for running the interactive review loop; that is the tcrit skill.
+description: Reference for TCrit's headless commands. Use when an agent needs to list, add, or reply to review comments with tcrit comment and tcrit comments, target a specific session or plan, read a TCrit review.json file, stop or resume a saved review, clear review state, or find the terminal's TMUX, Herdr, or TTY variables with tcrit env. Not for running the interactive review loop; that is the tcrit skill.
 user-invocable: false
 ---
 
@@ -173,3 +173,17 @@ Use `clear` when deletion is requested, or when an approved finish result direct
 For Codex review launches, the interactive `tcrit` skill prepares and displays a fresh marker for each round.  `tcrit terminal prepare` returns JSON with `id`, `marker`, and `expires_at`; pass its ID as `--terminal-request <id>` on `tcrit`, `tcrit review`, or `tcrit plan`.  Requests expire after two minutes and are consumed at destination selection.  Review session IDs and terminal request IDs are separate.
 
 `tcrit terminal notify <id>` is a terminal-filter callback, not an agent-side workaround.  It reads the filter's original tmux/Herdr environment and records the destination before or during review startup.  Duplicate notifications from one pane are accepted; different panes are ambiguous.  Expired or consumed requests fail.  Without a notification, TCrit reads only the visible text in live registered panes.  It never broadens a failed search to all panes or scrollback.
+
+## Terminal environment
+
+`tcrit env` locates the Herdr or tmux pane the same way a review launch does, from the multiplexer environment or from process ancestry, and prints the variables that address it.
+
+```bash
+tcrit env                       # NAME=value lines: TMUX, TMUX_PANE, TTY, or HERDR_*
+tcrit env --json                # the same as one JSON object
+tcrit env tty                   # only the terminal device, such as /dev/ttys003
+tcrit env run <command> [args]  # exec the command with those variables set
+tcrit env -- <command> [args]   # the same
+```
+
+Flags go before the mode word.  Without a pane, `TTY` is the controlling terminal of the nearest ancestor process, then `SSH_TTY`; the command fails when nothing is found.  Hooks that run detached from the agent's terminal can use `tcrit env tty` to find it.  `--terminal-request <id>` resolves a prepared marker as a review launch would, so it only applies inside a flow that displays one.
