@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.16.2
+
+### Added
+
+- `tcrit env tty` prints only the terminal device, and `tcrit env run <command>` runs a command with the terminal variables set.  `tcrit env -- <command>` keeps working.
+- The `tcrit-cli` skill documents `tcrit env`.
+
+### Changed
+
+- When no Herdr or tmux pane reports a terminal, `tcrit env` takes `TTY` from the controlling terminal of the process or its nearest ancestor, then from `SSH_TTY`, and succeeds with `TTY` alone outside a multiplexer.
+
 ## 0.16.1
 
 ### Added
