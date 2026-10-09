@@ -3995,6 +3995,7 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 
 	case finishModal:
 		unresolved := m.unresolvedTotal()
+		titleStyle := modalTitleStyle
 		var titleText, info string
 		if unresolved == 0 {
 			titleText = "Approve review?"
@@ -4006,9 +4007,14 @@ func (m AppModel) renderWithModalLayout(background string) (string, []modalMouse
 			titleText = "Finish review?"
 			info = fmt.Sprintf("%d unresolved comment(s) will be sent to the agent.", unresolved)
 		}
-		title, closeRegion := modalTitle(titleText, innerWidth)
+		if unresolved == 0 || !m.newFeedback {
+			frameStyle = frameStyle.BorderForeground(lipgloss.BrightGreen)
+			titleStyle = titleStyle.Foreground(lipgloss.BrightGreen)
+			info = lipgloss.NewStyle().Foreground(lipgloss.BrightGreen).Render(info)
+		}
+		title, closeRegion := modalTitleRow(titleStyle.MarginBottom(0).Render(titleText), innerWidth)
 
-		prefix := title + "\n" + info + "\n\n"
+		prefix := title + "\n\n" + info + "\n\n"
 		prefix = lipgloss.Wrap(prefix, innerWidth, "")
 		buttons, buttonRegions := layoutModalButtonRow([]modalButtonSpec{
 			{rendered: m.renderModalButton(m.finishActionLabel(), "y", m.modalFocus == 0), action: modalMouseAction{focus: 0}},

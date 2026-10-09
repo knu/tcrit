@@ -1,5 +1,7 @@
 # Differences from upstream
 
+- **Approval dialog colors** — Submit dialogs for approval, including Resolve All & Approve, use light green borders, titles, and messages.
+
 - **Inline README videos** — GitHub video attachments render the demos as embedded players.  Versioned release assets remain available for downloads.
 
 - **Reuse draft releases** — automated releases update an existing draft, retain its attached recordings, and replace its notes with the matching `CHANGELOG.md` section before publication.
