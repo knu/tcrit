@@ -28,7 +28,8 @@ blocking like ` + "`tcrit review`" + `.
 Without --name, the slug is derived from the plan's first heading.
 Each new invocation creates an independent session.  Use --session <id>
 to save a new version and continue a previous review.`,
-	Args: cobra.MaximumNArgs(1),
+	Args:    cobra.MaximumNArgs(1),
+	PreRunE: validateScopeFlags,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runPlan(args)
 	},
@@ -113,6 +114,7 @@ func readPlanContent(args []string) (content []byte, sourceFile string, err erro
 
 func init() {
 	rootCmd.AddCommand(planCmd)
+	addFocusFlag(planCmd)
 	planCmd.Flags().StringVar(&planSession, "session", "", "continue a saved plan review")
 	planCmd.Flags().StringVar(&planName, "name", "", "plan slug (derived from the first heading when omitted)")
 }

@@ -25,6 +25,17 @@ Your agent writes code or a plan, you review it in the TUI, and the agent reads 
 - **Scriptable and Crit-compatible** — [Crit](https://crit.md/)-compatible `review.json`, `tcrit comment` and `tcrit comments` for automation, and sessions that stop and resume by ID.
 - **Readable on any terminal** — light and dark backgrounds, per-author colors, compact tab paths, and a review bar that names what is under review.
 
+To open a review at a specific file or line:
+
+```bash
+tcrit notes.md:42
+tcrit --focus internal/tui/app.go
+tcrit review --staged --focus internal/tui/app.go:120
+tcrit --session <id> --focus internal/tui/app.go:120
+```
+
+Use `tcrit FILE[:LINE]` to review a single document, or `--focus PATH[:LINE]` with a file in the review.  Line numbers start at 1.  From round 2 onward, the review automatically focuses the first thread with a new reply from another author, in file and display order.  An explicit file line or `--focus` takes priority; `--focus` wins when both are given.
+
 ## Install
 
 Install the `tcrit` binary, then install the review skills for your agent with `tcrit install`.

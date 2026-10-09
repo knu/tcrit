@@ -15,6 +15,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/knu/tcrit/internal/config"
+	"github.com/knu/tcrit/internal/document"
 	"github.com/knu/tcrit/internal/git"
 	"github.com/knu/tcrit/internal/ipc"
 	"github.com/knu/tcrit/internal/review"
@@ -47,7 +48,7 @@ var resolveExec = func() (string, error) {
 }
 
 var reviewCmd = &cobra.Command{
-	Use:   "review [file]",
+	Use:   "review [file[:LINE]]",
 	Short: "Review git changes (default) or a single document",
 	Long: `Open a review and block until the human finishes it.
 
@@ -79,6 +80,8 @@ type reviewMode struct {
 	patch       *git.Patch
 	sessionKey  string // exact saved session opened by the TUI
 	source      *git.ReviewSource
+	focusPath   string
+	focusLine   int
 }
 
 func (m *reviewMode) code() bool { return m.docPath == "" }
@@ -148,6 +151,9 @@ func runReview(args []string) error {
 
 // runReviewFlow opens one round in the caller's multiplexer or terminal.
 func runReviewFlow(cfg *config.Config, sess *review.Session, mode *reviewMode) error {
+	if err := resolveFocus(mode); err != nil {
+		return err
+	}
 	lock := flock.New(filepath.Join(sess.Dir, "run.lock"))
 	locked, err := lock.TryLock()
 	if err != nil {
@@ -245,11 +251,25 @@ func resolveReviewMode(args []string) (*reviewMode, error) {
 		return nil, fmt.Errorf("--scope, --staged, and --unstaged are only valid for code review")
 	}
 	if len(args) == 1 && !reviewCode {
-		filePath := args[0]
+		filePath, line, err := parseFocus(args[0])
+		if err != nil {
+			return nil, err
+		}
 		if _, err := os.Stat(filePath); os.IsNotExist(err) {
 			return nil, fmt.Errorf("file not found: %s", filePath)
 		}
-		return &reviewMode{docPath: filePath}, nil
+		mode := &reviewMode{docPath: filePath}
+		if line > 0 {
+			doc, err := document.Load(filePath)
+			if err != nil {
+				return nil, err
+			}
+			if !doc.HasLine(line) {
+				return nil, fmt.Errorf("focus line %d is not in the review: %s", line, filePath)
+			}
+			mode.focusPath, mode.focusLine = filePath, line
+		}
+		return mode, nil
 	}
 
 	if !git.IsGitRepo() {
@@ -393,7 +413,15 @@ func buildTUICommand(mode *reviewMode, host string) (string, error) {
 	if mode.sessionKey == "" {
 		return "", fmt.Errorf("missing review session ID")
 	}
-	return fmt.Sprintf("%s %s _tui --session %s", envPrefix, shellEscape(tcritBin), shellEscape(mode.sessionKey)), nil
+	command := fmt.Sprintf("%s %s _tui --session %s", envPrefix, shellEscape(tcritBin), shellEscape(mode.sessionKey))
+	if mode.focusPath != "" {
+		focus := mode.focusPath
+		if mode.focusLine > 0 {
+			focus += ":" + strconv.Itoa(mode.focusLine)
+		}
+		command += " --focus " + shellEscape(focus)
+	}
+	return command, nil
 }
 
 // resolveExecutable returns the absolute path to the currently running binary.
@@ -547,6 +575,7 @@ func init() {
 	rootCmd.AddCommand(reviewCmd)
 	reviewCmd.Flags().BoolVar(&reviewCode, "code", false, "review code changes (default when no file argument is given)")
 	addDiffFlag(reviewCmd)
+	addFocusFlag(reviewCmd)
 	reviewCmd.Flags().BoolVar(&reviewStaged, "staged", false, "review only changes staged in the index (alias for --scope=staged)")
 	reviewCmd.Flags().BoolVar(&reviewUnstaged, "unstaged", false, "review unstaged and untracked changes (alias for --scope=unstaged)")
 

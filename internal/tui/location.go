@@ -25,6 +25,40 @@ type sourceEditorReadyMsg struct {
 
 type sourceEditorFinishedMsg struct{ err error }
 
+func startupLocation(cfg AppConfig) *sourceLocation {
+	if cfg.FocusPath == "" {
+		return nil
+	}
+	return &sourceLocation{path: cfg.FocusPath, line: cfg.FocusLine}
+}
+
+func (m *AppModel) focusStartupLocation() {
+	if m.initialFocus == nil || m.width <= 0 || m.height <= 0 || len(m.tabs) == 0 || m.tab().state == nil {
+		return
+	}
+	location := *m.initialFocus
+	m.initialFocus = nil
+	m.previousReplyIDs = nil
+	for i := range m.tabs {
+		t := &m.tabs[i]
+		if m.sourcePath(t.path) != m.sourcePath(location.path) {
+			continue
+		}
+		m.activeTab = i
+		m.focused = contentPane
+		if location.line > 0 && t.doc != nil && t.doc.HasLine(location.line) {
+			t.cursorLine, t.cursorSide = location.line, ""
+		} else if location.line > 0 {
+			m.locationError = fmt.Sprintf("Line %d is not in the review.", location.line)
+		}
+		m.rebuildContent()
+		m.updateCommentSidebar()
+		m.scrollToCursor()
+		return
+	}
+	m.locationError = "Focus file is not in the review."
+}
+
 func (m *AppModel) sourcePath(path string) string {
 	if !filepath.IsAbs(path) && m.session != nil {
 		path = filepath.Join(m.session.Meta.CWD, path)

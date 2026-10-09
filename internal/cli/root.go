@@ -13,7 +13,7 @@ import (
 var rootSession string
 
 var rootCmd = &cobra.Command{
-	Use:     "tcrit [file]",
+	Use:     "tcrit [file[:LINE]]",
 	Version: versionString(),
 	Short:   "Review code changes and documents from the terminal",
 	Long: "TCrit is a terminal-based review tool for code changes and documents. " +
@@ -70,4 +70,5 @@ func init() {
 	rootCmd.Flags().BoolVar(&reviewStaged, "staged", false, "review only changes staged in the index (alias for --scope=staged)")
 	rootCmd.Flags().BoolVar(&reviewUnstaged, "unstaged", false, "review unstaged and untracked changes (alias for --scope=unstaged)")
 	addDiffFlag(rootCmd)
+	addFocusFlag(rootCmd)
 }

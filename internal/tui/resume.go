@@ -51,7 +51,7 @@ func (m *AppModel) restoreRound() error {
 }
 
 func (m *AppModel) focusNewReply() {
-	if m.previousReplyIDs == nil || m.width <= 0 || m.height <= 0 {
+	if m.initialFocus != nil || m.previousReplyIDs == nil || m.width <= 0 || m.height <= 0 {
 		return
 	}
 	seen := make(map[string]bool, len(m.previousReplyIDs))

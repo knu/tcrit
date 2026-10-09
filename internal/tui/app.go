@@ -60,10 +60,12 @@ type AppConfig struct {
 	Session *review.Session
 	Author  string
 	// Staged reads code-review files and diffs from the Git index.
-	Staged   bool
-	Patch    *gitpkg.Patch
-	Source   *gitpkg.ReviewSource
-	FinishCh chan<- FinishEvent
+	Staged    bool
+	Patch     *gitpkg.Patch
+	Source    *gitpkg.ReviewSource
+	FinishCh  chan<- FinishEvent
+	FocusPath string
+	FocusLine int
 }
 
 // gutterWidth is the total width of the left gutter: line number (5) + marker (1) + space (1).
@@ -94,6 +96,7 @@ type AppModel struct {
 	foldResolved     bool
 	ignoreWhitespace bool
 	previousReplyIDs []string // submission baseline pending initial window dimensions
+	initialFocus     *sourceLocation
 
 	// Finish-flow state (see AppConfig).
 	finishCh chan<- FinishEvent
@@ -244,6 +247,7 @@ func NewApp(filePath string, cfg AppConfig) AppModel {
 		authorColors:    make(map[string]int),
 		finishCh:        cfg.FinishCh,
 		host:            os.Getenv("TCRIT_HOST"),
+		initialFocus:    startupLocation(cfg),
 		contentViewport: viewport.New(),
 		commentViewport: viewport.New(),
 		fileTree:        newFileTree(),
@@ -317,6 +321,7 @@ func NewCodeReviewApp(files []gitpkg.FileChange, ref string, cfg AppConfig) AppM
 		patch:           cfg.Patch,
 		source:          cfg.Source,
 		host:            os.Getenv("TCRIT_HOST"),
+		initialFocus:    startupLocation(cfg),
 		contentViewport: viewport.New(),
 		commentViewport: viewport.New(),
 		fileTree:        newFileTree(),
@@ -417,6 +422,7 @@ func (m AppModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.tabs) > 0 && m.tab().state != nil {
 			m.rebuildContent()
 			m.updateCommentSidebar()
+			m.focusStartupLocation()
 			m.focusNewReply()
 		}
 		return m, nil
@@ -457,6 +463,7 @@ func (m AppModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recalculateLayout()
 		m.rebuildContent()
 		m.updateCommentSidebar()
+		m.focusStartupLocation()
 		m.focusNewReply()
 		return m, nil
 

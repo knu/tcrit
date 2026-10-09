@@ -21,6 +21,9 @@ var tuiCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		if err := resolveFocus(mode); err != nil {
+			return err
+		}
 		_, err = runTUISession(cfg, sess, mode, true)
 		return err
 	},
@@ -28,5 +31,6 @@ var tuiCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(tuiCmd)
+	addFocusFlag(tuiCmd)
 	tuiCmd.Flags().StringVar(&tuiSession, "session", "", "saved review session")
 }

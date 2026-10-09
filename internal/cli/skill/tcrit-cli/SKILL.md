@@ -44,6 +44,17 @@ tcrit comment --session <id> --json --file .tmp/replies.json --author 'Claude Co
 
 To resume a stopped session, run `tcrit --session <id>` from its original directory.  If a command is still waiting for the reviewer, retain its execution handle and collect that command's result instead.  The `/tcrit` skill distinguishes retryable launch failures from interrupted reviews that require explicit chat instructions to resume.  Resuming restores the saved plan or diff input.  To replace that input, use `tcrit plan --session <id> <file>` or `tcrit --diff=<file> --session <id>`.  The `/tcrit` skill covers the interactive review loop.
 
+## Startup focus
+
+For a single document, use `tcrit FILE:LINE` or `tcrit review FILE:LINE`.  Add `--focus PATH[:LINE]` to `tcrit`, `tcrit review`, or `tcrit plan`, including `--session` invocations, to select the initial file and optionally scroll to a line:
+
+```bash
+tcrit review --staged --focus 'path/to/file'
+tcrit --session <id> --focus 'path/to/file:42'
+```
+
+Paths may be relative or absolute and must belong to the review.  Plan reviews also accept the original plan path.  Line numbers are positive, 1-indexed new-side source coordinates in the reviewed content: index contents for staged reviews, the right endpoint for committed comparisons, and the saved snapshot for supplied diffs.  Missing files and unavailable lines are rejected; omit the line for binary or deleted files.  From round 2 onward, automatic focus selects the first visible thread, in file and display order, with a reply added since the previous submission by an author other than the reviewer.  An explicit document line or `--focus` takes priority; `--focus` wins when both are given.  Explicit focus leaves tab order and review scope unchanged and applies only to that invocation.
+
 ## Review file format
 
 TCrit stores each review as a `review.json` that follows crit's CritJSON layout, so tooling written for either works on both.

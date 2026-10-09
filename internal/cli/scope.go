@@ -9,6 +9,9 @@ import (
 )
 
 func validateScopeFlags(cmd *cobra.Command, _ []string) error {
+	if cmd.Flags().Changed("focus") && reviewFocus == "" {
+		return fmt.Errorf("--focus requires a file path")
+	}
 	if cmd.Flags().Changed("diff") && reviewDiff == "" {
 		return fmt.Errorf("--diff requires a file path or -")
 	}

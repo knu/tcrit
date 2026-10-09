@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,7 +10,46 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/knu/tcrit/internal/document"
+	gitpkg "github.com/knu/tcrit/internal/git"
+	"github.com/knu/tcrit/internal/review"
 )
+
+func TestStartupFocus(t *testing.T) {
+	for _, lateWindow := range []bool{false, true} {
+		for _, line := range []int{0, 25} {
+			t.Run(fmt.Sprintf("line=%d/lateWindow=%t", line, lateWindow), func(t *testing.T) {
+				t.Chdir(t.TempDir())
+				for _, path := range []string{"a.txt", "z.txt"} {
+					if err := os.WriteFile(path, []byte(strings.Repeat("line\n", 40)), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				app := NewCodeReviewApp([]gitpkg.FileChange{{Path: "z.txt"}, {Path: "a.txt"}}, "HEAD", AppConfig{FocusPath: "./z.txt", FocusLine: line})
+				window := tea.WindowSizeMsg{Width: 100, Height: 18}
+				if !lateWindow {
+					app, _ = updateApp(app, window)
+				}
+				app.previousReplyIDs = []string{}
+				app, _ = updateApp(app, docRenderedMsg{})
+				app.tabs[0].state.Comments = []review.Comment{{ID: "thread", StartLine: 2, EndLine: 2, Replies: []review.Reply{{ID: "new", Author: "Agent"}}}}
+				if lateWindow {
+					app, _ = updateApp(app, window)
+				}
+				if app.activeTab != 1 || app.tab().cursorLine != max(1, line) || app.tab().cursorOnAnnotation {
+					t.Fatalf("focus = tab %d, line %d, annotation %t", app.activeTab, app.tab().cursorLine, app.tab().cursorOnAnnotation)
+				}
+				if line == 25 && app.contentViewport.YOffset() == 0 {
+					t.Fatal("focused line was not scrolled into view")
+				}
+				app.tab().cursorLine = 3
+				app, _ = updateApp(app, window)
+				if app.tab().cursorLine != 3 {
+					t.Fatal("resize reapplied startup focus")
+				}
+			})
+		}
+	}
+}
 
 func TestGotoLineAndEditorFallback(t *testing.T) {
 	app := setupAppWithDoc(t, "one\ntwo\nthree")

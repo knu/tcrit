@@ -26,12 +26,14 @@ import (
 func runTUISession(cfg *config.Config, sess *review.Session, mode *reviewMode, serving bool) (*ipc.FinishPayload, error) {
 	finishCh := make(chan tui.FinishEvent, 4)
 	appCfg := tui.AppConfig{
-		Session:  sess,
-		Author:   cfg.Author,
-		Staged:   mode.staged,
-		Source:   mode.source,
-		FinishCh: finishCh,
-		Patch:    mode.patch,
+		Session:   sess,
+		Author:    cfg.Author,
+		Staged:    mode.staged,
+		Source:    mode.source,
+		FinishCh:  finishCh,
+		Patch:     mode.patch,
+		FocusPath: mode.focusPath,
+		FocusLine: mode.focusLine,
 	}
 
 	var model tui.AppModel
