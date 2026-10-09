@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.16.3
+
+### Added
+
+- `--focus PATH[:LINE]` opens a review at a specific file or line, including when resuming a session.  Single-document reviews also accept `FILE:LINE`.
+- Bundled agent skills document startup file and line focus.
+
+### Changed
+
+- Submit dialogs for Approve and Resolve All & Approve use light green borders, titles, and messages.
+- Update Go dependencies.
+
 ## 0.16.2
 
 ### Added
