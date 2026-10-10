@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.16.4
+
+### Added
+
+- The review header shows the project name and Git branch, with `--project` and `--topic` overrides retained across review rounds.
+
+### Changed
+
+- The file tree starts fully expanded under the project name.  Folding or unfolding a folder cascades through single-child directory chains.
+
 ## 0.16.3
 
 ### Added

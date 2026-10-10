@@ -385,7 +385,7 @@ The kill ring is shared across comment and reply dialogs for the TUI run and is 
 | `alt+p` (`M-p`)     | Open the file selector: type to filter tabs fuzzily, `↑` / `↓` choose, `enter` switches |
 | `1`-`9`             | Switch to the numbered file tab from the content pane |
 
-Normally, only threads resolved in earlier rounds are folded.  `h` also folds threads resolved in this round; `H` hides comments and shows line markers in a narrow right gutter.  Press either key to switch directly to its mode, or press it again to return to normal.  In the file tree, `h` keeps its folder-navigation role.  The tree starts fully expanded under the project name.  Folding or unfolding a folder also follows any chain of single child folders.
+Normally, only threads resolved in earlier rounds are folded.  `h` also folds threads resolved in this round; `H` hides comments and shows line markers in a narrow right gutter.  Press either key to switch directly to its mode, or press it again to return to normal.  In the file tree, `h` keeps its folder-navigation role.  The tree starts fully expanded under the project name; fold the project folder to collapse the whole tree.  Folding or unfolding a folder also follows any chain of single child folders.
 
 `f` replies to the file's existing thread, or creates a file comment when there is none.  The file selector matches like VS Code's: gaps are allowed, several words must all match, and basename matches rank first.  `n` / `N` visit change hunks and unresolved comments in display order across files and reveal comments hidden with `H`.
 
