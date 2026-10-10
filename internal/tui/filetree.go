@@ -44,6 +44,7 @@ type treeRow struct {
 
 // fileTree is the sidebar's file tree state.
 type fileTree struct {
+	root      *treeNode
 	rows      []treeRow
 	cursor    int
 	hscroll   int             // columns the cursor row is scrolled to the right
@@ -147,13 +148,19 @@ func (m *AppModel) syncFileTree() {
 		paths[i] = t.path
 	}
 	root := buildFileTree(paths)
+	root.name = m.project
+	if root.name == "" {
+		root.name = "Files"
+	}
+	tree.root = root
 	if tree.syncedTab != m.activeTab {
+		delete(tree.collapsed, "")
 		parts := strings.Split(strings.Trim(filepath.ToSlash(m.tabs[m.activeTab].path), "/"), "/")
 		for j := 1; j < len(parts); j++ {
 			delete(tree.collapsed, strings.Join(parts[:j], "/"))
 		}
 	}
-	tree.rows = visibleTreeRows(root, tree.collapsed)
+	tree.rows = visibleTreeRows(&treeNode{children: []*treeNode{root}}, tree.collapsed)
 	if tree.syncedTab != m.activeTab {
 		for i, row := range tree.rows {
 			if !row.isDir && row.tabIndex == m.activeTab {
@@ -288,10 +295,28 @@ func (m *AppModel) toggleTreeDir(i int) {
 		return
 	}
 	row := tree.rows[i]
-	if row.collapsed {
-		delete(tree.collapsed, row.path)
-	} else {
-		tree.collapsed[row.path] = true
+	var find func(*treeNode) *treeNode
+	find = func(node *treeNode) *treeNode {
+		if node.isDir && node.path == row.path {
+			return node
+		}
+		for _, child := range node.children {
+			if found := find(child); found != nil {
+				return found
+			}
+		}
+		return nil
+	}
+	for node := find(tree.root); node != nil; {
+		if row.collapsed {
+			delete(tree.collapsed, node.path)
+		} else {
+			tree.collapsed[node.path] = true
+		}
+		if len(node.children) != 1 || !node.children[0].isDir {
+			break
+		}
+		node = node.children[0]
 	}
 	tree.cursor = i
 	m.updateCommentSidebar()

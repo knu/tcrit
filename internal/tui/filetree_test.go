@@ -10,7 +10,7 @@ import (
 )
 
 func newFileTreeTestApp() AppModel {
-	app := NewApp("root.go", AppConfig{})
+	app := NewApp("root.go", AppConfig{Project: "test-project"})
 	app.multiFile = true
 	app.tabs = nil
 	for _, path := range []string{"a/sub/z.go", "a/y.go", "b/x.go", "root.go"} {
@@ -37,18 +37,18 @@ func treeRowPaths(app AppModel) []string {
 
 func TestFileTreeRowsListDirectoriesFirstAndFoldChildren(t *testing.T) {
 	app := newFileTreeTestApp()
-	want := "a a/sub a/sub/z.go a/y.go b b/x.go root.go"
+	want := " a a/sub a/sub/z.go a/y.go b b/x.go root.go"
 	if got := strings.Join(treeRowPaths(app), " "); got != want {
 		t.Fatalf("rows = %q, want %q", got, want)
 	}
-	for i, depth := range []int{0, 1, 2, 1, 0, 1, 0} {
+	for i, depth := range []int{0, 1, 2, 3, 2, 1, 2, 1} {
 		if app.fileTree.rows[i].depth != depth {
 			t.Fatalf("row %d depth = %d, want %d", i, app.fileTree.rows[i].depth, depth)
 		}
 	}
 
-	app.toggleTreeDir(0)
-	if got := strings.Join(treeRowPaths(app), " "); got != "a b b/x.go root.go" {
+	app.toggleTreeDir(1)
+	if got := strings.Join(treeRowPaths(app), " "); got != " a b b/x.go root.go" {
 		t.Fatalf("folded rows = %q", got)
 	}
 }
@@ -66,7 +66,7 @@ func TestFileTreeFollowsActiveTabAndUnfoldsItsDirectories(t *testing.T) {
 		t.Fatalf("cursor on %q, want the active tab", row.path)
 	}
 
-	app.toggleTreeDir(0) // fold a/
+	app.toggleTreeDir(1) // fold a/
 	app.activeTab = 3    // root.go, as any tab switch elsewhere would do
 	app.updateCommentSidebar()
 	if row := app.fileTree.rows[app.fileTree.cursor]; row.path != "root.go" {
@@ -129,20 +129,21 @@ func TestFileTreeRendersOneColumnIndentAndActiveFile(t *testing.T) {
 	app = pressKey(app, 's')
 	lines := strings.Split(ansi.Strip(app.fileTree.viewport.View()), "\n")
 	want := []string{
-		"  ▾ a/",
-		"   ▾ sub/",
-		">     z.go",
-		"     y.go",
-		"  ▾ b/",
-		"     x.go",
-		"    root.go",
+		"  ▾ test-project/",
+		"   ▾ a/",
+		"    ▾ sub/",
+		">      z.go",
+		"      y.go",
+		"   ▾ b/",
+		"      x.go",
+		"     root.go",
 	}
 	for i, line := range want {
 		if strings.TrimRight(lines[i], " ") != line {
 			t.Fatalf("row %d = %q, want %q", i, lines[i], line)
 		}
 	}
-	active := strings.Split(app.fileTree.viewport.View(), "\n")[2]
+	active := strings.Split(app.fileTree.viewport.View(), "\n")[3]
 	if !strings.Contains(active, "\x1b[1") {
 		t.Fatalf("active file row = %q, want bold", active)
 	}
@@ -152,11 +153,11 @@ func TestFileTreeMouse(t *testing.T) {
 	app := newFileTreeTestApp()
 	left, top, _, _ := app.commentBounds()
 
-	app = clickMouse(app, left+1, top+4) // b/
+	app = clickMouse(app, left+1, top+5) // b/
 	if !app.fileTree.collapsed["b"] || app.focused != commentPane {
 		t.Fatalf("clicking a directory: folded = %t, focus = %v", app.fileTree.collapsed["b"], app.focused)
 	}
-	app = clickMouse(app, left+1, top+5) // root.go, now right below the folded b/
+	app = clickMouse(app, left+1, top+6) // root.go, now right below the folded b/
 	if app.activeTab != 3 {
 		t.Fatalf("clicking a file: tab = %d, want root.go", app.activeTab)
 	}
@@ -200,7 +201,7 @@ func TestFileTreeScrollsTruncatedCursorRow(t *testing.T) {
 	if app.fileTree.cursor != cursor || app.fileTree.hscroll >= app.maxTreeScroll() {
 		t.Fatalf("h while scrolled moved the cursor to %d (scroll %d)", app.fileTree.cursor, app.fileTree.hscroll)
 	}
-	for range 10 {
+	for app.fileTree.hscroll > 0 {
 		app = pressKey(app, 'h')
 	}
 	if app.fileTree.hscroll != 0 {
@@ -214,5 +215,35 @@ func TestFileTreeScrollsTruncatedCursorRow(t *testing.T) {
 	app = pressKey(app, 'l') // unfolds it rather than scrolling
 	if app.fileTree.collapsed["b"] || app.fileTree.hscroll != 0 {
 		t.Fatalf("l on a folded directory: folded = %t, scroll = %d", app.fileTree.collapsed["b"], app.fileTree.hscroll)
+	}
+}
+
+func TestFileTreeRootAndCascade(t *testing.T) {
+	app := newFileTreeTestApp()
+	app.tabs = app.tabs[:1]
+	app.tabs[0].path = "a/sub/deep/z.go"
+	app.fileTree = newFileTree()
+	app.updateCommentSidebar()
+	if root := app.fileTree.rows[0]; root.name != "test-project" || root.collapsed {
+		t.Fatalf("root = %+v", root)
+	}
+	app.toggleTreeDir(0)
+	if len(app.fileTree.rows) != 1 {
+		t.Fatalf("folded root leaves %d rows", len(app.fileTree.rows))
+	}
+	for _, path := range []string{"", "a", "a/sub", "a/sub/deep"} {
+		if !app.fileTree.collapsed[path] {
+			t.Fatalf("%q was not folded", path)
+		}
+	}
+	app.toggleTreeDir(0)
+	if len(app.fileTree.rows) != 5 || len(app.fileTree.collapsed) != 0 {
+		t.Fatalf("cascade did not reopen the chain: %+v", app.fileTree)
+	}
+	app.toggleTreeDir(0)
+	app.fileTree.syncedTab = -1
+	app.updateCommentSidebar()
+	if len(app.fileTree.rows) != 5 {
+		t.Fatal("following the active file did not reopen the root")
 	}
 }
