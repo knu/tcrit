@@ -45,6 +45,21 @@ type FileChange struct {
 	Path    string
 	Status  ChangeStatus
 	OldPath string // for renames
+	Binary  bool
+}
+
+// IsBinary also recognizes snapshots saved before binary detection was
+// separated from the change status.
+func (f FileChange) IsBinary() bool {
+	return f.Binary || f.Status == StatusBinary
+}
+
+// ReviewStatus preserves the Crit-compatible status for binary files.
+func (f FileChange) ReviewStatus() string {
+	if f.IsBinary() {
+		return StatusBinary.String()
+	}
+	return f.Status.String()
 }
 
 // ChangedFiles returns files with changes relative to HEAD (staged + unstaged + untracked).
@@ -76,7 +91,7 @@ func changedFilesFrom(ref string, staged bool) ([]FileChange, error) {
 
 	for i := range files {
 		if binaries[files[i].Path] {
-			files[i].Status = StatusBinary
+			files[i].Binary = true
 		}
 	}
 

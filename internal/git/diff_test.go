@@ -166,7 +166,10 @@ func TestChangedFilesWithSpecialPaths(t *testing.T) {
 
 	assertStatus("docs/user guide.md", StatusModified)
 	assertStatus("\u30c6\u30b9\u30c8 \u30e1\u30e2.txt", StatusModified)
-	assertStatus("bin file.dat", StatusBinary)
+	assertStatus("bin file.dat", StatusModified)
+	if !byPath["bin file.dat"].IsBinary() {
+		t.Error("binary file lost its binary flag")
+	}
 	assertStatus("untracked file.txt", StatusUntracked)
 
 	fc, ok := byPath["new name.txt"]

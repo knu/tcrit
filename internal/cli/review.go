@@ -321,7 +321,7 @@ func saveReviewMode(sess *review.Session, mode *reviewMode) error {
 			s.CJ.CliArgs = []string{"plan", "--name", mode.planSlug, mode.planFile}
 		}
 		for _, f := range mode.files {
-			s.SetFileComments(f.Path, f.Status.String(), s.FileComments(f.Path))
+			s.SetFileComments(f.Path, f.ReviewStatus(), s.FileComments(f.Path))
 		}
 		return nil
 	})

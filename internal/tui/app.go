@@ -282,7 +282,7 @@ func NewCodeReviewApp(files []gitpkg.FileChange, ref string, cfg AppConfig) AppM
 			if pf := cfg.Patch.File(f.Path); pf != nil {
 				diff = pf.Diff
 			}
-		} else if f.Status != gitpkg.StatusBinary {
+		} else if !f.IsBinary() {
 			if cfg.Source != nil {
 				diff, _ = cfg.Source.Diff(f.Path, f.OldPath)
 			} else {
@@ -290,8 +290,10 @@ func NewCodeReviewApp(files []gitpkg.FileChange, ref string, cfg AppConfig) AppM
 			}
 		}
 		ft := newFileTab(f.Path, diff)
+		ft.status = f.Status.String()
+		ft.isBinary = f.IsBinary()
 		if f.Status == gitpkg.StatusBinary {
-			ft.isBinary = true
+			ft.status = "modified"
 		}
 		if f.Status == gitpkg.StatusDeleted {
 			ft.isDeleted = true
@@ -2455,7 +2457,7 @@ func (m *AppModel) tabLabels() []tabLabel {
 			filenameStyle = filenameStyle.Bold()
 		}
 		label = label[:start] + filenameStyle.String() + label[start:] + ansi.NewStyle().Normal().Underline(false).String()
-		if counts := t.changeCounts(); counts != "" {
+		if counts := t.changeSummary(); counts != "" {
 			label += " " + counts
 		}
 		labels[i] = tabLabel{text: label}

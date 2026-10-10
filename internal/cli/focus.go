@@ -77,7 +77,7 @@ func resolveFocus(mode *reviewMode) error {
 			if line == 0 {
 				break
 			}
-			if file.Status == git.StatusBinary || file.Status == git.StatusDeleted {
+			if file.IsBinary() || file.Status == git.StatusDeleted {
 				return fmt.Errorf("focus line is unavailable in %s", path)
 			}
 			switch {

@@ -133,7 +133,7 @@ func (m *AppModel) rebuildContent() {
 	}
 	if t.isBinary || t.doc == nil {
 		if t.isBinary {
-			layout.appendBlock(&b, "\n  Binary file changed — cannot display content.", contentMouseTarget{})
+			layout.appendBlock(&b, "\n  Binary file "+t.changeSummary()+" — cannot display content.", contentMouseTarget{})
 		} else if t.outsideChanges {
 			layout.appendBlock(&b, "\n  Added file removed — no longer part of the changes.", contentMouseTarget{})
 		}

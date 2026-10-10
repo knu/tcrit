@@ -89,7 +89,7 @@ func (s ReviewSource) Files() ([]FileChange, error) {
 	binary := parseNumstatZ(out)
 	for i := range files {
 		if binary[files[i].Path] {
-			files[i].Status = StatusBinary
+			files[i].Binary = true
 		}
 	}
 	if s.Scope == "all" || s.Scope == "unstaged" {

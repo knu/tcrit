@@ -197,7 +197,7 @@ func (m *AppModel) treeRowText(i int) string {
 	}
 	text := strings.Repeat(" ", row.depth*treeIndent) + style.Render(icon+label)
 	if !row.isDir {
-		if counts := m.tabs[row.tabIndex].changeCounts(); counts != "" {
+		if counts := m.tabs[row.tabIndex].changeSummary(); counts != "" {
 			text += " " + counts
 		}
 	}

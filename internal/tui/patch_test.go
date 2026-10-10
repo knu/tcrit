@@ -34,6 +34,57 @@ func patchApp(t *testing.T, raw string) AppModel {
 	return updated.(AppModel)
 }
 
+func TestBinaryChangeLabels(t *testing.T) {
+	for _, tc := range []struct {
+		status, marker, header, before, after string
+	}{
+		{"added", "A", "new file mode 100644\n", "/dev/null", "b/image.png"},
+		{"deleted", "D", "deleted file mode 100644\n", "a/image.png", "/dev/null"},
+		{"modified", "M", "", "a/image.png", "b/image.png"},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			m := patchApp(t, "diff --git a/image.png b/image.png\n"+tc.header+"Binary files "+tc.before+" and "+tc.after+" differ\n")
+			m.syncFileTree()
+			label := "(" + tc.marker + ")"
+			for name, view := range map[string]string{
+				"content": m.contentViewport.GetContent(),
+				"tree":    m.fileTree.viewport.GetContent(),
+			} {
+				if !strings.Contains(ansi.Strip(view), label) {
+					t.Errorf("%s missing %s: %s", name, label, ansi.Strip(view))
+				}
+			}
+		})
+	}
+}
+
+func TestTextChangeSummaryKeepsLineCounts(t *testing.T) {
+	m := patchApp(t, "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n")
+	if got := ansi.Strip(m.tab().changeSummary()); got != "(+1 -1)" {
+		t.Fatalf("text summary = %q", got)
+	}
+	for _, tc := range []struct{ status, want string }{
+		{"added", "(A +1)"}, {"untracked", "(A +1)"}, {"deleted", "(D -1)"},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			tab := m.tabs[0]
+			tab.status = tc.status
+			if tc.status == "deleted" {
+				tab.changedLines = nil
+			} else {
+				tab.deletedAfter = nil
+			}
+			if got := ansi.Strip(tab.changeSummary()); got != tc.want {
+				t.Fatalf("summary = %q, want %q", got, tc.want)
+			}
+			tab.changedLines, tab.deletedAfter = nil, nil
+			if got := ansi.Strip(tab.changeSummary()); got != tc.want[:2]+")" {
+				t.Fatalf("empty file summary = %q", got)
+			}
+		})
+	}
+}
+
 func TestPatchPartialContext(t *testing.T) {
 	m := patchApp(t, "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -10,2 +10,2 @@\n context\n-old\n+new\n@@ -20 +20 @@\n-last\n+final\n")
 	if err := os.WriteFile("a.txt", []byte("unrelated worktree"), 0o600); err != nil {

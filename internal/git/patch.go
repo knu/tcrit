@@ -59,10 +59,8 @@ func ParsePatch(r io.Reader) (*Patch, error) {
 			return nil, fmt.Errorf("duplicate diff path %q; supply a single combined diff", path)
 		}
 		seen[path] = true
-		pf := PatchFile{Change: FileChange{Path: path}, Diff: diffInfo([]*gitdiff.File{f})}
+		pf := PatchFile{Change: FileChange{Path: path, Binary: f.IsBinary}, Diff: diffInfo([]*gitdiff.File{f})}
 		switch {
-		case f.IsBinary:
-			pf.Change.Status = StatusBinary
 		case f.IsDelete:
 			pf.Change.Status = StatusDeleted
 		case f.IsNew:

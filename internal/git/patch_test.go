@@ -20,7 +20,7 @@ func TestParsePatch(t *testing.T) {
 		{"deleted", "diff --git a/a.txt b/a.txt\ndeleted file mode 100644\n--- a/a.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-old\n", "a.txt", "", StatusDeleted, false},
 		{"renamed", "diff --git a/old.txt b/new.txt\nsimilarity index 100%\nrename from old.txt\nrename to new.txt\n", "new.txt", "", StatusRenamed, true},
 		{"spaces", "diff --git a/my file.txt b/my file.txt\nnew file mode 100644\n--- /dev/null\n+++ b/my file.txt\n@@ -0,0 +1 @@\n+text\n", "my file.txt", "text\n", StatusAdded, false},
-		{"binary", "diff --git a/a.png b/a.png\nindex 1234567..abcdef0 100644\nBinary files a/a.png and b/a.png differ\n", "a.png", "", StatusBinary, false},
+		{"binary", "diff --git a/a.png b/a.png\nindex 1234567..abcdef0 100644\nBinary files a/a.png and b/a.png differ\n", "a.png", "", StatusModified, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -32,6 +32,9 @@ func TestParsePatch(t *testing.T) {
 				t.Fatalf("unexpected snapshot: %+v", p)
 			}
 			f := p.Files[0]
+			if f.Change.IsBinary() != (tt.name == "binary") {
+				t.Fatalf("binary flag = %v", f.Change.IsBinary())
+			}
 			if f.Change.Path != tt.path || f.Change.Status != tt.status || f.Content != tt.content || (f.Known != nil) != tt.partial {
 				t.Fatalf("file = %+v", f)
 			}

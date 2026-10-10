@@ -109,6 +109,68 @@ func TestReviewSources(t *testing.T) {
 	}
 }
 
+func TestBinaryChangeStatuses(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+	t.Chdir(dir)
+	runGit(t, dir, "init", "-q")
+	runGit(t, dir, "config", "user.name", "Test")
+	runGit(t, dir, "config", "user.email", "test@example.com")
+	writeFile(t, dir, "deleted.bin", []byte("\x00deleted"))
+	writeFile(t, dir, "modified.bin", []byte("\x00before"))
+	writeFile(t, dir, "old.bin", []byte("\x00renamed"))
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "-qm", "base")
+	runGit(t, dir, "tag", "base")
+	runGit(t, dir, "rm", "deleted.bin")
+	runGit(t, dir, "mv", "old.bin", "renamed.bin")
+	writeFile(t, dir, "added.bin", []byte("\x00added"))
+	writeFile(t, dir, "modified.bin", []byte("\x00after"))
+	runGit(t, dir, "add", ".")
+	check := func(files []FileChange, err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := map[string]ChangeStatus{"added.bin": StatusAdded, "deleted.bin": StatusDeleted, "modified.bin": StatusModified, "renamed.bin": StatusRenamed}
+		if len(files) != len(want) {
+			t.Fatalf("files = %+v", files)
+		}
+		for _, f := range files {
+			status, ok := want[f.Path]
+			// A pure rename has no numstat content changes to mark as binary.
+			if !ok || f.Status != status || (status != StatusRenamed && !f.IsBinary()) {
+				t.Errorf("file = %+v", f)
+			}
+			if f.IsBinary() && f.ReviewStatus() != "binary" {
+				t.Errorf("binary review status = %q", f.ReviewStatus())
+			}
+		}
+	}
+	check(ChangedFiles())
+	check(ChangedFilesStaged())
+	check((ReviewSource{Scope: "all"}).Files())
+	check((ReviewSource{Scope: "staged"}).Files())
+	runGit(t, dir, "commit", "-qm", "changes")
+	s, err := ResolveRange("base..HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(s.Files())
+	writeFile(t, dir, "modified.bin", []byte("\x00unstaged"))
+	if err := os.Remove("added.bin"); err != nil {
+		t.Fatal(err)
+	}
+	files, err := (ReviewSource{Scope: "unstaged"}).Files()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 2 || files[0].Status != StatusDeleted || files[1].Status != StatusModified || !files[0].IsBinary() || !files[1].IsBinary() {
+		t.Fatalf("unstaged files = %+v", files)
+	}
+}
+
 func TestDiffFollowsRenames(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)

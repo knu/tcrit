@@ -20,6 +20,7 @@ type fileReview struct {
 // FileTab holds per-file state for a single tab in the code review TUI.
 type FileTab struct {
 	path          string
+	status        string
 	doc           *document.Document
 	state         *fileReview
 	diff          *gitpkg.DiffInfo // original diff, retained when whitespace is ignored
@@ -161,9 +162,28 @@ func computeChangeChunks(diff *gitpkg.DiffInfo) []changeChunk {
 	return chunks
 }
 
-// changeCounts renders the "(+N -M)" summary shown after a file name.
-func (t *FileTab) changeCounts() string {
+// changeSummary combines file status and line counts inside neutral parentheses.
+func (t *FileTab) changeSummary() string {
 	var counts []string
+	if !t.outsideChanges {
+		switch t.status {
+		case "added", "untracked":
+			counts = append(counts, tabAddedCount.Render("A"))
+		case "deleted":
+			counts = append(counts, tabDeletedCount.Render("D"))
+		default:
+			if t.isBinary {
+				marker := "M"
+				if t.status == "renamed" {
+					marker = "R"
+				}
+				counts = append(counts, tabCountDelimiter.Foreground(warning).Render(marker))
+			}
+		}
+	}
+	if t.isBinary {
+		return tabCountDelimiter.Render("(") + strings.Join(counts, " ") + tabCountDelimiter.Render(")")
+	}
 	if n := len(t.changedLines); n > 0 {
 		counts = append(counts, tabAddedCount.Render(fmt.Sprintf("+%d", n)))
 	}
