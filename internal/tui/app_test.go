@@ -49,6 +49,27 @@ func TestRenderHeaderUsesTCritBrand(t *testing.T) {
 	}
 }
 
+func TestReviewBarProjectAndTopic(t *testing.T) {
+	app := setupAppWithDoc(t, "first\nsecond\n")
+	app.project, app.topic = "tcrit", "header-project-topic"
+	app.width = 120
+	bar := ansi.Strip(app.renderReviewBar())
+	if !strings.HasPrefix(bar, " TCrit: tcrit · header-project-topic — review the document.") {
+		t.Fatalf("bar = %q", bar)
+	}
+	app.topic = "\x1b[31m" + strings.Repeat("長いトピック", 20) + "\n\t"
+	for _, width := range []int{20, 60, 100} {
+		app.width = width
+		bar := app.renderReviewBar()
+		if lipgloss.Width(bar) != width || lipgloss.Height(bar) != 1 {
+			t.Fatalf("width %d: bar does not fit on one line: %q", width, bar)
+		}
+		if !strings.HasSuffix(ansi.Strip(bar), " Submit q ") {
+			t.Fatalf("width %d: Submit button was truncated: %q", width, bar)
+		}
+	}
+}
+
 func TestRenderHeaderShowsCodeReviewScope(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -1103,7 +1124,8 @@ func TestReviewBarHostsSubmitButton(t *testing.T) {
 	}
 	for _, part := range []string{
 		reviewBarStyle.Bold(true).Render(" TCrit"),
-		reviewBarStyle.Render(": review the "),
+		reviewBarStyle.Render(": "),
+		reviewBarStyle.Render("review the "),
 		reviewBarStyle.Render("document on tmux."),
 	} {
 		if !strings.Contains(bar, part) {

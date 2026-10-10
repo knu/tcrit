@@ -26,6 +26,8 @@ import (
 func runTUISession(cfg *config.Config, sess *review.Session, mode *reviewMode, serving bool) (*ipc.FinishPayload, error) {
 	finishCh := make(chan tui.FinishEvent, 4)
 	appCfg := tui.AppConfig{
+		Project:   reviewProjectLabel(cfg.ProjectRoot, sess),
+		Topic:     reviewTopicLabel(sess, mode),
 		Session:   sess,
 		Author:    cfg.Author,
 		Staged:    mode.staged,

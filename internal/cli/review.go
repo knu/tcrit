@@ -172,6 +172,7 @@ func runReviewFlow(cfg *config.Config, sess *review.Session, mode *reviewMode) e
 	if ipc.Alive(sock) {
 		return fmt.Errorf("review %s is already active; stop it before resuming", sess.Key)
 	}
+	applyHeaderFlags(sess)
 	if err := saveReviewMode(sess, mode); err != nil {
 		return err
 	}
@@ -576,6 +577,7 @@ func init() {
 	reviewCmd.Flags().BoolVar(&reviewCode, "code", false, "review code changes (default when no file argument is given)")
 	addDiffFlag(reviewCmd)
 	addFocusFlag(reviewCmd)
+	addHeaderFlags(reviewCmd)
 	reviewCmd.Flags().BoolVar(&reviewStaged, "staged", false, "review only changes staged in the index (alias for --scope=staged)")
 	reviewCmd.Flags().BoolVar(&reviewUnstaged, "unstaged", false, "review unstaged and untracked changes (alias for --scope=unstaged)")
 

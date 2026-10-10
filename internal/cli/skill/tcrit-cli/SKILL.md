@@ -44,6 +44,21 @@ tcrit comment --session <id> --json --file .tmp/replies.json --author 'Claude Co
 
 To resume a stopped session, run `tcrit --session <id>` from its original directory.  If a command is still waiting for the reviewer, retain its execution handle and collect that command's result instead.  The `/tcrit` skill distinguishes retryable launch failures from interrupted reviews that require explicit chat instructions to resume.  Resuming restores the saved plan or diff input.  To replace that input, use `tcrit plan --session <id> <file>` or `tcrit --diff=<file> --session <id>`.  The `/tcrit` skill covers the interactive review loop.
 
+## Project and topic labels
+
+The header shows the repository directory name, shared across linked worktrees, or the current directory name outside Git.  Use `--project TEXT` to replace the project name.  Git reviews also show the current branch, or the right endpoint of an explicit committed comparison.  Documents, plans, and supplied diffs omit the automatic branch label; detached HEAD has no current-branch label.
+
+Add `--project TEXT` or `--topic TEXT` to `tcrit`, `tcrit review`, or `tcrit plan`.  `--topic` overrides the branch label or supplies one when none is automatic.  Use a short task name when it identifies the review better than the branch:
+
+```bash
+tcrit review --staged --project 'TCrit' --topic 'Header display'
+tcrit plan plan.md --topic 'Header design'
+tcrit --session <id> --topic 'Revised header'
+tcrit --topic ''                          # hide the topic label
+```
+
+Both overrides are saved with the session and retained on later rounds.  Pass either option again to replace its label; omitting it preserves the saved choice.  An empty value hides that label.  These options change only the header labels, leaving review scope and session selection intact.
+
 ## Startup focus
 
 For a single document, use `tcrit FILE:LINE` or `tcrit review FILE:LINE`.  Add `--focus PATH[:LINE]` to `tcrit`, `tcrit review`, or `tcrit plan`, including `--session` invocations, to select the initial file and optionally scroll to a line:

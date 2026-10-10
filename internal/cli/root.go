@@ -71,4 +71,5 @@ func init() {
 	rootCmd.Flags().BoolVar(&reviewUnstaged, "unstaged", false, "review unstaged and untracked changes (alias for --scope=unstaged)")
 	addDiffFlag(rootCmd)
 	addFocusFlag(rootCmd)
+	addHeaderFlags(rootCmd)
 }

@@ -60,6 +60,10 @@ Make sure `$GOPATH/bin` (defaults to `~/go/bin`) is in your `PATH`:
 export PATH="$PATH:$(go env GOPATH)/bin"
 ```
 
+### Review header
+
+The header shows the project name and, for Git reviews, the branch under review.  The project name defaults to the repository directory name, shared across linked worktrees, or the current directory name outside Git.  Use `tcrit --project 'My project'` to replace it.  Use `--topic 'Header display'` to replace the branch label, or `--topic ''` to hide it.  You can also add a topic to a document or plan review.  Saved sessions retain both overrides; pass the option again to change its label.
+
 ### Codex with a background server
 
 > [!WARNING]

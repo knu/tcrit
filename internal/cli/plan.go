@@ -115,6 +115,7 @@ func readPlanContent(args []string) (content []byte, sourceFile string, err erro
 func init() {
 	rootCmd.AddCommand(planCmd)
 	addFocusFlag(planCmd)
+	addHeaderFlags(planCmd)
 	planCmd.Flags().StringVar(&planSession, "session", "", "continue a saved plan review")
 	planCmd.Flags().StringVar(&planName, "name", "", "plan slug (derived from the first heading when omitted)")
 }

@@ -57,6 +57,8 @@ type FinishEvent struct {
 
 // AppConfig carries the cross-cutting dependencies of the TUI.
 type AppConfig struct {
+	Project string
+	Topic   string
 	Session *review.Session
 	Author  string
 	// Staged reads code-review files and diffs from the Git index.
@@ -74,6 +76,8 @@ const gutterWidth = 7
 const displayTabWidth = 4
 
 type AppModel struct {
+	project       string
+	topic         string
 	width, height int
 	focused       pane
 	modal         modalType
@@ -239,6 +243,8 @@ func NewApp(filePath string, cfg AppConfig) AppModel {
 	}
 
 	return AppModel{
+		project:         cfg.Project,
+		topic:           cfg.Topic,
 		filePath:        filePath,
 		tabs:            []FileTab{tab},
 		activeTab:       0,
@@ -309,6 +315,8 @@ func NewCodeReviewApp(files []gitpkg.FileChange, ref string, cfg AppConfig) AppM
 	}
 
 	return AppModel{
+		project:         cfg.Project,
+		topic:           cfg.Topic,
 		tabs:            tabs,
 		activeTab:       0,
 		multiFile:       true,
@@ -2247,7 +2255,17 @@ func (m AppModel) renderReviewBar() string {
 		subject += " on " + m.host
 	}
 	subject += "."
-	text := reviewBarStyle.Bold(true).Render(" TCrit") + reviewBarStyle.Render(": review the ")
+	text := reviewBarStyle.Bold(true).Render(" TCrit") + reviewBarStyle.Render(": ")
+	if m.project != "" {
+		text += reviewBarStyle.Bold(true).Render(headerLabel(m.project))
+		if m.topic != "" {
+			text += reviewBarStyle.Render(" · " + headerLabel(m.topic))
+		}
+		text += reviewBarStyle.Render(" — ")
+	} else if m.topic != "" {
+		text += reviewBarStyle.Render(headerLabel(m.topic) + " — ")
+	}
+	text += reviewBarStyle.Render("review the ")
 	if style, ok := scopeWordStyle(scope); ok {
 		text += style.Render(scope) + reviewBarStyle.Render(" ")
 	}
@@ -2272,6 +2290,15 @@ func (m AppModel) renderReviewBar() string {
 	}
 	gap := m.width - lipgloss.Width(text) - lipgloss.Width(right)
 	return text + reviewBarStyle.Render(strings.Repeat(" ", gap)) + right
+}
+
+func headerLabel(value string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, ansi.Strip(value))
 }
 
 // submitButton renders the button that opens the finish dialog.
