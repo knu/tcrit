@@ -36,7 +36,7 @@ tcrit --session <id> --focus internal/tui/app.go:120
 
 Use `tcrit FILE[:LINE]` to review a single document, or `--focus PATH[:LINE]` with a file in the review.  Line numbers start at 1.  From round 2 onward, the review automatically focuses the first thread with a new reply from another author, in file and display order.  An explicit file line or `--focus` takes priority; `--focus` wins when both are given.
 
-Tabs, the file tree, and the file selector mark new files with `(A +12)` and deleted files with `(D -8)`.  Modified text files show line counts such as `(+3 -2)`.  Binary files show `(A)`, `(D)`, or `(M)` without line counts; the content placeholder shows the same marker.  Additions are green, deletions red, and binary modifications yellow, inside neutral parentheses.  Empty new and deleted files also show `(A)` and `(D)`.
+Tabs, the file tree, and the file selector use `A` for new files and `D` for deleted files, alongside line counts: `(A +12)` or `(D -8)`.  Modified text files show counts such as `(+3 -2)`.  Empty files and binary files omit counts; binary changes show `(M)` for modifications or `(R)` for renames.  The binary content placeholder uses the same marker.  Additions are green, deletions red, and binary modifications and renames yellow; parentheses keep their normal color.
 
 ## Install
 

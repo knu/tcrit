@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.16.5
+
+### Changed
+
+- File tabs, the file tree, and the file selector show new files as `(A +12)` and deleted files as `(D -8)`.  Binary files show `(A)`, `(D)`, or `(M)` without line counts, including in their content placeholders.  Only the text inside parentheses is colored: green for additions, red for deletions, and yellow for binary modifications.
+- Bundled agent skills explain local storage, communication, command side effects, and the scope of human approval.
+
+### Fixed
+
+- Binary detection preserves whether a file was added, deleted, modified, or renamed across review scopes and supplied diffs.
+
 ## 0.16.4
 
 ### Added
