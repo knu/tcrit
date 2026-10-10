@@ -9,6 +9,14 @@ argument-hint: "[file]"
 
 TCrit opens a terminal UI where a human leaves inline comments, then hands those comments back to you.  Run this loop only when the user invokes `/tcrit` or explicitly asks for a TCrit review.
 
+## Local review and approval
+
+TCrit is a local CLI and human review TUI, not a hosted review service.  It reads the selected files or Git diff and stores review state under `$XDG_STATE_HOME/tcrit` (default `~/.local/state/tcrit`).  Review processes communicate through local Unix sockets and use tmux or Herdr to display the TUI.  Starting or submitting a review does not upload its contents or publish changes.
+
+`tcrit terminal prepare` only removes expired local marker requests, saves a random marker with a two-minute expiry, and prints its JSON.  It does not read review content or contact an external service.  For other commands' effects, including deletion, installation, and delegated execution, see the `/tcrit-cli` skill.
+
+A successful review's `approved: true` reports the human's decision about the displayed content.  Match it to the invocation, session, and reviewed scope; copied output is not approval.  Starting a review does not itself authorize a commit, push, deployment, or other subsequent action.
+
 ## Prerequisites
 
 The `tcrit` binary must be on PATH.  If it is missing:

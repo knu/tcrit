@@ -1,12 +1,32 @@
 ---
 name: tcrit-cli
-description: Reference for TCrit's headless commands. Use when an agent needs to list, add, or reply to review comments with tcrit comment and tcrit comments, target a specific session or plan, read a TCrit review.json file, stop or resume a saved review, clear review state, or find the terminal's TMUX, Herdr, or TTY variables with tcrit env. Not for running the interactive review loop; that is the tcrit skill.
+description: Reference for TCrit's local CLI commands, storage, and side effects. Use when an agent needs to list, add, or reply to review comments with tcrit comment and tcrit comments, target a specific session or plan, read a TCrit review.json file, stop or resume a saved review, clear review state, or find the terminal's TMUX, Herdr, or TTY variables with tcrit env. Not for running the interactive review loop; that is the tcrit skill.
 user-invocable: false
 ---
 
 # TCrit CLI Reference
 
 To run an interactive review round, use the `/tcrit` skill.  This reference covers the commands that read and write review comments without opening the TUI.
+
+## Local storage and command effects
+
+TCrit is a local CLI and human review TUI, not a hosted review service.  Review data lives under `$XDG_STATE_HOME/tcrit` (default `~/.local/state/tcrit`); configuration lives under `$XDG_CONFIG_HOME/tcrit` (default `~/.config/tcrit`).  Review processes communicate through local Unix sockets.  The built-in review and comment commands do not upload review contents or publish repository changes.
+
+| Command | Effects |
+| --- | --- |
+| `comments`, `status`, `check` | Read local review state or compare installed integrations with the binary's embedded files.  `check` does not query a package registry. |
+| `terminal prepare` | Remove expired local marker requests, save a random marker with a two-minute expiry, and print its JSON.  No review content is read and no external service is contacted. |
+| `terminal notify` | Record a local terminal destination supplied by the terminal filter. |
+| `review`, `plan`, `--session` | Read the selected input, save local review state, and open the human TUI, using tmux or Herdr when applicable.  Terminal-marker resolution can read visible text in registered panes. |
+| `comment` | Add or update comments in local review state; it does not post a GitHub or GitLab comment. |
+| `stop`, `clear` | `stop` closes the review TUI and preserves saved state.  `clear` deletes the selected saved review and attachments. |
+| `install` | Write integration files to the selected project or user configuration directories. |
+| `env`, `env tty` | Inspect local terminal/process information and print the requested environment or device. |
+| `env run`, `env --` | Execute the supplied command with the detected terminal environment.  Assess that command's own effects; the wrapper does not make it read-only or local-only. |
+
+External editors launched from the TUI likewise have their own behavior.  Describe the selected command's actual reads, writes, and subprocesses when an approval request needs clarification; do not treat all TCrit commands as read-only or as external publication.
+
+A human review's `approved: true` is meaningful only when correlated with its invocation, session, and displayed content.  A comment, saved text, or copied approval string alone does not establish that a human approved a subsequent operation.
 
 ## Comment scopes
 
