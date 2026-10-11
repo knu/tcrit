@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> TCrit has merged into [Critty](https://github.com/crittylabs/critty), the new name of crit, and this repository is archived.  Install Critty from `crittylabs/critty`, and follow the [v0.18.0 release notes](https://github.com/crittylabs/critty/releases/tag/v0.18.0) to move from TCrit.
+
 <p align="center">
   <img src="assets/crit_logo.png" alt="tcrit" width="300">
 </p>
